@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mathieu's Workout Progression</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; padding: 0; background: #101214; }
+  #root { min-height: 100vh; }
+</style>
+
+<!-- React + ReactDOM (UMD builds) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<!-- Recharts' UMD build needs these two as globals, or it throws on load and nothing mounts -->
+<script src="https://unpkg.com/react-is@18/umd/react-is.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+<!-- Recharts (UMD build, exposes window.Recharts) -->
+<script src="https://unpkg.com/recharts@2/umd/Recharts.min.js"></script>
+<!-- Babel standalone: transforms the JSX below directly in the browser (no build step) -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root">
+  <div style="color:#9a9fa6;font-family:monospace;padding:24px;">Loading…</div>
+</div>
+
+<script>
+function showFatalError(title, details) {
+  var root = document.getElementById("root");
+  if (!root) return;
+  root.innerHTML =
+    '<div style="max-width:640px;margin:60px auto;padding:20px;background:#16181b;border:1px solid #E63946;border-radius:10px;color:#F5F3EE;font-family:monospace;white-space:pre-wrap;">' +
+    '<strong style="color:#E63946;">' + title + '</strong>\n\n' + details +
+    "\n\nOpen your browser console (F12) for the full trace." +
+    "</div>";
+}
+
+window.addEventListener("error", function (e) {
+  if (e.target && e.target.tagName === "SCRIPT") {
+    showFatalError("A required script failed to load:", e.target.src +
+      "\n\nThis usually means either there's no internet connection right now, " +
+      "or something (firewall/ad-blocker/browser privacy setting) is blocking unpkg.com.");
+  } else {
+    showFatalError("A script error occurred:", (e.message || "Unknown error") +
+      (e.filename ? "\n(" + e.filename + ":" + e.lineno + ")" : ""));
+  }
+}, true);
+
+window.addEventListener("load", function () {
+  setTimeout(function () {
+    var missing = [];
+    if (typeof React === "undefined") missing.push("React");
+    if (typeof ReactDOM === "undefined") missing.push("ReactDOM");
+    if (typeof Recharts === "undefined") missing.push("Recharts");
+    if (typeof Babel === "undefined") missing.push("Babel");
+    if (missing.length) {
+      showFatalError("Couldn't load: " + missing.join(", "),
+        "These libraries load from unpkg.com over the internet — check your connection, " +
+        "or try a different browser/network if one is blocking that domain.");
+    }
+  }, 500);
+});
+</script>
+
+<script>
+window.storage = {
+  async get(key, shared) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw === null || raw === undefined) return null;
+      return { key, value: raw, shared: !!shared };
+    } catch (e) { return null; }
+  },
+  async set(key, value, shared) {
+    try {
+      localStorage.setItem(key, value);
+      return { key, value, shared: !!shared };
+    } catch (e) { return null; }
+  },
+  async delete(key, shared) {
+    try {
+      const existed = localStorage.getItem(key) !== null;
+      localStorage.removeItem(key);
+      return { key, deleted: existed, shared: !!shared };
+    } catch (e) { return null; }
+  },
+  async list(prefix, shared) {
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!prefix || (k && k.startsWith(prefix))) keys.push(k);
+      }
+      return { keys, prefix, shared: !!shared };
+    } catch (e) { return null; }
+  },
+};
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } = Recharts;
+
+function Icon({ children, size = 24, color = "currentColor", strokeWidth = 2, style, onClick }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={style} onClick={onClick}>
+      {children}
+    </svg>
+  );
+}
+const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></Icon>;
+const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
+const Trash2 = (p) => <Icon {...p}><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></Icon>;
+const Download = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></Icon>;
+const Upload = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></Icon>;
+const Pencil = (p) => <Icon {...p}><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></Icon>;
+const TrendingUp = (p) => <Icon {...p}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" /></Icon>;
+const Award = (p) => <Icon {...p}><circle cx="12" cy="8" r="6" /><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11" /></Icon>;
+const Flame = (p) => <Icon {...p}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" /></Icon>;
+const Weight = (p) => <Icon {...p}><circle cx="12" cy="5" r="3" /><path d="M6.5 8a2 2 0 0 0-2 1.6l-1.65 8.4A2 2 0 0 0 4.8 20.4h14.4a2 2 0 0 0 2-1.6l-1.65-8.4a2 2 0 0 0-2-1.6H6.5z" /></Icon>;
+const LayoutGrid = (p) => <Icon {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></Icon>;
+const History = (p) => <Icon {...p}><path d="M3 3v5h5" /><path d="M3.05 13a9 9 0 1 0 .5-4.5" /><path d="M12 7v5l4 2" /></Icon>;
+const AlertTriangle = (p) => <Icon {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></Icon>;
+const GitCompare = (p) => <Icon {...p}><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><path d="M11 18H8a2 2 0 0 1-2-2V9" /></Icon>;
+const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></Icon>;
+const Settings2 = (p) => <Icon {...p}><path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></Icon>;
+const Dumbbell = (p) => <Icon {...p}><path d="m6.5 6.5 11 11" /><path d="m21 21-1-1" /><path d="m3 3 1 1" /><path d="m18 22 4-4" /><path d="m2 6 4-4" /><path d="m3 10 7-7" /><path d="m14 21 7-7" /></Icon>;
+
+const EXERCISES = ["Wide Grip Pull-Ups", "Chest Dips", "Push-Ups", "Goblet Squat", "Bulgarian Split Squat", "Chin-Ups", "Hanging Knee Raises"];
+const COLORS = { "Wide Grip Pull-Ups": "#F2C94C", "Chest Dips": "#E63946", "Push-Ups": "#6FCF97", "Goblet Squat": "#56CCF2", "Bulgarian Split Squat": "#2EC4B6", "Chin-Ups": "#BB86FC", "Hanging Knee Raises": "#F2994A" };
+const MUSCLE_GROUP = { "Wide Grip Pull-Ups": "Pull", "Chin-Ups": "Pull", "Chest Dips": "Push", "Push-Ups": "Push", "Goblet Squat": "Legs", "Bulgarian Split Squat": "Legs", "Hanging Knee Raises": "Core" };
+const GROUP_COLORS = { Pull: "#F2C94C", Push: "#E63946", Legs: "#56CCF2", Core: "#F2994A" };
+const GROUPS = ["Pull", "Push", "Legs", "Core"];
+const RETIRED = ["Goblet Squat"];
+
+const EXERCISE_ALIASES = {
+  "Wide Grip Pull-Ups": ["wide grip pull ups", "wide grip pull-ups", "wide grip pullups"],
+  "Chin-Ups": ["chin ups pull up", "chin ups", "chin-ups", "chinups"],
+  "Chest Dips": ["chest dips", "dips"],
+  "Push-Ups": ["push ups", "push-ups", "pushups"],
+  "Goblet Squat": ["goblet squat", "gobelet squat", "goblet squats"],
+  "Bulgarian Split Squat": ["bulgarian split squat", "split squat", "bss"],
+  "Hanging Knee Raises": ["hanging knee raises", "hanging knee raise", "knee raises"],
+};
+
+function matchExercise(header) {
+  const norm = header.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  let best = null, bestLen = 0;
+  EXERCISES.forEach((canon) => {
+    const aliases = EXERCISE_ALIASES[canon] || [canon.toLowerCase()];
+    aliases.forEach((alias) => {
+      if (norm.includes(alias) && alias.length > bestLen) { best = canon; bestLen = alias.length; }
+    });
+  });
+  return best;
+}
+
+function parseFreeform(text) {
+  const lines = text.split("\n").map((l) => l.trim());
+  const setLineRe = /^(\d+)\s*reps?\s*x\s*(\d+)\s*sets?\s*(.*)$/i;
+  const supersetRe = /^super\s*set$/i;
+  const results = {};
+  const unmatched = [];
+  let current = null;
+  lines.forEach((raw) => {
+    if (!raw || supersetRe.test(raw)) return;
+    const setMatch = raw.match(setLineRe);
+    if (setMatch) {
+      if (current) {
+        const reps = parseInt(setMatch[1], 10);
+        const setsCount = parseInt(setMatch[2], 10) || 1;
+        const rest = setMatch[3] || "";
+        const kgMatch = rest.match(/(\d+(?:\.\d+)?)\s*kg/i);
+        if (!results[current]) results[current] = { reps: [], load: 0 };
+        for (let i = 0; i < setsCount; i++) results[current].reps.push(reps);
+        if (kgMatch) results[current].load = parseFloat(kgMatch[1]);
+      }
+      return;
+    }
+    const header = raw.replace(/:\s*$/, "").trim();
+    const canon = matchExercise(header);
+    if (canon) { current = canon; if (!results[current]) results[current] = { reps: [], load: 0 }; }
+    else { current = null; if (header) unmatched.push(header); }
+  });
+  return { results, unmatched };
+}
+
+const SEED_SESSIONS = [
+  { id: "s1", date: "2026-06-15", label: "Session 1", bodyweight: 83.4, load: {}, notes: "",
+    ex: { "Wide Grip Pull-Ups": [6,6,6], "Chest Dips": [6,6,6], "Push-Ups": [10,10,10], "Goblet Squat": [10,10,10], "Chin-Ups": [6,6,6], "Hanging Knee Raises": [10,10,10] } },
+  { id: "s2", date: "2026-06-18", label: "4th set added", bodyweight: 83.4, load: {}, notes: "",
+    ex: { "Wide Grip Pull-Ups": [6,6,6,6], "Chest Dips": [8,8,8,8], "Push-Ups": [12,12,12], "Goblet Squat": [10,10,10,10], "Chin-Ups": [7,7,7], "Hanging Knee Raises": [10,10,10] } },
+  { id: "s3", date: "2026-06-21", label: "Max-effort scheme", bodyweight: 83.4, load: {}, notes: "",
+    ex: { "Wide Grip Pull-Ups": [10,8,7,6], "Chest Dips": [10,8,8,8], "Push-Ups": [10,10,10,10], "Goblet Squat": [12,12,12,12], "Chin-Ups": [8,7,6,6], "Hanging Knee Raises": [12,12,12] } },
+  { id: "s4", date: "2026-06-30", label: "Post-travel", bodyweight: 83.4, load: {}, notes: "",
+    ex: { "Wide Grip Pull-Ups": [11,9,8,6], "Chest Dips": [12,10,10,8], "Push-Ups": [12,12,12,12], "Goblet Squat": [12,12,12,12], "Chin-Ups": [8,7,7,6], "Hanging Knee Raises": [12,12,12] } },
+  { id: "s5", date: "2026-07-02", label: "External load added", bodyweight: 83.4, load: { "Chest Dips": 5, "Goblet Squat": 20 }, notes: "",
+    ex: { "Wide Grip Pull-Ups": [12,10,8,7], "Chest Dips": [12,12,10,10], "Push-Ups": [12,12,12,12], "Goblet Squat": [12,12,12,12], "Chin-Ups": [7,7,7,7], "Hanging Knee Raises": [12,12,12] } },
+  { id: "s6", date: "2026-07-05", label: "Stamina push", bodyweight: 81.9, load: { "Chest Dips": 5, "Goblet Squat": 20 }, notes: "",
+    ex: { "Wide Grip Pull-Ups": [12,11,9,7], "Chest Dips": [12,12,10,10], "Push-Ups": [12,12,12,12], "Goblet Squat": [12,12,12,12], "Chin-Ups": [8,8,7,7], "Hanging Knee Raises": [12,12,12] } },
+  { id: "s7", date: "2026-07-07", label: "PR session", bodyweight: 81.9, load: { "Chest Dips": 5, "Goblet Squat": 20 }, notes: "",
+    ex: { "Wide Grip Pull-Ups": [12,12,9,8], "Chest Dips": [12,12,12,10], "Push-Ups": [12,12,12,12], "Goblet Squat": [12,12,12,12], "Chin-Ups": [9,8,7,7], "Hanging Knee Raises": [12,12,12] } },
+];
+
+const STORAGE_KEY = "sessions-v3";
+const total = (sets) => (sets || []).reduce((a, b) => a + b, 0);
+const fmtDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const fmtDateFull = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const dayDiff = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const mondayOf = (dateStr) => { const d = new Date(dateStr + "T00:00:00"); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return d; };
+const emptyDraft = () => ({ date: new Date().toISOString().slice(0, 10), label: "", bodyweight: "", notes: "", ex: Object.fromEntries(EXERCISES.map((e) => [e, ""])), load: Object.fromEntries(EXERCISES.map((e) => [e, ""])) });
+
+const migrate = (loaded) =>
+  loaded.map((s) => {
+    let out = s;
+    if (out.bodyweight === undefined) {
+      const seedMatch = SEED_SESSIONS.find((sd) => sd.date === s.date);
+      out = { ...out, bodyweight: seedMatch ? seedMatch.bodyweight : null, load: seedMatch ? seedMatch.load : {} };
+    }
+    if (out.notes === undefined) out = { ...out, notes: "" };
+    return out;
+  });
+
+const TABS = [
+  { id: "dashboard", label: "Dashboard", Icon: LayoutGrid },
+  { id: "history", label: "History & Log", Icon: History },
+];
+
+function TrainingLog() {
+  const [sessions, setSessions] = useState(null);
+  const [tab, setTab] = useState("dashboard");
+  const [filter, setFilter] = useState("All");
+  const [metric, setMetric] = useState("reps");
+  const [range, setRange] = useState("all");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [draft, setDraft] = useState(emptyDraft);
+  const [pasteText, setPasteText] = useState("");
+  const [parseNote, setParseNote] = useState("");
+  const [selectedCompare, setSelectedCompare] = useState([]);
+  const [showCompare, setShowCompare] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 560 : false);
+  const [targetSettings, setTargetSettings] = useState(null);
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [targetDraft, setTargetDraft] = useState({ startDate: "", weeks: "12" });
+  const [selectedHeatDate, setSelectedHeatDate] = useState(null);
+  const [chartFocus, setChartFocus] = useState(null);
+  const TARGET_KEY = "target-settings-v1";
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 560);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY, false);
+        if (res && res.value) {
+          const migrated = migrate(JSON.parse(res.value));
+          setSessions(migrated);
+          await window.storage.set(STORAGE_KEY, JSON.stringify(migrated), false);
+        } else {
+          setSessions(SEED_SESSIONS);
+          await window.storage.set(STORAGE_KEY, JSON.stringify(SEED_SESSIONS), false);
+        }
+      } catch (e) {
+        setSessions(SEED_SESSIONS);
+        try { await window.storage.set(STORAGE_KEY, JSON.stringify(SEED_SESSIONS), false); } catch (_) {}
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(TARGET_KEY, false);
+        setTargetSettings(res && res.value ? JSON.parse(res.value) : {});
+      } catch (e) {
+        setTargetSettings({});
+      }
+    })();
+  }, []);
+
+  const persist = async (next) => {
+    setSessions(next);
+    try { await window.storage.set(STORAGE_KEY, JSON.stringify(next), false); } catch (_) {}
+  };
+
+  const saveTargetSettings = async () => {
+    const weeksNum = parseInt(targetDraft.weeks, 10);
+    const next = {
+      startDate: targetDraft.startDate || null,
+      weeks: Number.isFinite(weeksNum) && weeksNum > 0 ? weeksNum : 12,
+    };
+    setTargetSettings(next);
+    setEditingTarget(false);
+    try { await window.storage.set(TARGET_KEY, JSON.stringify(next), false); } catch (_) {}
+  };
+
+  const doDelete = async (id) => {
+    await persist(sessions.filter((s) => s.id !== id));
+    setSelectedCompare((sc) => sc.filter((x) => x !== id));
+    setConfirmDelete(null);
+  };
+
+  const startEdit = (s) => {
+    setEditingId(s.id);
+    setDraft({
+      date: s.date, label: s.label, bodyweight: s.bodyweight != null ? String(s.bodyweight) : "", notes: s.notes || "",
+      ex: Object.fromEntries(EXERCISES.map((e) => [e, s.ex[e] ? s.ex[e].join(",") : ""])),
+      load: Object.fromEntries(EXERCISES.map((e) => [e, (s.load || {})[e] ? String(s.load[e]) : ""])),
+    });
+    setShowForm(true);
+  };
+
+  const cancelForm = () => { setShowForm(false); setEditingId(null); setDraft(emptyDraft()); setPasteText(""); setParseNote(""); };
+
+  const handleParseFill = () => {
+    const { results, unmatched } = parseFreeform(pasteText);
+    const matchedNames = Object.keys(results);
+    if (!matchedNames.length) {
+      setParseNote('Couldn\'t parse anything — check the format (e.g. "12 rep x 3 sets body weight").');
+      return;
+    }
+    setDraft((d) => {
+      const nextEx = { ...d.ex };
+      const nextLoad = { ...d.load };
+      matchedNames.forEach((name) => {
+        nextEx[name] = results[name].reps.join(",");
+        if (results[name].load > 0) nextLoad[name] = String(results[name].load);
+      });
+      return { ...d, ex: nextEx, load: nextLoad };
+    });
+    const notes = [];
+    if (matchedNames.includes("Goblet Squat")) notes.push('Mapped to the retired Goblet Squat field — edit to Bulgarian Split Squat below if that\'s what you meant.');
+    if (unmatched.length) notes.push(`Couldn't match: ${unmatched.join(", ")} — enter those manually below.`);
+    setParseNote(notes.join(" ") || "Filled in below — review before saving.");
+    setPasteText("");
+  };
+
+  const saveSession = async () => {
+    if (!sessions) return;
+    setSaving(true);
+    const exData = {}; const loadData = {};
+    EXERCISES.forEach((name) => {
+      const parsed = draft.ex[name].split(",").map((v) => parseInt(v.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
+      if (parsed.length) exData[name] = parsed;
+      const l = parseFloat(draft.load[name]);
+      if (Number.isFinite(l) && l > 0) loadData[name] = l;
+    });
+    const bw = parseFloat(draft.bodyweight);
+    let next;
+    if (editingId) {
+      next = sessions.map((s) => s.id === editingId
+        ? { ...s, date: draft.date, label: draft.label.trim() || "Session", bodyweight: Number.isFinite(bw) ? bw : null, load: loadData, ex: exData, notes: draft.notes.trim() }
+        : s);
+    } else {
+      const newSession = { id: "s" + Date.now(), date: draft.date, label: draft.label.trim() || "Session", bodyweight: Number.isFinite(bw) ? bw : null, load: loadData, ex: exData, notes: draft.notes.trim() };
+      next = [...sessions, newSession];
+    }
+    next = next.sort((a, b) => a.date.localeCompare(b.date));
+    await persist(next);
+    cancelForm();
+    setSaving(false);
+  };
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "training-log-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  const exportCSV = () => {
+    const rows = [["date", "label", "bodyweight_kg", "exercise", "reps_per_set", "added_kg", "total_reps", "notes"]];
+    sessions.forEach((s) => {
+      EXERCISES.forEach((name) => {
+        if (!s.ex[name]) return;
+        rows.push([s.date, s.label, s.bodyweight ?? "", name, s.ex[name].join("-"), (s.load || {})[name] || 0, total(s.ex[name]), s.notes || ""]);
+      });
+    });
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "training-log-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!Array.isArray(parsed)) throw new Error("not an array");
+        const existingDates = new Set(sessions.map((s) => s.date));
+        const toAdd = migrate(parsed.filter((s) => s && s.date && s.ex && !existingDates.has(s.date)));
+        const skipped = parsed.length - toAdd.length;
+        const next = [...sessions, ...toAdd].sort((a, b) => a.date.localeCompare(b.date));
+        await persist(next);
+        setImportMsg(`Imported ${toAdd.length} session(s)${skipped ? `, skipped ${skipped} duplicate date(s)` : ""}.`);
+      } catch (err) {
+        setImportMsg("Import failed — file doesn't look like a valid export.");
+      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setTimeout(() => setImportMsg(""), 6000);
+    };
+    reader.readAsText(file);
+  };
+
+  const todayStr = toISODate(new Date());
+
+  const loadableSet = useMemo(() => {
+    const s = new Set();
+    (sessions || []).forEach((sess) => {
+      EXERCISES.forEach((name) => { if ((sess.load || {})[name] > 0) s.add(name); });
+    });
+    return s;
+  }, [sessions]);
+
+  const bwMap = useMemo(() => {
+    const map = {};
+    let last = null;
+    (sessions || []).forEach((s) => {
+      if (s.bodyweight != null) last = s.bodyweight;
+      map[s.id] = last;
+    });
+    return map;
+  }, [sessions]);
+
+  const effLoadPerRep = (s, name) => {
+    const bw = bwMap[s.id];
+    return bw == null ? null : bw + ((s.load || {})[name] || 0);
+  };
+
+  const rangedSessions = useMemo(() => {
+    if (!sessions) return [];
+    if (range === "all") return sessions;
+    const days = range === "30" ? 30 : 90;
+    return sessions.filter((s) => dayDiff(s.date, todayStr) <= days);
+  }, [sessions, range]);
+
+  const chartData = useMemo(() => rangedSessions.map((s) => {
+    const row = { date: fmtDate(s.date), fullDate: s.date };
+    let totalVol = 0, anyVol = false;
+    EXERCISES.forEach((name) => {
+      if (!s.ex[name]) { row[name] = null; return; }
+      const reps = total(s.ex[name]);
+      if (metric === "reps") { row[name] = reps; return; }
+      const lpr = effLoadPerRep(s, name);
+      const v = lpr == null ? null : Math.round(reps * lpr);
+      row[name] = v;
+      if (v != null) { totalVol += v; anyVol = true; }
+    });
+    if (metric === "volume") row.Total = anyVol ? totalVol : null;
+    return row;
+  }), [rangedSessions, metric]);
+
+  const perSetData = useMemo(() => {
+    if (filter === "All" || filter.startsWith("group:")) return [];
+    return rangedSessions.filter((s) => s.ex[filter]).map((s) => {
+      const row = { date: fmtDate(s.date) };
+      const lpr = effLoadPerRep(s, filter);
+      s.ex[filter].forEach((r, i) => { row["Set " + (i + 1)] = metric === "reps" ? r : (lpr == null ? null : Math.round(r * lpr)); });
+      row.Total = metric === "reps" ? total(s.ex[filter]) : (lpr == null ? null : Math.round(total(s.ex[filter]) * lpr));
+      return row;
+    });
+  }, [rangedSessions, filter, metric]);
+
+  const loadStepData = useMemo(() => {
+    if (!loadableSet.has(filter)) return [];
+    return rangedSessions.filter((s) => s.ex[filter]).map((s) => ({ date: fmtDate(s.date), "Added load (kg)": (s.load || {})[filter] || 0 }));
+  }, [rangedSessions, filter, loadableSet]);
+
+  const bodyweightData = useMemo(() => rangedSessions.filter((s) => s.bodyweight != null).map((s) => ({ date: fmtDate(s.date), kg: s.bodyweight })), [rangedSessions]);
+
+  const groupChartData = useMemo(() => {
+    if (!filter.startsWith("group:")) return [];
+    const group = filter.slice(6);
+    return rangedSessions
+      .filter((s) => EXERCISES.some((name) => MUSCLE_GROUP[name] === group && s.ex[name]))
+      .map((s) => {
+        let val = 0;
+        EXERCISES.forEach((name) => {
+          if (MUSCLE_GROUP[name] !== group || !s.ex[name]) return;
+          const reps = total(s.ex[name]);
+          if (metric === "reps") { val += reps; return; }
+          const lpr = effLoadPerRep(s, name);
+          if (lpr != null) val += reps * lpr;
+        });
+        return { date: fmtDate(s.date), value: Math.round(val) };
+      });
+  }, [rangedSessions, filter, metric]);
+
+  const maxSets = useMemo(() => ((filter === "All" || filter.startsWith("group:")) ? 0 : Math.max(0, ...rangedSessions.map((s) => (s.ex[filter] || []).length))), [rangedSessions, filter]);
+  const activeGroup = filter === "All" ? null : filter.startsWith("group:") ? filter.slice(6) : MUSCLE_GROUP[filter] || null;
+
+  const latest = sessions && sessions.length ? sessions[sessions.length - 1] : null;
+  const first = sessions && sessions.length ? sessions[0] : null;
+
+  const deltaFor = (name) => {
+    if (!latest || !first || !latest.ex[name] || !first.ex[name]) return null;
+    return total(latest.ex[name]) - total(first.ex[name]);
+  };
+
+  const sessionVolume = (s) => EXERCISES.reduce((sum, name) => {
+    if (!s.ex[name]) return sum;
+    const lpr = effLoadPerRep(s, name);
+    return lpr == null ? sum : sum + total(s.ex[name]) * lpr;
+  }, 0);
+
+  const volumeKpi = useMemo(() => {
+    if (!sessions || !latest || !first) return null;
+    const latestVol = sessionVolume(latest);
+    const firstVol = sessionVolume(first);
+    const cumulative = sessions.reduce((sum, s) => sum + sessionVolume(s), 0);
+    return { latestVol, delta: latestVol - firstVol, cumulative };
+  }, [sessions, latest, first]);
+
+  const groupVolumeLatest = useMemo(() => {
+    if (!latest) return [];
+    const totals = {}; GROUPS.forEach((g) => (totals[g] = 0));
+    EXERCISES.forEach((name) => {
+      if (!latest.ex[name]) return;
+      const lpr = effLoadPerRep(latest, name);
+      if (lpr == null) return;
+      totals[MUSCLE_GROUP[name]] += total(latest.ex[name]) * lpr;
+    });
+    const grand = Object.values(totals).reduce((a, b) => a + b, 0) || 1;
+    return GROUPS.map((g) => ({ group: g, kg: Math.round(totals[g]), pct: Math.round((totals[g] / grand) * 100) }));
+  }, [latest]);
+
+  const prMap = useMemo(() => {
+    if (!sessions) return {};
+    const map = {};
+    EXERCISES.forEach((name) => {
+      let bestVol = -1, bestVolDate = null, bestVolReps = null, priorBest = -1;
+      sessions.forEach((s) => {
+        if (!s.ex[name]) return;
+        const lpr = effLoadPerRep(s, name);
+        if (lpr == null) return;
+        const setVols = s.ex[name].map((r) => r * lpr);
+        const maxInSession = Math.max(...setVols);
+        const maxIdx = setVols.indexOf(maxInSession);
+        if (!latest || s.id !== latest.id) { if (maxInSession > priorBest) priorBest = maxInSession; }
+        if (maxInSession > bestVol) { bestVol = maxInSession; bestVolDate = s.date; bestVolReps = s.ex[name][maxIdx]; }
+      });
+      const latestLpr = latest ? effLoadPerRep(latest, name) : null;
+      const latestSetVols = latest && latest.ex[name] && latestLpr != null ? latest.ex[name].map((r) => r * latestLpr) : null;
+      const latestMax = latestSetVols ? Math.max(...latestSetVols) : -1;
+      map[name] = { bestVol, bestVolDate, bestVolReps, isNewPR: latest && latestMax > priorBest && latestMax === bestVol };
+    });
+    return map;
+  }, [sessions, latest]);
+
+  const consistency = useMemo(() => {
+    if (!sessions || sessions.length === 0) return null;
+    const weekKeySet = new Set(sessions.map((s) => toISODate(mondayOf(s.date))));
+    const currentMonday = mondayOf(todayStr);
+    let streak = 0, firstIter = true;
+    let cursor = new Date(currentMonday);
+    for (let i = 0; i < 104; i++) {
+      const key = toISODate(cursor);
+      if (weekKeySet.has(key)) streak++;
+      else if (!firstIter) break;
+      firstIter = false;
+      cursor.setDate(cursor.getDate() - 7);
+    }
+    const firstMonday = mondayOf(sessions[0].date);
+    const weeksSpan = Math.max(1, Math.round((currentMonday - firstMonday) / (7 * 86400000)) + 1);
+    const avgPerWeek = (sessions.length / weeksSpan).toFixed(1);
+    const thisWeekKey = toISODate(currentMonday);
+    const thisWeekCount = sessions.filter((s) => toISODate(mondayOf(s.date)) === thisWeekKey).length;
+    const daysSinceLast = dayDiff(sessions[sessions.length - 1].date, todayStr);
+    return { streak, avgPerWeek, thisWeekCount, daysSinceLast };
+  }, [sessions]);
+
+  const twelveWeekTarget = useMemo(() => {
+    if (!sessions || sessions.length === 0 || !first) return null;
+    const goalWeeks = (targetSettings && targetSettings.weeks) || 12;
+    const startDate = (targetSettings && targetSettings.startDate) || first.date;
+    const startMonday = mondayOf(startDate);
+    const currentMonday = mondayOf(todayStr);
+    const weekKeySet = new Set(sessions.map((s) => toISODate(mondayOf(s.date))));
+    let cursor = new Date(startMonday);
+    let missedWeeks = 0, trainedWeeks = 0;
+    while (cursor < currentMonday) {
+      const key = toISODate(cursor);
+      if (weekKeySet.has(key)) trainedWeeks++; else missedWeeks++;
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    if (weekKeySet.has(toISODate(currentMonday)) && currentMonday >= startMonday) trainedWeeks++;
+    const targetDate = new Date(startMonday);
+    targetDate.setDate(targetDate.getDate() + (goalWeeks + missedWeeks) * 7);
+    const targetISO = toISODate(targetDate);
+    const daysRemaining = Math.max(0, dayDiff(todayStr, targetISO));
+    const trainedCapped = Math.min(goalWeeks, trainedWeeks);
+    return { targetDate: targetISO, daysRemaining, trainedWeeks: trainedCapped, goalWeeks, missedWeeks, reached: trainedWeeks >= goalWeeks };
+  }, [sessions, first, todayStr, targetSettings]);
+
+  const HEATMAP_WEEKS = 24;
+
+  const heatmapWeeks = useMemo(() => {
+    if (!sessions) return [];
+    const sessionByDate = {};
+    sessions.forEach((s) => { sessionByDate[s.date] = s; });
+    const currentMonday = mondayOf(todayStr);
+    const weeks = [];
+    for (let w = HEATMAP_WEEKS - 1; w >= 0; w--) {
+      const weekStart = new Date(currentMonday); weekStart.setDate(weekStart.getDate() - w * 7);
+      const days = [];
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(weekStart); day.setDate(day.getDate() + d);
+        const iso = toISODate(day);
+        days.push({ date: iso, trained: !!sessionByDate[iso], isFuture: iso > todayStr });
+      }
+      weeks.push(days);
+    }
+    return weeks;
+  }, [sessions]);
+
+  const heatSession = useMemo(() => {
+    if (!selectedHeatDate || !sessions) return null;
+    return sessions.find((s) => s.date === selectedHeatDate);
+  }, [selectedHeatDate, sessions]);
+
+  if (!sessions) {
+    return <div style={{ background: "#101214", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
+  }
+
+  const setColor = (i) => ["#F2C94C", "#E63946", "#56CCF2", "#6FCF97"][i % 4];
+  const yLabel = metric === "reps" ? "reps" : "kg";
+  const changeFilter = (f) => { setFilter(f); setChartFocus(null); };
+
+  const toggleCompare = (id) => {
+    setSelectedCompare((sc) => {
+      if (sc.includes(id)) return sc.filter((x) => x !== id);
+      if (sc.length >= 2) return [sc[1], id];
+      return [...sc, id];
+    });
+  };
+
+  const compareSessions = selectedCompare.length === 2 ? selectedCompare.map((id) => sessions.find((s) => s.id === id)).sort((a, b) => a.date.localeCompare(b.date)) : null;
+
+  return (
+    <div style={{ background: "#101214", minHeight: "100vh", color: "#E8E6E1", fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght=500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        .disp { font-family: 'Oswald', sans-serif; letter-spacing: 0.02em; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .pill { transition: all 0.15s ease; }
+        .pill:hover { transform: translateY(-1px); }
+        ::-webkit-scrollbar { height: 6px; width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #2a2e33; border-radius: 3px; }
+        input[type="text"], input[type="date"], input[type="number"], textarea { color-scheme: dark; }
+        textarea { font-family: 'Inter', sans-serif; resize: vertical; }
+        .file-btn { position: relative; overflow: hidden; }
+        .file-btn input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        @media (max-width: 560px) {
+          button, .file-btn, input[type="checkbox"] { min-height: 40px; }
+          .pill { padding: 8px 12px !important; font-size: 12.5px !important; }
+        }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ borderBottom: "1px solid #22262b", padding: isMobile ? "14px 12px 0" : "20px 16px 0" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <Dumbbell size={20} color="#F2C94C" strokeWidth={2.2} />
+            <span className="mono" style={{ fontSize: 11, letterSpacing: "0.15em", color: "#8a8f98", textTransform: "uppercase" }}>Calisthenics · Training Log</span>
+          </div>
+          <h1 className="disp" style={{ fontSize: "clamp(24px, 6vw, 32px)", fontWeight: 700, margin: "0 0 4px", color: "#F5F3EE", display: "flex", alignItems: "center", gap: 10 }}>
+            Mathieu's workout progression
+            <span className="mono" style={{ fontSize: 11, fontWeight: 700, color: "#101214", background: "#F2C94C", borderRadius: 999, padding: "2px 9px", letterSpacing: "0.03em" }}>v2</span>
+          </h1>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+            <span style={{ fontSize: 13, color: "#9a9fa6", fontWeight: 600 }}>{sessions.length} Sessions Logged</span>
+            <span className="mono" style={{ fontSize: 12, color: "#6b7078" }}>{first ? fmtDateFull(first.date) : ""} → {latest ? fmtDateFull(latest.date) : ""}</span>
+          </div>
+          <div style={{ display: "flex", gap: 2, overflowX: "auto" }}>
+            {TABS.map(({ id, label, Icon }) => (
+              <button key={id} onClick={() => setTab(id)} style={{
+                display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "none", border: "none", whiteSpace: "nowrap",
+                padding: "9px 12px", fontSize: 12.5, fontWeight: 600, color: tab === id ? "#F2C94C" : "#6b7078",
+                borderBottom: tab === id ? "2px solid #F2C94C" : "2px solid transparent", fontFamily: "'Inter', sans-serif",
+              }}>
+                <Icon size={14} /> {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "14px 12px" : "18px 16px" }}>
+
+        {tab === "dashboard" && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
+              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                  <Weight size={14} color="#F2C94C" />
+                  <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Volume Load — latest</span>
+                </div>
+                <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#F5F3EE" }}>
+                  {volumeKpi ? Math.round(volumeKpi.latestVol).toLocaleString() : "—"} <span className="mono" style={{ fontSize: 12, color: "#6b7078" }}>kg</span>
+                </div>
+                <div style={{ fontSize: 11, color: volumeKpi && volumeKpi.delta >= 0 ? "#6FCF97" : "#E63946", marginTop: 4 }}>
+                  {volumeKpi ? (volumeKpi.delta >= 0 ? "+" : "") + Math.round(volumeKpi.delta).toLocaleString() + " kg vs " + fmtDate(first.date) : ""}
+                </div>
+                <div style={{ fontSize: 11, color: "#4a4f56", marginTop: 4 }} className="mono">{volumeKpi ? Math.round(volumeKpi.cumulative).toLocaleString() : ""} kg lifetime</div>
+              </div>
+
+              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                  <Award size={14} color="#F2C94C" />
+                  <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (best set volume, all-time)</span>
+                </div>
+                <div style={{ display: "grid", gap: 4 }}>
+                  {EXERCISES.map((name) => {
+                    const pr = prMap[name];
+                    if (!pr || pr.bestVol < 0) return null;
+                    return (
+                      <div key={name} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                        <span style={{ color: "#9a9fa6" }}>{name.split(" ")[0]}</span>
+                        <span className="mono" style={{ color: pr.isNewPR ? "#F2C94C" : "#c9cdd3", fontWeight: pr.isNewPR ? 700 : 400 }}>{Math.round(pr.bestVol)}kg <span style={{ color: "#5a5f66" }}>({pr.bestVolReps}r)</span>{pr.isNewPR ? " 🔥 new" : ""}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 10, color: "#4a4f56", marginTop: 8 }} className="mono">volume = reps × (bodyweight + added load) for your single best set</div>
+              </div>
+
+              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                  <Flame size={14} color="#F2C94C" />
+                  <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Consistency</span>
+                </div>
+                {consistency && (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: "#9a9fa6" }}>Streak (wks w/ ≥1)</span><span className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{consistency.streak}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: "#9a9fa6" }}>This week</span><span className="mono" style={{ color: "#F5F3EE" }}>{consistency.thisWeekCount}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: "#9a9fa6" }}>Avg / week</span><span className="mono" style={{ color: "#F5F3EE" }}>{consistency.avgPerWeek}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: "#9a9fa6" }}>Last session</span><span className="mono" style={{ color: "#F5F3EE" }}>{consistency.daysSinceLast === 0 ? "today" : consistency.daysSinceLast + "d ago"}</span></div>
+                  </div>
+                )}
+              </div>
+              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Target size={14} color="#F2C94C" />
+                    <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{twelveWeekTarget ? twelveWeekTarget.goalWeeks : 12}-Week Target</span>
+                  </div>
+                  <Settings2
+                    size={13}
+                    color="#5a5f66"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => {
+                      setTargetDraft({ startDate: (targetSettings && targetSettings.startDate) || (first ? first.date : ""), weeks: String((targetSettings && targetSettings.weeks) || 12) });
+                      setEditingTarget(true);
+                    }}
+                  />
+                </div>
+                {editingTarget ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Start date</div>
+                      <input type="date" value={targetDraft.startDate} onChange={(e) => setTargetDraft({ ...targetDraft, startDate: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Weeks</div>
+                      <input type="number" min="1" value={targetDraft.weeks} onChange={(e) => setTargetDraft({ ...targetDraft, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={saveTargetSettings} style={{ flex: 1, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
+                      <button onClick={() => setEditingTarget(false)} style={{ flex: 1, background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 0", fontWeight: 600, fontSize: 11.5, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : twelveWeekTarget && (
+                  twelveWeekTarget.reached ? (
+                    <>
+                      <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#6FCF97" }}>Goal reached 🎉</div>
+                      <div style={{ fontSize: 11, color: "#6b7078", marginTop: 4 }}>{twelveWeekTarget.goalWeeks}/{twelveWeekTarget.goalWeeks} trained weeks — hit on {fmtDate(twelveWeekTarget.targetDate)}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#F5F3EE" }}>
+                        {twelveWeekTarget.daysRemaining} <span className="mono" style={{ fontSize: 12, color: "#6b7078" }}>days left</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#9a9fa6", marginTop: 4 }}>Target: {fmtDateFull(twelveWeekTarget.targetDate)}</div>
+                      <div style={{ fontSize: 11, color: "#6b7078", marginTop: 2 }} className="mono">{twelveWeekTarget.trainedWeeks}/{twelveWeekTarget.goalWeeks} weeks trained{twelveWeekTarget.missedWeeks > 0 ? ` · +${twelveWeekTarget.missedWeeks}wk pushed (missed)` : ""}</div>
+                    </>
+                  )
+                )}
+              </div>
+            </div>
+
+            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 18 }}>
+              <div style={{ marginBottom: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Last 24 weeks — days trained</span>
+              </div>
+              <div style={{ display: "flex", gap: isMobile ? 2 : 4, overflowX: "auto", paddingBottom: 4 }}>
+                <div style={{ display: "grid", gridTemplateRows: `repeat(7, ${isMobile ? 12 : 14}px)`, gap: isMobile ? 2 : 4, marginRight: 4, flexShrink: 0 }}>
+                  {["M", "T", "W", "T", "F", "S", "D"].map((d, i) => (
+                    <span key={i} className="mono" style={{ fontSize: 9, color: "#4a4f56", lineHeight: `${isMobile ? 12 : 14}px` }}>{d}</span>
+                  ))}
+                </div>
+                {heatmapWeeks.map((week, wi) => (
+                  <div key={wi} style={{ display: "grid", gridTemplateRows: `repeat(7, ${isMobile ? 12 : 14}px)`, gap: isMobile ? 2 : 4 }}>
+                    {week.map((d, di) => (
+                      <div
+                        key={di}
+                        title={d.date}
+                        onClick={() => d.trained && setSelectedHeatDate(d.date)}
+                        style={{
+                          width: isMobile ? 12 : 14, height: isMobile ? 12 : 14, borderRadius: 3,
+                          background: d.isFuture ? "transparent" : d.trained ? "#F2C94C" : "#1d2024",
+                          border: d.isFuture ? "1px dashed #22262b" : "1px solid #22262b",
+                          cursor: d.trained ? "pointer" : "default",
+                        }}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: "#4a4f56", marginTop: 8 }} className="mono">tap a filled square to see that session · your goal: every other day</div>
+            </div>
+
+            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 18 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 4 }}>Volume by muscle group — latest session ({latest ? fmtDate(latest.date) : ""})</div>
+              <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 12 }}>Pull: pull-ups + chin-ups · Push: dips + push-ups · Legs: goblet squat · Core: hanging knee raises</div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {groupVolumeLatest.map((g) => {
+                  const isActive = activeGroup === g.group;
+                  return (
+                    <div key={g.group} style={{ borderRadius: 8, padding: "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+                        <span style={{ color: GROUP_COLORS[g.group], fontWeight: 600 }}>{g.group}</span>
+                        <span className="mono" style={{ color: "#c9cdd3" }}>{g.kg.toLocaleString()} kg ({g.pct}%)</span>
+                      </div>
+                      <div style={{ background: "#1d2024", borderRadius: 4, height: 8, overflow: "hidden" }}><div style={{ width: g.pct + "%", height: "100%", background: GROUP_COLORS[g.group] }} /></div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 6px", marginBottom: 18 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 6, paddingLeft: 6 }}>Bodyweight (kg)</div>
+              <ResponsiveContainer width="100%" height={isMobile ? 110 : 140}>
+                <LineChart data={bodyweightData} margin={{ top: 5, right: 16, left: -10, bottom: 0 }}>
+                  <CartesianGrid stroke="#22262b" vertical={false} />
+                  <XAxis dataKey="date" stroke="#6b7078" fontSize={11} />
+                  <YAxis stroke="#6b7078" fontSize={11} domain={["dataMin - 1", "dataMax + 1"]} />
+                  <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="kg" stroke="#56CCF2" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+              <button className="pill" onClick={() => changeFilter("All")} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700, border: filter === "All" ? "1px solid #F5F3EE" : "1px solid #22262b", background: filter === "All" ? "#F5F3EE1a" : "#16181b", color: filter === "All" ? "#F5F3EE" : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>All</button>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {["reps", "volume"].map((m) => (<button key={m} onClick={() => setMetric(m)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: metric === m ? "#F2C94C" : "transparent", color: metric === m ? "#101214" : "#9a9fa6" }}>{m === "reps" ? "Reps" : "Volume (kg)"}</button>))}
+                </div>
+                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([v, l]) => (<button key={v} onClick={() => setRange(v)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: range === v ? "#F2C94C" : "transparent", color: range === v ? "#101214" : "#9a9fa6" }}>{l}</button>))}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
+              {GROUPS.map((g) => {
+                const groupValue = "group:" + g;
+                const groupActive = filter === groupValue || activeGroup === g;
+                const gColor = GROUP_COLORS[g];
+                const groupExercises = EXERCISES.filter((n) => MUSCLE_GROUP[n] === g);
+                return (
+                  <div key={g} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5 }}>
+                    <button className="pill" onClick={() => changeFilter(groupValue)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: `1px solid ${gColor}`, background: groupActive ? `${gColor}2a` : "transparent", color: gColor, fontFamily: "'Inter', sans-serif", minWidth: 46, textAlign: "center" }}>{g}</button>
+                    {groupExercises.map((name) => {
+                      const active = filter === name;
+                      const color = COLORS[name];
+                      return (
+                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #22262b", background: active ? `${color}1a` : "#16181b", color: active ? color : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>{name}</button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
+            {filter === "All" && metric === "reps" && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 16 }}>
+                {EXERCISES.map((name) => {
+                  const d = deltaFor(name);
+                  const latestTotal = latest && latest.ex[name] ? total(latest.ex[name]) : null;
+                  return (
+                    <div key={name} style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 10, padding: "12px 14px" }}>
+                      <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4, fontWeight: 600 }}>{name}</div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}><span className="disp" style={{ fontSize: 22, fontWeight: 700, color: COLORS[name] }}>{latestTotal ?? "—"}</span><span className="mono" style={{ fontSize: 11, color: "#6b7078" }}>reps</span></div>
+                      {d !== null && (<div style={{ fontSize: 11, color: d >= 0 ? "#6FCF97" : "#E63946", marginTop: 2, display: "flex", alignItems: "center", gap: 3 }}><TrendingUp size={11} /> {d >= 0 ? "+" : ""}{d} since {fmtDate(first.date)}</div>)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>
+                {filter === "All"
+                  ? `Total ${yLabel} per session, by exercise`
+                  : filter.startsWith("group:")
+                  ? `${filter.slice(6)} — total ${yLabel} per session (${EXERCISES.filter((n) => MUSCLE_GROUP[n] === filter.slice(6)).join(" + ")})`
+                  : `${filter} — ${yLabel} per set across sessions`}
+              </div>
+              {metric === "volume" && (<div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Volume = total reps × (bodyweight + any added external weight) for that session.</div>)}
+              <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
+                {filter === "All" ? (
+                  <LineChart data={chartData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
+                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
+                    {EXERCISES.map((name) => (
+                      <Line key={name} type="monotone" dataKey={name} stroke={COLORS[name]} strokeWidth={chartFocus === name ? 3 : 2.2} strokeOpacity={chartFocus && chartFocus !== name ? 0.18 : 1} dot={{ r: 3, fillOpacity: chartFocus && chartFocus !== name ? 0.18 : 1 }} connectNulls />
+                    ))}
+                    {metric === "volume" && (
+                      <Line dataKey="Total" type="monotone" stroke="#F5F3EE" strokeWidth={chartFocus === "Total" ? 3.4 : 2.8} strokeDasharray="5 3" strokeOpacity={chartFocus && chartFocus !== "Total" ? 0.15 : 1} dot={{ r: 3.5, fillOpacity: chartFocus && chartFocus !== "Total" ? 0.15 : 1 }} connectNulls />
+                    )}
+                  </LineChart>
+                ) : filter.startsWith("group:") ? (
+                  <LineChart data={groupChartData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
+                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => [`${v} ${yLabel}`, filter.slice(6)]} />
+                    <Line type="monotone" dataKey="value" stroke={GROUP_COLORS[filter.slice(6)]} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
+                  </LineChart>
+                ) : (
+                  <LineChart data={perSetData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
+                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
+                    {Array.from({ length: maxSets }).map((_, i) => {
+                      const key = "Set " + (i + 1);
+                      return <Line key={i} type="monotone" dataKey={key} stroke={setColor(i)} strokeWidth={chartFocus === key ? 2.4 : 1.6} strokeOpacity={chartFocus && chartFocus !== key ? 0.15 : 0.85} dot={{ r: 2.5, fillOpacity: chartFocus && chartFocus !== key ? 0.15 : 1 }} connectNulls />;
+                    })}
+                    <Line type="monotone" dataKey="Total" stroke="#F5F3EE" strokeWidth={chartFocus === "Total" ? 3.2 : 2.6} strokeOpacity={chartFocus && chartFocus !== "Total" ? 0.15 : 1} dot={{ r: 3.5, fillOpacity: chartFocus && chartFocus !== "Total" ? 0.15 : 1 }} connectNulls />
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+
+            {chartFocus && (filter === "All" || !filter.startsWith("group:")) && (
+              <div style={{ textAlign: "center", marginTop: -8, marginBottom: 10 }}>
+                <button onClick={() => setChartFocus(null)} className="mono" style={{ background: "none", border: "none", color: "#6b7078", fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>Show all lines</button>
+              </div>
+            )}
+
+            {loadableSet.has(filter) && (
+              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>{filter} — added external load (kg), kept separate from reps</div>
+                <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Shown on its own so reps and load never blend into one misleading number — 12 reps @ +5kg isn't directly comparable to 10 reps @ +15kg.</div>
+                <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
+                  <LineChart data={loadStepData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
+                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <Line type="stepAfter" dataKey="Added load (kg)" stroke="#E63946" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            <div style={{ background: "#101214", border: "1px dashed #22262b", borderRadius: 10, padding: "10px 14px", fontSize: 11, color: "#6b7078", marginBottom: 8 }}>
+              "First logged session" ({first ? fmtDateFull(first.date) : ""}) is just your earliest entry — used only as a fixed reference point for comparisons, not a training assumption.
+            </div>
+          </>
+        )}
+
+        {tab === "history" && (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+              {!showForm && (
+                <button onClick={() => setShowForm(true)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}><Plus size={16} /> Log new session</button>
+              )}
+              <button onClick={exportJSON} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export JSON</button>
+              <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export CSV</button>
+              <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
+                <Upload size={14} /> Import JSON
+                <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImport} />
+              </label>
+              {selectedCompare.length === 2 && (
+                <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 10, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
+              )}
+            </div>
+
+            {importMsg && (<div style={{ fontSize: 12, color: "#F2C94C", marginBottom: 12 }}>{importMsg}</div>)}
+            {selectedCompare.length > 0 && selectedCompare.length < 2 && (<div style={{ fontSize: 12, color: "#6b7078", marginBottom: 12 }}>Select one more session to compare.</div>)}
+
+            {showForm && (
+              <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 18, marginBottom: 22 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <span style={{ fontWeight: 700, fontSize: 15 }}>{editingId ? "Edit session" : "New session"}</span>
+                  <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={cancelForm} />
+                </div>
+                <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Date</div><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
+                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Bodyweight (kg)</div><input type="number" step="0.1" placeholder="81.9" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
+                  <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Label (optional)</div><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} /></div>
+                </div>
+
+                <div style={{ background: "#101214", border: "1px dashed #2a2e33", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6 }}>Paste your workout summary — parses it and fills the fields below for you to review</div>
+                  <textarea
+                    value={pasteText}
+                    onChange={(e) => setPasteText(e.target.value)}
+                    placeholder={"Wide grip pull ups :\n12 rep x 1 sets body weight\n9 rep x 1 sets body weight\n\nChest dips :\n12 rep x 3 sets body weight + 5kg"}
+                    rows={4}
+                    className="mono"
+                    style={{ width: "100%", background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box", resize: "vertical" }}
+                  />
+                  <button onClick={handleParseFill} style={{ marginTop: 8, background: "#2a2e33", color: "#F5F3EE", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Parse & fill</button>
+                  {parseNote && <div style={{ fontSize: 11.5, color: "#F2C94C", marginTop: 8, lineHeight: 1.5 }}>{parseNote}</div>}
+                </div>
+
+                <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: "160px 1fr 90px", gap: 8, marginBottom: 4, fontSize: 10, color: "#5a5f66", textTransform: "uppercase", letterSpacing: "0.04em" }}><span></span><span>Reps per set</span><span>Added kg</span></div>
+                <div style={{ display: "grid", gap: isMobile ? 14 : 10, marginBottom: 14 }}>
+                  {(editingId ? EXERCISES : EXERCISES.filter((name) => !RETIRED.includes(name))).map((name) => (
+                    isMobile ? (
+                      <div key={name} style={{ display: "grid", gap: 6, borderBottom: "1px solid #1d2024", paddingBottom: 10 }}>
+                        <span style={{ fontSize: 13, color: COLORS[name], fontWeight: 600 }}>{name}</span>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8 }}>
+                          <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
+                          <input type="text" placeholder="+kg" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={name} style={{ display: "grid", gridTemplateColumns: "160px 1fr 90px", gap: 10, alignItems: "center" }}>
+                        <span style={{ fontSize: 13, color: COLORS[name], fontWeight: 600 }}>{name}</span>
+                        <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                        <input type="text" placeholder="0" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                      </div>
+                    )
+                  ))}
+                </div>
+                <div style={{ marginBottom: 4, fontSize: 11, color: "#8a8f98" }}>Notes (optional — soreness, sleep, how it felt)</div>
+                <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
+              </div>
+            )}
+
+            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Session history ({sessions.length}) · select up to 2 to compare</div>
+              <div style={{ maxHeight: 520, overflowY: "auto" }}>
+                {[...sessions].reverse().map((s, idx) => (
+                  <div key={s.id} style={{ padding: "12px 16px", borderBottom: idx === sessions.length - 1 ? "none" : "1px solid #1d2024", background: selectedCompare.includes(s.id) ? "#1d2024" : "transparent" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input type="checkbox" checked={selectedCompare.includes(s.id)} onChange={() => toggleCompare(s.id)} style={{ cursor: "pointer" }} />
+                        <span className="disp" style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>{fmtDate(s.date)}</span>
+                        <span style={{ fontSize: 12, color: "#6b7078" }}>{s.label}</span>
+                        {s.bodyweight != null ? (
+                          <span className="mono" style={{ fontSize: 11, color: "#4a4f56" }}>{s.bodyweight} kg</span>
+                        ) : bwMap[s.id] != null ? (
+                          <span className="mono" style={{ fontSize: 11, color: "#4a4f56", fontStyle: "italic" }}>~{bwMap[s.id]} kg (carried)</span>
+                        ) : null}
+                      </div>
+                      <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
+                        <Pencil size={14} style={{ cursor: "pointer", color: "#5a5f66" }} onClick={() => startEdit(s)} />
+                        <Trash2 size={15} style={{ cursor: "pointer", color: "#5a5f66" }} onClick={() => setConfirmDelete(s)} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {EXERCISES.filter((n) => s.ex[n]).map((name) => (
+                        <span key={name} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${COLORS[name]}14`, color: COLORS[name], border: `1px solid ${COLORS[name]}33` }}>{name.split(" ")[0]}: {s.ex[name].join("-")}{(s.load || {})[name] ? ` (+${s.load[name]}kg)` : ""}</span>
+                      ))}
+                    </div>
+                    {s.notes && <div style={{ fontSize: 11.5, color: "#6b7078", fontStyle: "italic", marginTop: 6 }}>"{s.notes}"</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        <div style={{ textAlign: "center", padding: "20px 0 4px", fontSize: 11, color: "#4a4f56" }} className="mono">Data saved automatically · visible only to you</div>
+      </div>
+
+      {confirmDelete && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
+          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 360, width: "100%" }}>
+            <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+              <AlertTriangle size={20} color="#E63946" style={{ flexShrink: 0 }} />
+              <div><div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>Delete this session?</div><div style={{ fontSize: 12.5, color: "#9a9fa6" }}>{fmtDateFull(confirmDelete.date)} — "{confirmDelete.label}" will be permanently removed. This can't be undone.</div></div>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setConfirmDelete(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => doDelete(confirmDelete.id)} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedHeatDate && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setSelectedHeatDate(null)}>
+          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: "20px 24px", maxWidth: 460, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div className="disp" style={{ fontSize: 20, fontWeight: 700, color: "#F5F3EE" }}>{fmtDateFull(selectedHeatDate)}</div>
+              <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setSelectedHeatDate(null)} />
+            </div>
+            {heatSession ? (
+              <div>
+                <div style={{ display: "flex", gap: 10, fontSize: 12.5, color: "#9a9fa6", marginBottom: 14, borderBottom: "1px solid #22262b", paddingBottom: 8 }}>
+                  {heatSession.label && <span>Label: <strong style={{ color: "#F5F3EE" }}>{heatSession.label}</strong></span>}
+                  <span>Bodyweight: <strong style={{ color: "#F5F3EE" }}>{heatSession.bodyweight ?? bwMap[heatSession.id] ?? "—"} kg</strong></span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+                  {EXERCISES.filter((n) => heatSession.ex[n]).map((name) => (
+                    <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1d2024", padding: "6px 10px", borderRadius: 8 }}>
+                      <span style={{ fontSize: 12.5, color: COLORS[name], fontWeight: 600 }}>{name}</span>
+                      <span className="mono" style={{ fontSize: 12, color: "#c9cdd3" }}>
+                        {heatSession.ex[name].join("-")}
+                        {(heatSession.load || {})[name] ? ` (+${heatSession.load[name]}kg)` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {heatSession.notes && (
+                  <div style={{ fontSize: 12, color: "#9a9fa6", background: "#101214", padding: "8px 12px", borderRadius: 8, fontStyle: "italic" }}>
+                    "{heatSession.notes}"
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: "#6b7078", fontStyle: "italic" }}>No active session details found for this date.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showCompare && compareSessions && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowCompare(false)}>
+          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Session comparison</span>
+              <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowCompare(false)} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#6b7078", marginBottom: 12 }}>
+              <span className="mono">{fmtDateFull(compareSessions[0].date)}</span><span className="mono">{fmtDateFull(compareSessions[1].date)}</span>
+            </div>
+            {compareSessions[0].bodyweight != null && compareSessions[1].bodyweight != null && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "8px 0", borderBottom: "1px solid #22262b", marginBottom: 8 }}>
+                <span style={{ color: "#9a9fa6" }}>Bodyweight</span>
+                <span className="mono" style={{ color: "#F5F3EE" }}>{compareSessions[0].bodyweight}kg → {compareSessions[1].bodyweight}kg ({(compareSessions[1].bodyweight - compareSessions[0].bodyweight >= 0 ? "+" : "") + (compareSessions[1].bodyweight - compareSessions[0].bodyweight).toFixed(1)}kg)</span>
+              </div>
+            )}
+            <div style={{ display: "grid", gap: 10 }}>
+              {EXERCISES.filter((name) => compareSessions[0].ex[name] || compareSessions[1].ex[name]).map((name) => {
+                const a = compareSessions[0], b = compareSessions[1];
+                const repsA = a.ex[name] ? total(a.ex[name]) : null, repsB = b.ex[name] ? total(b.ex[name]) : null;
+                const volA = a.ex[name] && effLoadPerRep(a, name) != null ? Math.round(repsA * effLoadPerRep(a, name)) : null;
+                const volB = b.ex[name] && effLoadPerRep(b, name) != null ? Math.round(repsB * effLoadPerRep(b, name)) : null;
+                return (
+                  <div key={name} style={{ padding: "10px 0", borderBottom: "1px solid #1d2024" }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS[name], marginBottom: 6 }}>{name}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#c9cdd3", marginBottom: 3 }}>
+                      <span>{a.ex[name] ? a.ex[name].join("-") : "—"}</span>
+                      <span className="mono">{repsA != null && repsB != null ? ((repsB - repsA >= 0 ? "+" : "") + (repsB - repsA) + " reps") : ""}</span>
+                      <span>{b.ex[name] ? b.ex[name].join("-") : "—"}</span>
+                    </div>
+                    {volA != null && volB != null && (<div style={{ fontSize: 11, color: "#6b7078", textAlign: "right" }}>{volA}kg → {volB}kg ({(volB - volA >= 0 ? "+" : "") + (volB - volA)}kg)</div>)}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<TrainingLog />);
+</script>
+</body>
+</html>
