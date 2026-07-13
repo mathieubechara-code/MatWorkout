@@ -1,41 +1,117 @@
-<script type="text/babel" data-presets="react">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mathieu's Workout Progression</title>
+<meta name="description" content="Calisthenics training log &amp; progress dashboard" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<style>
+  html, body { margin: 0; padding: 0; background: #101214; }
+  #root { min-height: 100vh; }
+</style>
+
+<!-- React -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<!-- Recharts (charting library) and its peer deps -->
+<script crossorigin src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-is@18/umd/react-is.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2/umd/Recharts.js"></script>
+<!-- Babel standalone: lets the browser compile the JSX below on the fly (no build step needed) -->
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react" data-type="module">
 const { useState, useEffect, useMemo, useRef } = React;
 const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } = Recharts;
 
-function Icon({ children, size = 24, color = "currentColor", strokeWidth = 2, style, onClick }) {
+// ---- Lightweight inline icon set (stand-ins for lucide-react, no external icon dependency) ----
+function Icon({ children, size = 16, color = "currentColor", strokeWidth = 2, style, onClick, title }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
-      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
-      style={style} onClick={onClick}>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+      onClick={onClick}
+    >
+      {title ? <title>{title}</title> : null}
       {children}
     </svg>
   );
 }
+
 const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></Icon>;
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
-const Trash2 = (p) => <Icon {...p}><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></Icon>;
-const Download = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></Icon>;
-const Upload = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></Icon>;
-const Pencil = (p) => <Icon {...p}><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></Icon>;
-const TrendingUp = (p) => <Icon {...p}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" /></Icon>;
-const Award = (p) => <Icon {...p}><circle cx="12" cy="8" r="6" /><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11" /></Icon>;
-const Flame = (p) => <Icon {...p}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" /></Icon>;
-const Weight = (p) => <Icon {...p}><circle cx="12" cy="5" r="3" /><path d="M6.5 8a2 2 0 0 0-2 1.6l-1.65 8.4A2 2 0 0 0 4.8 20.4h14.4a2 2 0 0 0 2-1.6l-1.65-8.4a2 2 0 0 0-2-1.6H6.5z" /></Icon>;
-const LayoutGrid = (p) => <Icon {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></Icon>;
-const History = (p) => <Icon {...p}><path d="M3 3v5h5" /><path d="M3.05 13a9 9 0 1 0 .5-4.5" /><path d="M12 7v5l4 2" /></Icon>;
-const AlertTriangle = (p) => <Icon {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></Icon>;
-const GitCompare = (p) => <Icon {...p}><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><path d="M11 18H8a2 2 0 0 1-2-2V9" /></Icon>;
-const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></Icon>;
-const Settings2 = (p) => <Icon {...p}><path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></Icon>;
-const Dumbbell = (p) => <Icon {...p}><path d="m6.5 6.5 11 11" /><path d="m21 21-1-1" /><path d="m3 3 1 1" /><path d="m18 22 4-4" /><path d="m2 6 4-4" /><path d="m3 10 7-7" /><path d="m14 21 7-7" /></Icon>;
+const Trash2 = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></Icon>;
+const Dumbbell = (p) => <Icon {...p}><path d="M6.5 6.5l11 11" /><path d="M21 21l-1.5-1.5" /><path d="M3 3l1.5 1.5" /><path d="M5 8l-2-2" /><path d="M8 5L6 3" /><path d="M16 19l2 2" /><path d="M19 16l2 2" /><rect x="2.5" y="14.5" width="4" height="4" rx="1" transform="rotate(-45 4.5 16.5)" /><rect x="17.5" y="5.5" width="4" height="4" rx="1" transform="rotate(-45 19.5 7.5)" /></Icon>;
+const TrendingUp = (p) => <Icon {...p}><polyline points="3 17 9 11 13 15 21 7" /><polyline points="14 7 21 7 21 14" /></Icon>;
+const Award = (p) => <Icon {...p}><circle cx="12" cy="8" r="6" /><path d="M9 13.5L7 22l5-3 5 3-2-8.5" /></Icon>;
+const Flame = (p) => <Icon {...p}><path d="M12 2c1 3-3 4-3 8a3 3 0 0 0 6 0c0-1-.5-1.8-1-2.5 2 1 3.5 3.5 3.5 6a5.5 5.5 0 0 1-11 0C6.5 9 9 6 12 2z" /></Icon>;
+const Weight = (p) => <Icon {...p}><circle cx="12" cy="12" r="8" /><path d="M9 9c0-1.5 1-2.5 3-2.5S15 7.5 15 9c0 1.2-.7 1.8-1.6 2.4-.9.6-1.4 1.1-1.4 2.1" /><line x1="12" y1="16.5" x2="12" y2="16.6" /></Icon>;
+const LayoutGrid = (p) => <Icon {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></Icon>;
+const History = (p) => <Icon {...p}><path d="M3 12a9 9 0 1 0 3-6.7" /><polyline points="3 4 3 9 8 9" /><polyline points="12 7 12 12 16 14" /></Icon>;
+const AlertTriangle = (p) => <Icon {...p}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12" y2="17.01" /></Icon>;
+const Pencil = (p) => <Icon {...p}><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" /><path d="M15 5l4 4" /></Icon>;
+const Download = (p) => <Icon {...p}><path d="M12 3v12" /><polyline points="7 10 12 15 17 10" /><path d="M4 19h16" /></Icon>;
+const Upload = (p) => <Icon {...p}><path d="M12 21V9" /><polyline points="7 14 12 9 17 14" /><path d="M4 19h16" /></Icon>;
+const GitCompare = (p) => <Icon {...p}><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5V13a3 3 0 0 0 3 3h3" /><path d="M18 15.5V11a3 3 0 0 0-3-3h-3" /></Icon>;
+const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></Icon>;
+const Settings2 = (p) => <Icon {...p}><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></Icon>;
+
+// ---- window.storage polyfill backed by localStorage (persists per-browser on GitHub Pages) ----
+window.storage = {
+  async get(key, shared) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw === null) return null;
+      return { key, value: raw, shared: !!shared };
+    } catch (e) { return null; }
+  },
+  async set(key, value, shared) {
+    try {
+      localStorage.setItem(key, value);
+      return { key, value, shared: !!shared };
+    } catch (e) { return null; }
+  },
+  async delete(key, shared) {
+    try {
+      localStorage.removeItem(key);
+      return { key, deleted: true, shared: !!shared };
+    } catch (e) { return null; }
+  },
+  async list(prefix, shared) {
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!prefix || (k && k.startsWith(prefix))) keys.push(k);
+      }
+      return { keys, prefix, shared: !!shared };
+    } catch (e) { return null; }
+  },
+};
 
 const EXERCISES = ["Wide Grip Pull-Ups", "Chest Dips", "Push-Ups", "Goblet Squat", "Bulgarian Split Squat", "Chin-Ups", "Hanging Knee Raises"];
 const COLORS = { "Wide Grip Pull-Ups": "#F2C94C", "Chest Dips": "#E63946", "Push-Ups": "#6FCF97", "Goblet Squat": "#56CCF2", "Bulgarian Split Squat": "#2EC4B6", "Chin-Ups": "#BB86FC", "Hanging Knee Raises": "#F2994A" };
 const MUSCLE_GROUP = { "Wide Grip Pull-Ups": "Pull", "Chin-Ups": "Pull", "Chest Dips": "Push", "Push-Ups": "Push", "Goblet Squat": "Legs", "Bulgarian Split Squat": "Legs", "Hanging Knee Raises": "Core" };
 const GROUP_COLORS = { Pull: "#F2C94C", Push: "#E63946", Legs: "#56CCF2", Core: "#F2994A" };
 const GROUPS = ["Pull", "Push", "Legs", "Core"];
+// Exercises retired from active logging. Past sessions and charts still show them in full —
+// they just no longer appear as fields in the "new session" entry form, so you don't
+// accidentally keep logging to an exercise you've moved on from.
 const RETIRED = ["Goblet Squat"];
 
+// Aliases for fuzzy-matching exercise names typed casually/with typos in pasted summaries.
 const EXERCISE_ALIASES = {
   "Wide Grip Pull-Ups": ["wide grip pull ups", "wide grip pull-ups", "wide grip pullups"],
   "Chin-Ups": ["chin ups pull up", "chin ups", "chin-ups", "chinups"],
@@ -58,6 +134,8 @@ function matchExercise(header) {
   return best;
 }
 
+// Parses a freeform pasted summary: exercise header lines followed by one "N rep x M sets ..." line
+// per set-group (M repeats of N reps), blank lines and "super set" markers are ignored separators.
 function parseFreeform(text) {
   const lines = text.split("\n").map((l) => l.trim());
   const setLineRe = /^(\d+)\s*reps?\s*x\s*(\d+)\s*sets?\s*(.*)$/i;
@@ -110,6 +188,10 @@ const total = (sets) => (sets || []).reduce((a, b) => a + b, 0);
 const fmtDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const fmtDateFull = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const dayDiff = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+const loadPerRep = (s, name) => (s.bodyweight == null ? null : s.bodyweight + ((s.load || {})[name] || 0));
+// Local-date formatter (NOT toISOString, which converts to UTC and can shift the
+// calendar date backward by one day for any timezone ahead of UTC — that off-by-one
+// was misaligning heatmap columns/day-of-week and skewing the streak count).
 const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const mondayOf = (dateStr) => { const d = new Date(dateStr + "T00:00:00"); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return d; };
 const emptyDraft = () => ({ date: new Date().toISOString().slice(0, 10), label: "", bodyweight: "", notes: "", ex: Object.fromEntries(EXERCISES.map((e) => [e, ""])), load: Object.fromEntries(EXERCISES.map((e) => [e, ""])) });
@@ -147,7 +229,7 @@ function TrainingLog() {
   const [showCompare, setShowCompare] = useState(false);
   const [importMsg, setImportMsg] = useState("");
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 560 : false);
-  const [targetSettings, setTargetSettings] = useState(null);
+  const [targetSettings, setTargetSettings] = useState(null); // { startDate, weeks } — null until loaded, then falls back to defaults
   const [editingTarget, setEditingTarget] = useState(false);
   const [targetDraft, setTargetDraft] = useState({ startDate: "", weeks: "12" });
   const [selectedHeatDate, setSelectedHeatDate] = useState(null);
@@ -323,6 +405,8 @@ function TrainingLog() {
 
   const todayStr = toISODate(new Date());
 
+  // Which exercises are "loadable" is detected from your actual data — any exercise that has
+  // ever had added weight logged against it gets load-aware charts + hypertrophy coaching.
   const loadableSet = useMemo(() => {
     const s = new Set();
     (sessions || []).forEach((sess) => {
@@ -331,6 +415,8 @@ function TrainingLog() {
     return s;
   }, [sessions]);
 
+  // Carries the last logged bodyweight forward for any session where it wasn't entered,
+  // so volume/PR math doesn't silently break just because bodyweight was left blank that day.
   const bwMap = useMemo(() => {
     const map = {};
     let last = null;
@@ -406,6 +492,9 @@ function TrainingLog() {
   }, [rangedSessions, filter, metric]);
 
   const maxSets = useMemo(() => ((filter === "All" || filter.startsWith("group:")) ? 0 : Math.max(0, ...rangedSessions.map((s) => (s.ex[filter] || []).length))), [rangedSessions, filter]);
+
+  // The muscle group tied to the currently selected exercise (or group filter), used to
+  // highlight the matching row in the "Volume by muscle group" panel.
   const activeGroup = filter === "All" ? null : filter.startsWith("group:") ? filter.slice(6) : MUSCLE_GROUP[filter] || null;
 
   const latest = sessions && sessions.length ? sessions[sessions.length - 1] : null;
@@ -413,7 +502,7 @@ function TrainingLog() {
 
   const deltaFor = (name) => {
     if (!latest || !first || !latest.ex[name] || !first.ex[name]) return null;
-    return total(latest.ex[name]) - total(first.first || first.ex[name]);
+    return total(latest.ex[name]) - total(first.ex[name]);
   };
 
   const sessionVolume = (s) => EXERCISES.reduce((sum, name) => {
@@ -451,7 +540,7 @@ function TrainingLog() {
       sessions.forEach((s) => {
         if (!s.ex[name]) return;
         const lpr = effLoadPerRep(s, name);
-        if (lpr == null) return;
+        if (lpr == null) return; // no bodyweight logged for this session — volume unknown, skip
         const setVols = s.ex[name].map((r) => r * lpr);
         const maxInSession = Math.max(...setVols);
         const maxIdx = setVols.indexOf(maxInSession);
@@ -532,17 +621,13 @@ function TrainingLog() {
     return weeks;
   }, [sessions]);
 
-  const heatSession = useMemo(() => {
-    if (!selectedHeatDate || !sessions) return null;
-    return sessions.find((s) => s.date === selectedHeatDate);
-  }, [selectedHeatDate, sessions]);
-
   if (!sessions) {
     return <div style={{ background: "#101214", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
   }
 
   const setColor = (i) => ["#F2C94C", "#E63946", "#56CCF2", "#6FCF97"][i % 4];
   const yLabel = metric === "reps" ? "reps" : "kg";
+
   const changeFilter = (f) => { setFilter(f); setChartFocus(null); };
 
   const toggleCompare = (id) => {
@@ -558,7 +643,7 @@ function TrainingLog() {
   return (
     <div style={{ background: "#101214", minHeight: "100vh", color: "#E8E6E1", fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght=500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
         .disp { font-family: 'Oswald', sans-serif; letter-spacing: 0.02em; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         .pill { transition: all 0.15s ease; }
@@ -745,7 +830,7 @@ function TrainingLog() {
                 {groupVolumeLatest.map((g) => {
                   const isActive = activeGroup === g.group;
                   return (
-                    <div key={g.group} style={{ borderRadius: 8, padding: "6px 8px", background: isActive ? GROUP_COLORS[g.group] + "22" : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
+                    <div key={g.group} style={{ borderRadius: 8, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
                         <span style={{ color: GROUP_COLORS[g.group], fontWeight: 600 }}>{g.group}</span>
                         <span className="mono" style={{ color: "#c9cdd3" }}>{g.kg.toLocaleString()} kg ({g.pct}%)</span>
@@ -757,9 +842,9 @@ function TrainingLog() {
               </div>
             </div>
 
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 6px", marginBottom: 18 }}>
+            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "16px 14px 6px", marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 6, paddingLeft: 6 }}>Bodyweight (kg)</div>
-              <ResponsiveContainer width="100%" height={isMobile ? 110 : 140} minWidth={100}>
+              <ResponsiveContainer width="100%" height={isMobile ? 110 : 140}>
                 <LineChart data={bodyweightData} margin={{ top: 5, right: 16, left: -10, bottom: 0 }}>
                   <CartesianGrid stroke="#22262b" vertical={false} />
                   <XAxis dataKey="date" stroke="#6b7078" fontSize={11} />
@@ -790,12 +875,12 @@ function TrainingLog() {
                 const groupExercises = EXERCISES.filter((n) => MUSCLE_GROUP[n] === g);
                 return (
                   <div key={g} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5 }}>
-                    <button className="pill" onClick={() => changeFilter(groupValue)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: `1px solid ${gColor}`, background: groupActive ? gColor + "2a" : "transparent", color: gColor, fontFamily: "'Inter', sans-serif", minWidth: 46, textAlign: "center" }}>{g}</button>
+                    <button className="pill" onClick={() => changeFilter(groupValue)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: `1px solid ${gColor}`, background: groupActive ? `${gColor}2a` : "transparent", color: gColor, fontFamily: "'Inter', sans-serif", minWidth: 46, textAlign: "center" }}>{g}</button>
                     {groupExercises.map((name) => {
                       const active = filter === name;
                       const color = COLORS[name];
                       return (
-                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #22262b", background: active ? color + "1a" : "#16181b", color: active ? color : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>{name}</button>
+                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #22262b", background: active ? `${color}1a` : "#16181b", color: active ? color : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>{name}</button>
                       );
                     })}
                   </div>
@@ -828,7 +913,7 @@ function TrainingLog() {
                   : `${filter} — ${yLabel} per set across sessions`}
               </div>
               {metric === "volume" && (<div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Volume = total reps × (bodyweight + any added external weight) for that session.</div>)}
-              <ResponsiveContainer width="100%" height={isMobile ? 230 : 280} minWidth={100}>
+              <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
                   <LineChart data={chartData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
                     <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
@@ -872,7 +957,7 @@ function TrainingLog() {
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>{filter} — added external load (kg), kept separate from reps</div>
                 <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Shown on its own so reps and load never blend into one misleading number — 12 reps @ +5kg isn't directly comparable to 10 reps @ +15kg.</div>
-                <ResponsiveContainer width="100%" height={isMobile ? 120 : 150} minWidth={100}>
+                <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
                   <LineChart data={loadStepData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
                     <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
                     <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
@@ -983,7 +1068,7 @@ function TrainingLog() {
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {EXERCISES.filter((n) => s.ex[n]).map((name) => (
-                        <span key={name} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: COLORS[name] + "14", color: COLORS[name], border: `1px solid ${COLORS[name]}33` }}>{name.split(" ")[0]}: {s.ex[name].join("-")}{(s.load || {})[name] ? ` (+${s.load[name]}kg)` : ""}</span>
+                        <span key={name} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${COLORS[name]}14`, color: COLORS[name], border: `1px solid ${COLORS[name]}33` }}>{name.split(" ")[0]}: {s.ex[name].join("-")}{(s.load || {})[name] ? ` (+${s.load[name]}kg)` : ""}</span>
                       ))}
                     </div>
                     {s.notes && <div style={{ fontSize: 11.5, color: "#6b7078", fontStyle: "italic", marginTop: 6 }}>"{s.notes}"</div>}
@@ -1014,37 +1099,8 @@ function TrainingLog() {
 
       {selectedHeatDate && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setSelectedHeatDate(null)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: "20px 24px", maxWidth: 460, width: "100%" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div className="disp" style={{ fontSize: 20, fontWeight: 700, color: "#F5F3EE" }}>{fmtDateFull(selectedHeatDate)}</div>
-              <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setSelectedHeatDate(null)} />
-            </div>
-            {heatSession ? (
-              <div>
-                <div style={{ display: "flex", gap: 10, fontSize: 12.5, color: "#9a9fa6", marginBottom: 14, borderBottom: "1px solid #22262b", paddingBottom: 8 }}>
-                  {heatSession.label && <span>Label: <strong style={{ color: "#F5F3EE" }}>{heatSession.label}</strong></span>}
-                  <span>Bodyweight: <strong style={{ color: "#F5F3EE" }}>{heatSession.bodyweight ?? bwMap[heatSession.id] ?? "—"} kg</strong></span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
-                  {EXERCISES.filter((n) => heatSession.ex[n]).map((name) => (
-                    <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1d2024", padding: "6px 10px", borderRadius: 8 }}>
-                      <span style={{ fontSize: 12.5, color: COLORS[name], fontWeight: 600 }}>{name}</span>
-                      <span className="mono" style={{ fontSize: 12, color: "#c9cdd3" }}>
-                        {heatSession.ex[name].join("-")}
-                        {(heatSession.load || {})[name] ? ` (+${heatSession.load[name]}kg)` : ""}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                {heatSession.notes && (
-                  <div style={{ fontSize: 12, color: "#9a9fa6", background: "#101214", padding: "8px 12px", borderRadius: 8, fontStyle: "italic" }}>
-                    "{heatSession.notes}"
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: "#6b7078", fontStyle: "italic" }}>No active session details found for this date.</div>
-            )}
+          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: "20px 28px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="disp" style={{ fontSize: 20, fontWeight: 700, color: "#F5F3EE" }}>{fmtDateFull(selectedHeatDate)}</div>
           </div>
         </div>
       )}
@@ -1093,4 +1149,8 @@ function TrainingLog() {
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<TrainingLog />);
+
+
 </script>
+</body>
+</html>
