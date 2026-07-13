@@ -239,33 +239,63 @@ function matchExercise(header, library) {
   return bestFuzzy;
 }
 
-// Parses a freeform pasted summary: exercise header lines followed by one "N rep x M sets ..." line
-// per set-group (M repeats of N reps), blank lines and "super set" markers are ignored separators.
+// Parses a freeform pasted summary. Supports two paste styles:
+//   1. Two-line: a header line ("Push-Ups"), then one "N rep(s) x M set(s) ..." line per
+//      set-group (M repeats of N reps). Blank lines and "super set" markers are ignored.
+//   2. Single-line shorthand: "Exercise : N x M" on one line (e.g. "biceps curl : 12 x 4") —
+//      the "rep(s)"/"set(s)" words are optional in both styles, so "12 x 4" alone also counts
+//      as a valid set line, not just "12 reps x 4 sets".
 // Headers are matched against the FULL exercise reference library (not a fixed 5-6 field
 // subset) plus any custom exercises the user has added — so any recognized exercise gets
 // filled in and auto-added to the tracked list, whether or not it's ever been logged before.
 // Only headers that truly don't match anything in the library land in `unmatched`.
 function parseFreeform(text, library) {
   const lines = text.split("\n").map((l) => l.trim());
-  const setLineRe = /^(\d+)\s*reps?\s*x\s*(\d+)\s*sets?\s*(.*)$/i;
+  const setLineRe = /^(\d+)\s*(?:reps?)?\s*x\s*(\d+)\s*(?:sets?)?\s*(.*)$/i;
   const supersetRe = /^super\s*set$/i;
   const results = {};
   const matchedEntries = [];
   const unmatched = [];
   let current = null; // matched library entry | null
+
+  const applySetMatch = (name, setMatch) => {
+    const reps = parseInt(setMatch[1], 10);
+    const setsCount = parseInt(setMatch[2], 10) || 1;
+    const rest = setMatch[3] || "";
+    const kgMatch = rest.match(/(\d+(?:\.\d+)?)\s*kg/i);
+    if (!results[name]) results[name] = { reps: [], load: 0 };
+    for (let i = 0; i < setsCount; i++) results[name].reps.push(reps);
+    if (kgMatch) results[name].load = parseFloat(kgMatch[1]);
+  };
+
   lines.forEach((raw) => {
     if (!raw || supersetRe.test(raw)) return;
+
+    // Single-line shorthand: split on the FIRST colon and see if the right side alone reads
+    // as a set line ("N x M ..."). If so, the left side is the exercise name for THIS line
+    // only — no need for a following line.
+    const colonIdx = raw.indexOf(":");
+    if (colonIdx !== -1) {
+      const left = raw.slice(0, colonIdx).trim();
+      const right = raw.slice(colonIdx + 1).trim();
+      const rightSetMatch = right.match(setLineRe);
+      if (left && rightSetMatch) {
+        const entry = matchExercise(left, library);
+        if (entry) {
+          current = entry;
+          if (!matchedEntries.some((r) => r.name === entry.name)) matchedEntries.push(entry);
+          applySetMatch(entry.name, rightSetMatch);
+        } else {
+          current = null;
+          unmatched.push(left);
+        }
+        return;
+      }
+    }
+
     const setMatch = raw.match(setLineRe);
     if (setMatch) {
-      if (current) {
-        const reps = parseInt(setMatch[1], 10);
-        const setsCount = parseInt(setMatch[2], 10) || 1;
-        const rest = setMatch[3] || "";
-        const kgMatch = rest.match(/(\d+(?:\.\d+)?)\s*kg/i);
-        if (!results[current.name]) results[current.name] = { reps: [], load: 0 };
-        for (let i = 0; i < setsCount; i++) results[current.name].reps.push(reps);
-        if (kgMatch) results[current.name].load = parseFloat(kgMatch[1]);
-      }
+      if (current) applySetMatch(current.name, setMatch);
       return;
     }
     const header = raw.replace(/:\s*$/, "").trim();
@@ -459,6 +489,26 @@ function TrainingLog() {
     customExercises.forEach((e) => { map[e.name] = e.ratio; });
     return map;
   }, [customExercises]);
+
+  // Exercises to actually draw on the charts/summary tiles. Deliberately NOT the same as
+  // `trackedExercises` (which only controls which fields show in the "new session" form) —
+  // that list lives in its own storage key and can fall out of sync with what's actually in
+  // your saved sessions (e.g. after a paste-parse on a device where the tracked list didn't
+  // load, or an import). Union the two and order library exercises first so charts always
+  // reflect what you've actually logged, even if the tracked list is empty or stale.
+  const chartExercises = useMemo(() => {
+    const loggedNames = new Set();
+    (sessions || []).forEach((s) => Object.keys(s.ex || {}).forEach((n) => loggedNames.add(n)));
+    const all = new Set([...trackedExercises, ...loggedNames]);
+    const libOrder = fullLibrary.map((e) => e.name);
+    return Array.from(all).sort((a, b) => {
+      const ia = libOrder.indexOf(a), ib = libOrder.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+  }, [sessions, trackedExercises, fullLibrary]);
 
   const doDeleteAllLogs = async () => {
     await persist([]);
@@ -671,7 +721,7 @@ function TrainingLog() {
   const chartData = useMemo(() => rangedSessions.map((s) => {
     const row = { date: fmtDate(s.date), fullDate: s.date };
     let totalVol = 0, anyVol = false;
-    trackedExercises.forEach((name) => {
+    chartExercises.forEach((name) => {
       if (!s.ex[name]) { row[name] = null; return; }
       const reps = total(s.ex[name]);
       if (metric === "reps") { row[name] = reps; return; }
@@ -682,7 +732,7 @@ function TrainingLog() {
     });
     if (metric === "volume") row.Total = anyVol ? totalVol : null;
     return row;
-  }), [rangedSessions, metric, trackedExercises]);
+  }), [rangedSessions, metric, chartExercises]);
 
   const perSetData = useMemo(() => {
     if (filter === "All" || filter.startsWith("group:")) return [];
@@ -706,10 +756,10 @@ function TrainingLog() {
     if (!filter.startsWith("group:")) return [];
     const group = filter.slice(6);
     return rangedSessions
-      .filter((s) => trackedExercises.some((name) => muscleGroupMap[name] === group && s.ex[name]))
+      .filter((s) => chartExercises.some((name) => muscleGroupMap[name] === group && s.ex[name]))
       .map((s) => {
         let val = 0;
-        trackedExercises.forEach((name) => {
+        chartExercises.forEach((name) => {
           if (muscleGroupMap[name] !== group || !s.ex[name]) return;
           const reps = total(s.ex[name]);
           if (metric === "reps") { val += reps; return; }
@@ -718,7 +768,7 @@ function TrainingLog() {
         });
         return { date: fmtDate(s.date), value: Math.round(val) };
       });
-  }, [rangedSessions, filter, metric, trackedExercises, muscleGroupMap]);
+  }, [rangedSessions, filter, metric, chartExercises, muscleGroupMap]);
 
   const maxSets = useMemo(() => ((filter === "All" || filter.startsWith("group:")) ? 0 : Math.max(0, ...rangedSessions.map((s) => (s.ex[filter] || []).length))), [rangedSessions, filter]);
 
@@ -1156,7 +1206,7 @@ function TrainingLog() {
                 const groupValue = "group:" + g;
                 const groupActive = filter === groupValue || activeGroup === g;
                 const gColor = GROUP_COLORS[g];
-                const groupExercises = trackedExercises.filter((n) => muscleGroupMap[n] === g);
+                const groupExercises = chartExercises.filter((n) => muscleGroupMap[n] === g);
                 return (
                   <div key={g} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5 }}>
                     <button className="pill" onClick={() => changeFilter(groupValue)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: `1px solid ${gColor}`, background: groupActive ? `${gColor}2a` : "transparent", color: gColor, fontFamily: "'Inter', sans-serif", minWidth: 46, textAlign: "center" }}>{g}</button>
@@ -1174,7 +1224,7 @@ function TrainingLog() {
 
             {filter === "All" && metric === "reps" && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 16 }}>
-                {trackedExercises.map((name) => {
+                {chartExercises.map((name) => {
                   const d = deltaFor(name);
                   const latestTotal = latest && latest.ex[name] ? total(latest.ex[name]) : null;
                   return (
@@ -1193,7 +1243,7 @@ function TrainingLog() {
                 {filter === "All"
                   ? `Total ${yLabel} per session, by exercise`
                   : filter.startsWith("group:")
-                  ? `${filter.slice(6)} — total ${yLabel} per session (${trackedExercises.filter((n) => muscleGroupMap[n] === filter.slice(6)).join(" + ")})`
+                  ? `${filter.slice(6)} — total ${yLabel} per session (${chartExercises.filter((n) => muscleGroupMap[n] === filter.slice(6)).join(" + ")})`
                   : `${filter} — ${yLabel} per set across sessions`}
               </div>
               {metric === "volume" && (<div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Volume = total reps × (bodyweight × exercise ratio + any added external weight) for that session. Ratios reflect how much of your bodyweight each exercise actually moves — see the exercise reference.</div>)}
@@ -1203,7 +1253,7 @@ function TrainingLog() {
                     <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
                     <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
-                    {trackedExercises.map((name) => (
+                    {chartExercises.map((name) => (
                       <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={chartFocus === name ? 3 : 2.2} strokeOpacity={chartFocus && chartFocus !== name ? 0.18 : 1} dot={{ r: 3, fillOpacity: chartFocus && chartFocus !== name ? 0.18 : 1 }} connectNulls />
                     ))}
                     {metric === "volume" && (
