@@ -134,6 +134,7 @@ const RETIRED = [];
 // (machine/barbell) with no bodyweight component, so volume there is just the load you enter.
 const EXERCISE_LIBRARY = [
   // -- Pull --
+  { name: "Pull-Ups", group: "Pull", ratio: 1.00, aliases: ["pull ups", "pull-ups", "pullups"] },
   { name: "Wide Grip Pull-Ups", group: "Pull", ratio: 1.00, aliases: ["wide grip pull ups", "wide grip pull-ups", "wide grip pullups"] },
   { name: "Chin-Ups", group: "Pull", ratio: 1.00, aliases: ["chin ups pull up", "chin ups", "chin-ups", "chinups"] },
   { name: "Close Grip Pull-Ups", group: "Pull", ratio: 1.00, aliases: ["close grip pull ups", "close grip pullups"] },
@@ -158,6 +159,7 @@ const EXERCISE_LIBRARY = [
   { name: "Bench Press", group: "Push", ratio: 0, aliases: ["bench press"] },
   { name: "Overhead Press", group: "Push", ratio: 0, aliases: ["overhead press", "shoulder press"] },
   // -- Legs --
+  { name: "Squats", group: "Legs", ratio: 1.00, aliases: ["squats", "squat"] },
   { name: "Goblet Squat", group: "Legs", ratio: 1.00, aliases: ["goblet squat", "gobelet squat", "goblet squats"] },
   { name: "Bulgarian Split Squat", group: "Legs", ratio: 0.90, aliases: ["bulgarian split squat", "split squat", "bss"] },
   { name: "Bodyweight Squat", group: "Legs", ratio: 1.00, aliases: ["bodyweight squat", "air squat"] },
@@ -177,6 +179,12 @@ const EXERCISE_LIBRARY = [
   { name: "V-Ups", group: "Core", ratio: 0.50, aliases: ["v ups", "v-ups", "vups"] },
   { name: "Ab Wheel Rollout", group: "Core", ratio: 0.55, aliases: ["ab wheel rollout", "ab rollout", "ab wheel"] },
   { name: "Russian Twists", group: "Core", ratio: 0.30, aliases: ["russian twists", "russian twist"] },
+  { name: "Plank", group: "Core", ratio: 0.35, aliases: ["plank", "planks", "forearm plank"] },
+  { name: "Burpees", group: "Core", ratio: 0.90, aliases: ["burpees", "burpee"] },
+  // -- Generic catch-alls (kept distinct from the specific grip/stance variants above so a
+  // plain paste like "Rows" or "Bicep Curls" — without a qualifier — still matches something) --
+  { name: "Rows", group: "Pull", ratio: 0, aliases: ["rows", "row"] },
+  { name: "Bicep Curls", group: "Pull", ratio: 0, aliases: ["bicep curls", "bicep curl", "curls"] },
 ];
 
 // Bodyweight-ratio lookup used by all volume math: fraction of bodyweight actually lifted per
