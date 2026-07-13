@@ -157,6 +157,7 @@ const EXERCISE_LIBRARY = [
   { name: "Ring Dips", group: "Push", ratio: 1.00, aliases: ["ring dips"] },
   { name: "Bench Dips", group: "Push", ratio: 0.60, aliases: ["bench dips"] },
   { name: "Bench Press", group: "Push", ratio: 0, aliases: ["bench press"] },
+  { name: "Smith Machine Bench Press", group: "Push", ratio: 0, aliases: ["smith machine bench press", "smith bench press", "smith bench", "smith machine bench"] },
   { name: "Overhead Press", group: "Push", ratio: 0, aliases: ["overhead press", "shoulder press"] },
   // -- Legs --
   { name: "Squats", group: "Legs", ratio: 1.00, aliases: ["squats", "squat"] },
@@ -169,6 +170,7 @@ const EXERCISE_LIBRARY = [
   { name: "Nordic Curl", group: "Legs", ratio: 0.75, aliases: ["nordic curl", "nordic curls"] },
   { name: "Calf Raises", group: "Legs", ratio: 1.00, aliases: ["calf raises", "calf raise"] },
   { name: "Barbell Back Squat", group: "Legs", ratio: 0, aliases: ["barbell back squat", "back squat", "barbell squat"] },
+  { name: "Smith Machine Squats", group: "Legs", ratio: 0, aliases: ["smith machine squats", "smith machine squat", "smith squat", "smith squats"] },
   { name: "Leg Press", group: "Legs", ratio: 0, aliases: ["leg press"] },
   // -- Core --
   { name: "Hanging Knee Raises", group: "Core", ratio: 0.45, aliases: ["hanging knee raises", "hanging knee raise", "knee raises"] },
@@ -252,6 +254,10 @@ function matchExercise(header, library) {
 function parseFreeform(text, library) {
   const lines = text.split("\n").map((l) => l.trim());
   const setLineRe = /^(\d+)\s*(?:reps?)?\s*x\s*(\d+)\s*(?:sets?)?\s*(.*)$/i;
+  // Same shape as setLineRe but not anchored to the start of the line, and requires a name
+  // (non-empty, non-numeric lead-in) before the numbers — used to pull "N x M" out of a line
+  // that has no colon at all, e.g. "Squats 12 x 3 10kg".
+  const embeddedSetRe = /^(.+?)\s+(\d+)\s*(?:reps?)?\s*x\s*(\d+)\s*(?:sets?)?\s*(.*)$/i;
   const supersetRe = /^super\s*set$/i;
   const results = {};
   const matchedEntries = [];
@@ -268,6 +274,19 @@ function parseFreeform(text, library) {
     if (kgMatch) results[name].load = parseFloat(kgMatch[1]);
   };
 
+  const matchAndApply = (name, setMatch) => {
+    const entry = matchExercise(name, library);
+    if (entry) {
+      current = entry;
+      if (!matchedEntries.some((r) => r.name === entry.name)) matchedEntries.push(entry);
+      applySetMatch(entry.name, setMatch);
+      return true;
+    }
+    current = null;
+    if (name) unmatched.push(name);
+    return false;
+  };
+
   lines.forEach((raw) => {
     if (!raw || supersetRe.test(raw)) return;
 
@@ -279,25 +298,25 @@ function parseFreeform(text, library) {
       const left = raw.slice(0, colonIdx).trim();
       const right = raw.slice(colonIdx + 1).trim();
       const rightSetMatch = right.match(setLineRe);
-      if (left && rightSetMatch) {
-        const entry = matchExercise(left, library);
-        if (entry) {
-          current = entry;
-          if (!matchedEntries.some((r) => r.name === entry.name)) matchedEntries.push(entry);
-          applySetMatch(entry.name, rightSetMatch);
-        } else {
-          current = null;
-          unmatched.push(left);
-        }
-        return;
-      }
+      if (left && rightSetMatch) { matchAndApply(left, rightSetMatch); return; }
     }
 
+    // Pure set line for a `current` set by a previous header line (the original two-line style).
     const setMatch = raw.match(setLineRe);
     if (setMatch) {
       if (current) applySetMatch(current.name, setMatch);
       return;
     }
+
+    // No colon, but the line still ends in "N x M ..." after a name with no separator at
+    // all, e.g. "Squats 12 x 3 10kg" — pull the name out and match+fill in one step.
+    const embeddedMatch = raw.match(embeddedSetRe);
+    if (embeddedMatch) {
+      const name = embeddedMatch[1].trim();
+      matchAndApply(name, [raw, embeddedMatch[2], embeddedMatch[3], embeddedMatch[4]]);
+      return;
+    }
+
     const header = raw.replace(/:\s*$/, "").trim();
     const entry = matchExercise(header, library);
     if (entry) {
