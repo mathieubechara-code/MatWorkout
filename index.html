@@ -14,17 +14,20 @@
 <!-- React -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<!-- Recharts (charting library) and its peer deps -->
-<script crossorigin src="https://unpkg.com/prop-types/prop-types.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-is@18/umd/react-is.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/recharts@2/umd/Recharts.js"></script>
+<!-- Recharts (charting library) and its peer dep -->
+<script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.15.4/umd/Recharts.js"></script>
 <!-- Babel standalone: lets the browser compile the JSX below on the fly (no build step needed) -->
-<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
 
-<script type="text/babel" data-presets="react" data-type="module">
+<!-- App source, kept as inert text so the browser never tries to parse it as JS directly.
+     The bootstrap script below transforms it with Babel (forcing the "classic" JSX runtime,
+     since the browser has no module loader for the "automatic" runtime's imports) and
+     evaluates the result. -->
+<script type="text/plain" id="app-source">
 const { useState, useEffect, useMemo, useRef } = React;
 const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } = Recharts;
 
@@ -1151,6 +1154,24 @@ const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<TrainingLog />);
 
 
+</script>
+
+<script>
+(function () {
+  var source = document.getElementById("app-source").textContent;
+  var result = Babel.transform(source, {
+    presets: [["react", { runtime: "classic" }]],
+    filename: "app.jsx",
+  }).code;
+  try {
+    (0, eval)(result);
+  } catch (err) {
+    document.getElementById("root").innerHTML =
+      '<div style="color:#E63946;background:#101214;min-height:100vh;padding:24px;font-family:monospace;white-space:pre-wrap;">Failed to start the app:\n' +
+      (err && err.stack ? err.stack : err) + '</div>';
+    console.error(err);
+  }
+})();
 </script>
 </body>
 </html>
