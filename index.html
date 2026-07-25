@@ -432,6 +432,9 @@ function TrainingLog() {
   const [selectedHeatDate, setSelectedHeatDate] = useState(null);
   const [chartFocus, setChartFocus] = useState(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [prSelected, setPrSelected] = useState(null); // null = no manual pick yet -> auto (top most-trained). Array = user's explicit picks.
+  const [showPrSettings, setShowPrSettings] = useState(false);
+  const [prDraft, setPrDraft] = useState([]); // working selection while the picker modal is open
   // Fluid heatmap: the square size is computed from the container's actual measured width
   // (see the effect near HEATMAP_WEEKS below) rather than a fixed pixel value, so 24 weeks
   // always fit exactly without needing horizontal scroll/swipe on narrow phone screens.
@@ -441,6 +444,7 @@ function TrainingLog() {
   const TRACKED_KEY = "tracked-exercises-v1";
   const CUSTOM_LIB_KEY = "custom-exercises-v1";
   const OWNER_KEY = "owner-name-v1";
+  const PR_PREFS_KEY = "pr-selected-exercises-v1";
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -516,6 +520,39 @@ function TrainingLog() {
     })();
   }, []);
 
+  // Manually-picked exercises for the PR tile. Left as `null` (auto/top-most-trained mode)
+  // until the user explicitly saves a selection via the picker — an empty saved array is a
+  // valid deliberate choice ("show none"), so it's distinguished from "never configured".
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(PR_PREFS_KEY, false);
+        setPrSelected(res && res.value ? JSON.parse(res.value) : null);
+      } catch (e) {
+        setPrSelected(null);
+      }
+    })();
+  }, []);
+
+  const savePrSelection = async (names) => {
+    setPrSelected(names);
+    try { await window.storage.set(PR_PREFS_KEY, JSON.stringify(names), false); } catch (_) {}
+  };
+
+  const clearPrSelection = async () => {
+    setPrSelected(null);
+    try { await window.storage.delete(PR_PREFS_KEY, false); } catch (_) {}
+  };
+
+  const openPrSettings = () => {
+    setPrDraft(prSelected != null ? prSelected : topPrExercises);
+    setShowPrSettings(true);
+  };
+
+  const togglePrDraft = (name) => {
+    setPrDraft((cur) => (cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]));
+  };
+
   const persistTracked = async (next) => {
     setTrackedExercises(next);
     try { await window.storage.set(TRACKED_KEY, JSON.stringify(next), false); } catch (_) {}
@@ -570,17 +607,22 @@ function TrainingLog() {
     });
   }, [sessions, fullLibrary]);
 
-  // Keeps the PR tile short and coherent: ranks currently-logged exercises by how many
-  // sessions they actually appear in (most-trained first) and shows only the top handful,
-  // rather than every exercise you've ever tried — which just grows forever otherwise.
-  // Ties fall back to the same reference-library order `chartExercises` already uses.
+  // Keeps the PR tile short and coherent. By default, ranks currently-logged exercises by
+  // how many sessions they actually appear in (most-trained first) and shows only the top
+  // handful — but if the user has saved an explicit pick via the settings gear, that list
+  // wins instead (filtered/ordered against `chartExercises` so a since-deleted exercise
+  // doesn't linger, and order stays consistent with the rest of the app).
   const PR_LIMIT = 6;
   const prExerciseOrder = useMemo(() => {
     const sessionCount = {};
     (sessions || []).forEach((s) => Object.keys(s.ex || {}).forEach((n) => { if (s.ex[n] && s.ex[n].length) sessionCount[n] = (sessionCount[n] || 0) + 1; }));
     return [...chartExercises].sort((a, b) => (sessionCount[b] || 0) - (sessionCount[a] || 0));
   }, [sessions, chartExercises]);
-  const topPrExercises = useMemo(() => prExerciseOrder.slice(0, PR_LIMIT), [prExerciseOrder]);
+  const isPrCustom = prSelected != null;
+  const topPrExercises = useMemo(() => {
+    if (isPrCustom) return chartExercises.filter((n) => prSelected.includes(n));
+    return prExerciseOrder.slice(0, PR_LIMIT);
+  }, [isPrCustom, prSelected, chartExercises, prExerciseOrder]);
 
   const doDeleteAllLogs = async () => {
     await persist([]);
@@ -1301,11 +1343,17 @@ function TrainingLog() {
               </div>
 
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                  <Award size={14} color="#F2C94C" />
-                  <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (best session volume, all-time)</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Award size={14} color="#F2C94C" />
+                    <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (best session volume, all-time)</span>
+                  </div>
+                  <Settings2 size={15} onClick={openPrSettings} title="Choose which exercises show here" style={{ cursor: "pointer", color: "#5a5f66", flexShrink: 0 }} />
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
+                  {topPrExercises.length === 0 && (
+                    <div style={{ fontSize: 11.5, color: "#6b7078", fontStyle: "italic" }}>No exercises picked — tap ⚙ to choose which ones show here.</div>
+                  )}
                   {topPrExercises.map((name) => {
                     const pr = prMap[name];
                     if (!pr || pr.bestVol < 0) return null;
@@ -1326,7 +1374,9 @@ function TrainingLog() {
                 </div>
                 <div style={{ fontSize: 10, color: "#4a4f56", marginTop: 8 }} className="mono">
                   volume = total reps × (bodyweight × exercise ratio + added load), summed across the whole session
-                  {prExerciseOrder.length > topPrExercises.length ? ` · top ${PR_LIMIT} most-trained shown (${prExerciseOrder.length - topPrExercises.length} more in History)` : ""}
+                  {isPrCustom
+                    ? " · custom picks (tap ⚙ to edit)"
+                    : (prExerciseOrder.length > topPrExercises.length ? ` · top ${PR_LIMIT} most-trained shown (${prExerciseOrder.length - topPrExercises.length} more in History) · tap ⚙ to pick your own` : "")}
                 </div>
               </div>
 
@@ -1880,6 +1930,59 @@ function TrainingLog() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPrSettings && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowPrSettings(false)}>
+          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 480, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Choose PR exercises</span>
+              <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowPrSettings(false)} />
+            </div>
+            <div style={{ fontSize: 11.5, color: "#6b7078", marginBottom: 14, lineHeight: 1.5 }}>
+              Pick which exercises show in the PR tile on the dashboard. Only exercises you've actually logged are listed here.
+            </div>
+            {chartExercises.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#6b7078", fontStyle: "italic" }}>Nothing logged yet — log a session first.</div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                {chartExercises.map((name) => {
+                  const on = prDraft.includes(name);
+                  return (
+                    <button
+                      key={name}
+                      onClick={() => togglePrDraft(name)}
+                      className="mono"
+                      style={{
+                        fontSize: 12, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "6px 12px",
+                        color: on ? "#101214" : (colorsMap[name] || "#9a9fa6"),
+                        background: on ? (colorsMap[name] || "#F2C94C") : "transparent",
+                        border: `1px solid ${colorsMap[name] || "#5a5f66"}${on ? "" : "66"}`,
+                      }}
+                    >
+                      {on ? "✓ " : ""}{name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={() => { clearPrSelection(); setShowPrSettings(false); }}
+                className="mono"
+                style={{ background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}
+              >
+                Reset to auto (top {PR_LIMIT})
+              </button>
+              <button
+                onClick={() => { savePrSelection(prDraft); setShowPrSettings(false); }}
+                style={{ background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "8px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>
