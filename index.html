@@ -402,6 +402,20 @@ function TrainingLog() {
   const [ownerName, setOwnerName] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  // Picked once per page load (not re-rolled on every re-render) so it doesn't flicker
+  // through different messages while `sessions`/`ownerName` are still loading async.
+  const [loadingMsg] = useState(() => {
+    const name = ownerName || "there";
+    const msgs = [
+      `How's the progress going, ${name}?`,
+      `Warming up the bar for ${name}…`,
+      `Loading ${name}'s gains…`,
+      `One sec, ${name} — pulling up your PRs…`,
+      `Progress report incoming for ${name}…`,
+      `Chalking up... loading your log…`,
+    ];
+    return msgs[Math.floor(Math.random() * msgs.length)];
+  });
   const [showAddExercise, setShowAddExercise] = useState(false);
   const [addExDraft, setAddExDraft] = useState({ name: "", group: "Pull", ratio: "1.0", target: "" });
   const [draft, setDraft] = useState(() => emptyDraft([]));
@@ -556,6 +570,18 @@ function TrainingLog() {
     });
   }, [sessions, fullLibrary]);
 
+  // Keeps the PR tile short and coherent: ranks currently-logged exercises by how many
+  // sessions they actually appear in (most-trained first) and shows only the top handful,
+  // rather than every exercise you've ever tried — which just grows forever otherwise.
+  // Ties fall back to the same reference-library order `chartExercises` already uses.
+  const PR_LIMIT = 6;
+  const prExerciseOrder = useMemo(() => {
+    const sessionCount = {};
+    (sessions || []).forEach((s) => Object.keys(s.ex || {}).forEach((n) => { if (s.ex[n] && s.ex[n].length) sessionCount[n] = (sessionCount[n] || 0) + 1; }));
+    return [...chartExercises].sort((a, b) => (sessionCount[b] || 0) - (sessionCount[a] || 0));
+  }, [sessions, chartExercises]);
+  const topPrExercises = useMemo(() => prExerciseOrder.slice(0, PR_LIMIT), [prExerciseOrder]);
+
   const doDeleteAllLogs = async () => {
     await persist([]);
     setSelectedCompare([]);
@@ -604,6 +630,14 @@ function TrainingLog() {
       delete nextEx[name]; delete nextLoad[name];
       return { ...d, ex: nextEx, load: nextLoad };
     });
+  };
+
+  // While editing an existing session, the ✕ clears that one exercise from THIS session only
+  // (it stays in your tracked list for every other session) — untracking globally would be
+  // the wrong action mid-edit. Clearing the fields means it's simply omitted on save (see
+  // `saveSession`, which skips any exercise with an empty reps string).
+  const removeFromSessionDraft = (name) => {
+    setDraft((d) => ({ ...d, ex: { ...d.ex, [name]: "" }, load: { ...d.load, [name]: "" } }));
   };
 
   const persist = async (next) => {
@@ -839,15 +873,28 @@ function TrainingLog() {
     });
   }, [rangedSessions, filter, metric]);
 
-  const loadStepData = useMemo(() => {
+  // Weight can vary per set within a session (e.g. drop sets), so instead of collapsing that
+  // down to a single "heaviest set" number (which hid real sets and produced confusing
+  // averages elsewhere), this shows one line per set's actual added weight, plus a "Total"
+  // line = the real added-weight training volume (Σ reps × added kg for that set) — a
+  // meaningful sum, unlike just adding the raw kilograms of different sets together.
+  const loadPerSetData = useMemo(() => {
     if (!loadableSet.has(filter)) return [];
-    // Weight can now vary per set within a session (e.g. drop sets) — the step chart shows
-    // the top (heaviest) set of the session as the representative "working weight".
-    return rangedSessions.filter((s) => s.ex[filter]).map((s) => {
+    return rangedSessions.filter((s) => s.ex[filter] && ((s.load || {})[filter] || []).some((w) => w > 0)).map((s) => {
+      const row = { date: fmtDate(s.date) };
       const weights = (s.load || {})[filter] || [];
-      return { date: fmtDate(s.date), "Added load (kg)": weights.length ? Math.max(...weights) : 0 };
+      const reps = s.ex[filter] || [];
+      let totalLoadVol = 0, any = false;
+      weights.forEach((w, i) => {
+        row["Set " + (i + 1)] = w || 0;
+        if (w > 0) { totalLoadVol += w * (reps[i] || 0); any = true; }
+      });
+      row.Total = any ? Math.round(totalLoadVol) : null;
+      return row;
     });
   }, [rangedSessions, filter, loadableSet]);
+
+  const maxLoadSets = useMemo(() => (!loadableSet.has(filter) ? 0 : Math.max(0, ...rangedSessions.map((s) => ((s.load || {})[filter] || []).length))), [rangedSessions, filter, loadableSet]);
 
   const bodyweightData = useMemo(() => rangedSessions.filter((s) => s.bodyweight != null).map((s) => ({ date: fmtDate(s.date), kg: s.bodyweight })), [rangedSessions]);
 
@@ -947,17 +994,22 @@ function TrainingLog() {
     return { date: "Wk of " + fmtDate(weekStart), kg: vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null };
   }), [weeklySessionGroups]);
 
-  // Most recent added-load entry within the week — load changes are step-like (you bump it
-  // and hold there), so "latest in the week" is more representative than an average.
-  const weeklyLoadStepData = useMemo(() => {
+  // Per-set breakdown doesn't aggregate cleanly across a week (different sessions can have
+  // different set counts/weights), so the weekly view collapses to a single Total line: the
+  // week's total added-weight training volume (Σ reps × added kg, summed across every set of
+  // every session that week) — same "Total" definition as the day view, just summed further.
+  const weeklyLoadTotalData = useMemo(() => {
     if (!loadableSet.has(filter)) return [];
     return weeklySessionGroups
       .filter(({ sessions: weekSessions }) => weekSessions.some((s) => s.ex[filter]))
       .map(({ weekStart, sessions: weekSessions }) => {
-        const withLoad = weekSessions.filter((s) => s.ex[filter]);
-        const lastWeights = withLoad.length ? ((withLoad[withLoad.length - 1].load || {})[filter] || []) : [];
-        const lastVal = lastWeights.length ? Math.max(...lastWeights) : 0;
-        return { date: "Wk of " + fmtDate(weekStart), "Added load (kg)": lastVal };
+        let totalLoadVol = 0, any = false;
+        weekSessions.forEach((s) => {
+          const weights = (s.load || {})[filter] || [];
+          const reps = s.ex[filter] || [];
+          weights.forEach((w, i) => { if (w > 0) { totalLoadVol += w * (reps[i] || 0); any = true; } });
+        });
+        return { date: "Wk of " + fmtDate(weekStart), Total: any ? Math.round(totalLoadVol) : null };
       });
   }, [weeklySessionGroups, filter, loadableSet]);
 
@@ -965,7 +1017,7 @@ function TrainingLog() {
   const chartDataView = timeView === "week" ? weeklyChartData : chartData;
   const groupChartDataView = timeView === "week" ? weeklyGroupChartData : groupChartData;
   const bodyweightDataView = timeView === "week" ? weeklyBodyweightData : bodyweightData;
-  const loadStepDataView = timeView === "week" ? weeklyLoadStepData : loadStepData;
+  const loadChartDataView = timeView === "week" ? weeklyLoadTotalData : loadPerSetData;
 
   const maxSets = useMemo(() => ((filter === "All" || filter.startsWith("group:") || timeView === "week") ? 0 : Math.max(0, ...rangedSessions.map((s) => (s.ex[filter] || []).length))), [rangedSessions, filter, timeView]);
 
@@ -1140,7 +1192,7 @@ function TrainingLog() {
   }, []);
 
   if (!sessions) {
-    return <div style={{ background: "#101214", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
+    return <div style={{ background: "#101214", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace", padding: 20, textAlign: "center" }}>{loadingMsg}</div>;
   }
 
   const setColor = (i) => ["#F2C94C", "#E63946", "#56CCF2", "#6FCF97"][i % 4];
@@ -1254,7 +1306,7 @@ function TrainingLog() {
                   <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (best session volume, all-time)</span>
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
-                  {chartExercises.map((name) => {
+                  {topPrExercises.map((name) => {
                     const pr = prMap[name];
                     if (!pr || pr.bestVol < 0) return null;
                     const age = prAgeLabel(pr.daysAgo);
@@ -1272,7 +1324,10 @@ function TrainingLog() {
                     );
                   })}
                 </div>
-                <div style={{ fontSize: 10, color: "#4a4f56", marginTop: 8 }} className="mono">volume = total reps × (bodyweight × exercise ratio + added load), summed across the whole session</div>
+                <div style={{ fontSize: 10, color: "#4a4f56", marginTop: 8 }} className="mono">
+                  volume = total reps × (bodyweight × exercise ratio + added load), summed across the whole session
+                  {prExerciseOrder.length > topPrExercises.length ? ` · top ${PR_LIMIT} most-trained shown (${prExerciseOrder.length - topPrExercises.length} more in History)` : ""}
+                </div>
               </div>
 
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
@@ -1515,13 +1570,22 @@ function TrainingLog() {
 
             {loadableSet.has(filter) && (
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>{filter} — added external load (kg), kept separate from reps</div>
-                <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Shown on its own so reps and load never blend into one misleading number — 12 reps @ +5kg isn't directly comparable to 10 reps @ +15kg.</div>
-                <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
-                  <LineChart data={loadStepDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>{filter} — added external weight (kg), kept separate from reps</div>
+                <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>
+                  {timeView === "week"
+                    ? "Weekly total added-weight volume (Σ reps × added kg across every set that week) — sets vary too much week to week to show individually here."
+                    : "Each thin line is one set's added weight (kg). The bold Total line is added-weight volume for the session (Σ reps × added kg) — not a sum of the kilograms themselves, which wouldn't mean anything on its own."}
+                </div>
+                <ResponsiveContainer width="100%" height={isMobile ? 160 : 190}>
+                  <LineChart data={loadChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
                     <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
                     <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
-                    <Line type="stepAfter" dataKey="Added load (kg)" stroke="#E63946" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
+                    {timeView !== "week" && <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />}
+                    {timeView !== "week" && Array.from({ length: maxLoadSets }).map((_, i) => {
+                      const key = "Set " + (i + 1);
+                      return <Line key={i} type="monotone" dataKey={key} stroke={setColor(i)} strokeWidth={1.6} strokeOpacity={0.85} dot={{ r: 2.5 }} connectNulls />;
+                    })}
+                    <Line type="monotone" dataKey="Total" stroke="#E63946" strokeWidth={timeView === "week" ? 2.2 : 2.6} dot={{ r: 3 }} connectNulls />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1593,14 +1657,14 @@ function TrainingLog() {
                   )}
                 </div>
 
-                <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: "160px 1fr 90px", gap: 8, marginBottom: 4, fontSize: 10, color: "#5a5f66", textTransform: "uppercase", letterSpacing: "0.04em" }}><span></span><span>Reps per set</span><span>Kg per set</span></div>
+                <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: "160px 1fr 90px 18px", gap: 8, marginBottom: 4, fontSize: 10, color: "#5a5f66", textTransform: "uppercase", letterSpacing: "0.04em" }}><span></span><span>Reps per set</span><span>Kg per set</span><span></span></div>
                 <div style={{ display: "grid", gap: isMobile ? 14 : 10, marginBottom: 14 }}>
                   {(editingId ? Object.keys(draft.ex) : trackedExercises.filter((name) => !RETIRED.includes(name))).map((name) => (
                     isMobile ? (
                       <div key={name} style={{ display: "grid", gap: 6, borderBottom: "1px solid #1d2024", paddingBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span style={{ fontSize: 13, color: colorsMap[name] || "#c9cdd3", fontWeight: 600 }}>{name}</span>
-                          {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#5a5f66", flexShrink: 0 }} />}
+                          <X size={14} onClick={() => (editingId ? removeFromSessionDraft(name) : untrackExercise(name))} title={editingId ? "Remove from this session" : "Remove from tracked exercises"} style={{ cursor: "pointer", color: "#5a5f66", flexShrink: 0 }} />
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8 }}>
                           <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
@@ -1608,11 +1672,11 @@ function TrainingLog() {
                         </div>
                       </div>
                     ) : (
-                      <div key={name} style={{ display: "grid", gridTemplateColumns: editingId ? "160px 1fr 90px" : "160px 1fr 90px 18px", gap: 10, alignItems: "center" }}>
+                      <div key={name} style={{ display: "grid", gridTemplateColumns: "160px 1fr 90px 18px", gap: 10, alignItems: "center" }}>
                         <span style={{ fontSize: 13, color: colorsMap[name] || "#c9cdd3", fontWeight: 600 }}>{name}</span>
                         <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
                         <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
-                        {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#5a5f66" }} />}
+                        <X size={14} onClick={() => (editingId ? removeFromSessionDraft(name) : untrackExercise(name))} title={editingId ? "Remove from this session" : "Remove from tracked exercises"} style={{ cursor: "pointer", color: "#5a5f66" }} />
                       </div>
                     )
                   ))}
