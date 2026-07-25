@@ -269,12 +269,12 @@ function parseFreeform(text, library) {
     const setsCount = parseInt(setMatch[2], 10) || 1;
     const rest = setMatch[3] || "";
     const kgMatch = rest.match(/(\d+(?:\.\d+)?)\s*kg/i);
-    // Weight is captured PER LINE and applied only to the set(s) that line describes, so
-    // "12 rep x 1 sets + 15kg" followed by "10 rep x 1 sets + 5kg" keeps 15 and 5 as two
-    // distinct per-set weights instead of the second line overwriting the first.
-    const kg = kgMatch ? parseFloat(kgMatch[1]) : 0;
-    if (!results[name]) results[name] = { reps: [], load: [] };
-    for (let i = 0; i < setsCount; i++) { results[name].reps.push(reps); results[name].load.push(kg); }
+    const weight = kgMatch ? parseFloat(kgMatch[1]) : 0;
+    if (!results[name]) results[name] = { reps: [], weights: [] };
+    // Each line's weight is pushed alongside its own reps, one entry per set, so a later
+    // line for the same exercise (e.g. a drop set at a different weight) doesn't overwrite
+    // an earlier line's weight — every set keeps the weight it was actually logged at.
+    for (let i = 0; i < setsCount; i++) { results[name].reps.push(reps); results[name].weights.push(weight); }
   };
 
   const matchAndApply = (name, setMatch) => {
@@ -339,6 +339,13 @@ const SEED_SESSIONS = [];
 
 const STORAGE_KEY = "sessions-v3";
 const total = (sets) => (sets || []).reduce((a, b) => a + b, 0);
+// Formats a per-set weight array for display: "(+15kg)" when every set used the same weight,
+// or "(+15/15/5/5kg)" when they differ (e.g. drop sets), "" when nothing was logged.
+const weightTag = (weights) => {
+  const w = weights || [];
+  if (!w.length || !w.some((x) => x > 0)) return "";
+  return w.every((x) => x === w[0]) ? ` (+${w[0]}kg)` : ` (+${w.join("/")}kg)`;
+};
 const fmtDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const fmtDateFull = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const dayDiff = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
@@ -355,17 +362,21 @@ const migrate = (loaded) =>
     let out = s;
     if (out.bodyweight === undefined) out = { ...out, bodyweight: null, load: out.load || {} };
     if (out.notes === undefined) out = { ...out, notes: "" };
-    // Older sessions stored one flat "added kg" number per exercise; normalize it to one
-    // weight per set (same length as ex[name]) so every session speaks the same per-set format.
-    if (out.load && Object.keys(out.load).some((name) => !Array.isArray(out.load[name]))) {
-      const nextLoad = {};
-      Object.keys(out.load).forEach((name) => {
-        const v = out.load[name];
-        const setCount = (out.ex && out.ex[name] ? out.ex[name].length : 1) || 1;
-        nextLoad[name] = Array.isArray(v) ? v : Array.from({ length: setCount }, () => v || 0);
-      });
-      out = { ...out, load: nextLoad };
-    }
+    // Legacy sessions stored one added-weight number per exercise for the whole session
+    // (`load[name] = 15`). Weight is now tracked per set, aligned with `ex[name]`
+    // (`load[name] = [15,15,5,5]`). Expand any legacy scalar into an array of that same
+    // value repeated for every set the exercise has, so old data keeps working unchanged.
+    // Already-migrated sessions (load[name] already an array) pass through untouched.
+    const ex = out.ex || {};
+    const oldLoad = out.load || {};
+    const migratedLoad = {};
+    Object.keys(oldLoad).forEach((name) => {
+      const v = oldLoad[name];
+      if (Array.isArray(v)) { migratedLoad[name] = v; return; }
+      const setsCount = (ex[name] || []).length || 1;
+      migratedLoad[name] = Array.from({ length: setsCount }, () => v);
+    });
+    out = { ...out, load: migratedLoad };
     return out;
   });
 
@@ -407,37 +418,22 @@ function TrainingLog() {
   const [selectedHeatDate, setSelectedHeatDate] = useState(null);
   const [chartFocus, setChartFocus] = useState(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  // Fluid heatmap: the square size is computed from the container's actual measured width
+  // (see the effect near HEATMAP_WEEKS below) rather than a fixed pixel value, so 24 weeks
+  // always fit exactly without needing horizontal scroll/swipe on narrow phone screens.
+  const [heatmapCellSize, setHeatmapCellSize] = useState(14);
+  const heatmapGridRef = useRef(null);
   const TARGET_KEY = "target-settings-v1";
   const TRACKED_KEY = "tracked-exercises-v1";
   const CUSTOM_LIB_KEY = "custom-exercises-v1";
   const OWNER_KEY = "owner-name-v1";
   const fileInputRef = useRef(null);
-  const heatmapRef = useRef(null);
-  const [heatCell, setHeatCell] = useState(14);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 560);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  // Sizes the heatmap squares to whatever width is actually available (rather than a fixed
-  // px guess), so all HEATMAP_WEEKS columns always fit on-screen without a horizontal swipe.
-  useEffect(() => {
-    const computeHeatCell = () => {
-      if (!heatmapRef.current) return;
-      const containerWidth = heatmapRef.current.clientWidth;
-      if (!containerWidth) return;
-      const labelColWidth = 18; // day-of-week label column + its margin
-      const gap = isMobile ? 2 : 3;
-      const available = containerWidth - labelColWidth - gap * (HEATMAP_WEEKS - 1);
-      const size = Math.floor(available / HEATMAP_WEEKS);
-      setHeatCell(Math.max(6, Math.min(isMobile ? 12 : 14, size)));
-    };
-    computeHeatCell();
-    window.addEventListener("resize", computeHeatCell);
-    return () => window.removeEventListener("resize", computeHeatCell);
-  }, [isMobile, tab]);
 
   useEffect(() => {
     (async () => {
@@ -640,11 +636,7 @@ function TrainingLog() {
     setDraft({
       date: s.date, label: s.label, bodyweight: s.bodyweight != null ? String(s.bodyweight) : "", notes: s.notes || "",
       ex: Object.fromEntries(namesForEdit.map((e) => [e, s.ex[e] ? s.ex[e].join(",") : ""])),
-      load: Object.fromEntries(namesForEdit.map((e) => {
-        const lv = (s.load || {})[e];
-        const arr = Array.isArray(lv) ? lv : (lv ? [lv] : []);
-        return [e, arr.length ? arr.join(",") : ""];
-      })),
+      load: Object.fromEntries(namesForEdit.map((e) => [e, (s.load || {})[e] && s.load[e].length ? s.load[e].join(",") : ""])),
     });
     setShowForm(true);
   };
@@ -668,9 +660,7 @@ function TrainingLog() {
       const nextLoad = { ...d.load };
       matchedNames.forEach((name) => {
         nextEx[name] = results[name].reps.join(",");
-        // Comma-separated, one weight per set, same position as the matching rep count —
-        // so "12,4,10,10" reps can line up with "15,15,5,5" kg.
-        nextLoad[name] = results[name].load.some((v) => v > 0) ? results[name].load.join(",") : "";
+        if (results[name].weights.some((w) => w > 0)) nextLoad[name] = results[name].weights.join(",");
       });
       matchedEntries.forEach((e) => {
         if (nextEx[e.name] === undefined) nextEx[e.name] = "";
@@ -693,13 +683,12 @@ function TrainingLog() {
     Object.keys(draft.ex).forEach((name) => {
       const parsed = draft.ex[name].split(",").map((v) => parseInt(v.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
       if (parsed.length) exData[name] = parsed;
-      // Weight is a comma list too, one entry per set (e.g. "15,15,5,5"). If fewer weights
-      // were typed than sets, the last weight entered carries forward to the rest — so
-      // typing a single "15" still applies it to every set, same as before this feature.
-      const loadParsed = (draft.load[name] || "").split(",").map((v) => parseFloat(v.trim())).filter((n) => Number.isFinite(n));
-      if (parsed.length && loadParsed.length) {
-        const loadArr = parsed.map((_, i) => (loadParsed[i] != null ? loadParsed[i] : loadParsed[loadParsed.length - 1]));
-        if (loadArr.some((v) => v > 0)) loadData[name] = loadArr;
+      // Weight is entered as a comma list aligned to the sets above (e.g. "15,15,5,5" next to
+      // "12,12,10,10"). A single value ("15") still works and applies to every set — if fewer
+      // weights than sets are given, the last one entered is repeated for the remaining sets.
+      const weightsRaw = (draft.load[name] || "").split(",").map((v) => v.trim()).filter((v) => v !== "").map((v) => parseFloat(v)).filter((n) => Number.isFinite(n) && n >= 0);
+      if (parsed.length && weightsRaw.length) {
+        loadData[name] = parsed.map((_, i) => (i < weightsRaw.length ? weightsRaw[i] : weightsRaw[weightsRaw.length - 1]));
       }
     });
     const bw = parseFloat(draft.bodyweight);
@@ -731,8 +720,8 @@ function TrainingLog() {
     sessions.forEach((s) => {
       Object.keys(s.ex).forEach((name) => {
         if (!s.ex[name]) return;
-        const loads = s.ex[name].map((_, i) => ((s.load || {})[name] || [])[i] || 0);
-        rows.push([s.date, s.label, s.bodyweight ?? "", name, s.ex[name].join("-"), loads.join("-"), total(s.ex[name]), s.notes || ""]);
+        const weights = (s.load || {})[name] || [];
+        rows.push([s.date, s.label, s.bodyweight ?? "", name, s.ex[name].join("-"), weights.length ? weights.join("-") : 0, total(s.ex[name]), s.notes || ""]);
       });
     });
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -773,7 +762,7 @@ function TrainingLog() {
   const loadableSet = useMemo(() => {
     const s = new Set();
     (sessions || []).forEach((sess) => {
-      Object.keys(sess.load || {}).forEach((name) => { if ((sess.load[name] || []).some((v) => v > 0)) s.add(name); });
+      Object.keys(sess.load || {}).forEach((name) => { if (((sess.load || {})[name] || []).some((w) => w > 0)) s.add(name); });
     });
     return s;
   }, [sessions]);
@@ -790,34 +779,26 @@ function TrainingLog() {
     return map;
   }, [sessions]);
 
-  // Per-set added-kg values for an exercise in a session, aligned to s.ex[name] (one weight
-  // per set, defaulting to 0 for any set that doesn't have one recorded).
-  const perSetLoads = (s, name) => {
-    const reps = s.ex[name] || [];
-    const raw = (s.load || {})[name];
-    const arr = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-    return reps.map((_, i) => arr[i] || 0);
-  };
-
-  // Reps-weighted average added kg across all sets — e.g. 12 reps @15kg + 10 reps @5kg
-  // averages closer to 15kg than 5kg, matching how much work was actually done at each load.
-  const avgAddedLoad = (s, name) => {
-    const reps = s.ex[name] || [];
-    const loads = perSetLoads(s, name);
-    const totalReps = reps.reduce((a, b) => a + b, 0);
-    if (!totalReps) return 0;
-    const weighted = reps.reduce((sum, r, i) => sum + r * loads[i], 0);
-    return weighted / totalReps;
-  };
-
-  // Effective per-rep load = bodyweight portion + the reps-weighted average added kg. Kept
-  // as a single number (rather than switching every call site to per-set math) because
-  // total(reps) * effLoadPerRep still reproduces the correct total session volume exactly.
-  const effLoadPerRep = (s, name) => {
+  // Per-set "load per rep" (bodyweight × ratio + THAT set's added weight), aligned with
+  // s.ex[name] — since weight is now tracked per set rather than once per session, volume
+  // math has to look at each set's own weight instead of assuming one value for all of them.
+  // Returns null (session-wide) if bodyweight is unknown, same as before.
+  const setLoadsFor = (s, name) => {
     const bw = bwMap[s.id];
     if (bw == null) return null;
     const ratio = bwRatioMap[name] != null ? bwRatioMap[name] : 1;
-    return bw * ratio + avgAddedLoad(s, name);
+    const reps = s.ex[name] || [];
+    const weights = (s.load || {})[name] || [];
+    return reps.map((_, i) => bw * ratio + (weights[i] || 0));
+  };
+
+  // Total volume for one exercise within one session: sum of each set's reps × that set's
+  // own load-per-rep. Null if bodyweight is unknown for the session.
+  const exerciseVolume = (s, name) => {
+    const loads = setLoadsFor(s, name);
+    if (loads == null) return null;
+    const reps = s.ex[name] || [];
+    return reps.reduce((sum, r, i) => sum + r * loads[i], 0);
   };
 
   const rangedSessions = useMemo(() => {
@@ -832,11 +813,9 @@ function TrainingLog() {
     let totalVol = 0, anyVol = false;
     chartExercises.forEach((name) => {
       if (!s.ex[name]) { row[name] = null; return; }
-      const reps = total(s.ex[name]);
-      if (metric === "reps") { row[name] = reps; return; }
-      const lpr = effLoadPerRep(s, name);
-      const v = lpr == null ? null : Math.round(reps * lpr);
-      row[name] = v;
+      if (metric === "reps") { row[name] = total(s.ex[name]); return; }
+      const v = exerciseVolume(s, name);
+      row[name] = v == null ? null : Math.round(v);
       if (v != null) { totalVol += v; anyVol = true; }
     });
     if (metric === "volume") row.Total = anyVol ? totalVol : null;
@@ -847,23 +826,27 @@ function TrainingLog() {
     if (filter === "All" || filter.startsWith("group:")) return [];
     return rangedSessions.filter((s) => s.ex[filter]).map((s) => {
       const row = { date: fmtDate(s.date) };
-      const bw = bwMap[s.id];
-      const ratio = bwRatioMap[filter] != null ? bwRatioMap[filter] : 1;
-      const loads = perSetLoads(s, filter);
-      // Each set uses its OWN recorded weight here (not a session-wide average), so sets
-      // logged with different added kg show their true individual volume.
+      const loads = setLoadsFor(s, filter); // per-set load-per-rep, or null if bodyweight unknown
+      let totalVol = 0, anyVol = false;
       s.ex[filter].forEach((r, i) => {
-        row["Set " + (i + 1)] = metric === "reps" ? r : (bw == null ? null : Math.round(r * (bw * ratio + loads[i])));
+        if (metric === "reps") { row["Set " + (i + 1)] = r; return; }
+        const v = loads == null ? null : Math.round(r * loads[i]);
+        row["Set " + (i + 1)] = v;
+        if (v != null) { totalVol += v; anyVol = true; }
       });
-      const lpr = effLoadPerRep(s, filter);
-      row.Total = metric === "reps" ? total(s.ex[filter]) : (lpr == null ? null : Math.round(total(s.ex[filter]) * lpr));
+      row.Total = metric === "reps" ? total(s.ex[filter]) : (anyVol ? Math.round(totalVol) : null);
       return row;
     });
   }, [rangedSessions, filter, metric]);
 
   const loadStepData = useMemo(() => {
     if (!loadableSet.has(filter)) return [];
-    return rangedSessions.filter((s) => s.ex[filter]).map((s) => ({ date: fmtDate(s.date), "Added load (kg)": Math.round(avgAddedLoad(s, filter) * 10) / 10 }));
+    // Weight can now vary per set within a session (e.g. drop sets) — the step chart shows
+    // the top (heaviest) set of the session as the representative "working weight".
+    return rangedSessions.filter((s) => s.ex[filter]).map((s) => {
+      const weights = (s.load || {})[filter] || [];
+      return { date: fmtDate(s.date), "Added load (kg)": weights.length ? Math.max(...weights) : 0 };
+    });
   }, [rangedSessions, filter, loadableSet]);
 
   const bodyweightData = useMemo(() => rangedSessions.filter((s) => s.bodyweight != null).map((s) => ({ date: fmtDate(s.date), kg: s.bodyweight })), [rangedSessions]);
@@ -877,10 +860,9 @@ function TrainingLog() {
         let val = 0;
         chartExercises.forEach((name) => {
           if (muscleGroupMap[name] !== group || !s.ex[name]) return;
-          const reps = total(s.ex[name]);
-          if (metric === "reps") { val += reps; return; }
-          const lpr = effLoadPerRep(s, name);
-          if (lpr != null) val += reps * lpr;
+          if (metric === "reps") { val += total(s.ex[name]); return; }
+          const v = exerciseVolume(s, name);
+          if (v != null) val += v;
         });
         return { date: fmtDate(s.date), value: Math.round(val) };
       });
@@ -911,10 +893,9 @@ function TrainingLog() {
       weekSessions.forEach((s) => {
         if (!s.ex[name]) return;
         any = true;
-        const reps = total(s.ex[name]);
-        repsSum += reps;
-        const lpr = effLoadPerRep(s, name);
-        if (lpr != null) volSum += reps * lpr;
+        repsSum += total(s.ex[name]);
+        const v = exerciseVolume(s, name);
+        if (v != null) volSum += v;
       });
       if (!any) { row[name] = null; return; }
       row[name] = metric === "reps" ? repsSum : Math.round(volSum);
@@ -934,10 +915,9 @@ function TrainingLog() {
         weekSessions.forEach((s) => {
           chartExercises.forEach((name) => {
             if (muscleGroupMap[name] !== group || !s.ex[name]) return;
-            const reps = total(s.ex[name]);
-            if (metric === "reps") { val += reps; return; }
-            const lpr = effLoadPerRep(s, name);
-            if (lpr != null) val += reps * lpr;
+            if (metric === "reps") { val += total(s.ex[name]); return; }
+            const v = exerciseVolume(s, name);
+            if (v != null) val += v;
           });
         });
         return { date: "Wk of " + fmtDate(weekStart), value: Math.round(val) };
@@ -954,10 +934,9 @@ function TrainingLog() {
         let reps = 0, vol = 0;
         weekSessions.forEach((s) => {
           if (!s.ex[filter]) return;
-          const r = total(s.ex[filter]);
-          reps += r;
-          const lpr = effLoadPerRep(s, filter);
-          if (lpr != null) vol += r * lpr;
+          reps += total(s.ex[filter]);
+          const v = exerciseVolume(s, filter);
+          if (v != null) vol += v;
         });
         return { date: "Wk of " + fmtDate(weekStart), Total: metric === "reps" ? reps : Math.round(vol) };
       });
@@ -976,7 +955,8 @@ function TrainingLog() {
       .filter(({ sessions: weekSessions }) => weekSessions.some((s) => s.ex[filter]))
       .map(({ weekStart, sessions: weekSessions }) => {
         const withLoad = weekSessions.filter((s) => s.ex[filter]);
-        const lastVal = withLoad.length ? (withLoad[withLoad.length - 1].load || {})[filter] || 0 : 0;
+        const lastWeights = withLoad.length ? ((withLoad[withLoad.length - 1].load || {})[filter] || []) : [];
+        const lastVal = lastWeights.length ? Math.max(...lastWeights) : 0;
         return { date: "Wk of " + fmtDate(weekStart), "Added load (kg)": lastVal };
       });
   }, [weeklySessionGroups, filter, loadableSet]);
@@ -1003,8 +983,8 @@ function TrainingLog() {
 
   const sessionVolume = (s) => Object.keys(s.ex).reduce((sum, name) => {
     if (!s.ex[name]) return sum;
-    const lpr = effLoadPerRep(s, name);
-    return lpr == null ? sum : sum + total(s.ex[name]) * lpr;
+    const v = exerciseVolume(s, name);
+    return v == null ? sum : sum + v;
   }, 0);
 
   const volumeKpi = useMemo(() => {
@@ -1019,11 +999,11 @@ function TrainingLog() {
     if (!latest) return [];
     const totals = {}; GROUPS.forEach((g) => (totals[g] = 0));
     Object.keys(latest.ex).forEach((name) => {
-      const lpr = effLoadPerRep(latest, name);
-      if (lpr == null) return;
+      const v = exerciseVolume(latest, name);
+      if (v == null) return;
       const group = muscleGroupMap[name] || "Custom";
       if (totals[group] === undefined) totals[group] = 0;
-      totals[group] += total(latest.ex[name]) * lpr;
+      totals[group] += v;
     });
     const grand = Object.values(totals).reduce((a, b) => a + b, 0) || 1;
     return GROUPS.map((g) => ({ group: g, kg: Math.round(totals[g] || 0), pct: Math.round(((totals[g] || 0) / grand) * 100) }));
@@ -1044,16 +1024,14 @@ function TrainingLog() {
       let bestVol = -1, bestDate = null, bestSets = null, bestReps = null, priorBest = -1;
       sessions.forEach((s) => {
         if (!s.ex[name]) return;
-        const lpr = effLoadPerRep(s, name);
-        if (lpr == null) return; // no bodyweight logged for this session — volume unknown, skip
+        const sessionVol = exerciseVolume(s, name);
+        if (sessionVol == null) return; // no bodyweight logged for this session — volume unknown, skip
         const reps = total(s.ex[name]);
-        const sessionVol = reps * lpr;
         if (!latest || s.id !== latest.id) { if (sessionVol > priorBest) priorBest = sessionVol; }
         if (sessionVol > bestVol) { bestVol = sessionVol; bestDate = s.date; bestSets = s.ex[name].length; bestReps = reps; }
       });
-      const latestLpr = latest ? effLoadPerRep(latest, name) : null;
-      const latestReps = latest && latest.ex[name] ? total(latest.ex[name]) : null;
-      const latestVol = latest && latest.ex[name] && latestLpr != null ? latestReps * latestLpr : -1;
+      const latestVolRaw = latest && latest.ex[name] ? exerciseVolume(latest, name) : null;
+      const latestVol = latestVolRaw != null ? latestVolRaw : -1;
       map[name] = {
         bestVol, bestDate, bestSets, bestReps,
         daysAgo: bestDate ? dayDiff(bestDate, todayStr) : null,
@@ -1137,6 +1115,29 @@ function TrainingLog() {
     }
     return weeks;
   }, [sessions]);
+
+  // Measures the heatmap grid's actual available width (via heatmapGridRef) and derives a
+  // square size that makes all 24 week-columns plus the day-label column fit exactly —
+  // replacing the old fixed 12/14px squares + horizontal scroll, which required swiping on
+  // phones. Recomputes on mount and whenever the container resizes (ResizeObserver), so it
+  // stays correct across orientation changes and window resizes too.
+  useEffect(() => {
+    const el = heatmapGridRef.current;
+    if (!el) return;
+    const GAP = 3;
+    const LABEL_COL_WIDTH = 18;
+    const compute = () => {
+      const width = el.clientWidth;
+      if (!width) return;
+      const usable = width - LABEL_COL_WIDTH - GAP * HEATMAP_WEEKS;
+      const size = Math.max(6, Math.min(16, Math.floor(usable / HEATMAP_WEEKS)));
+      setHeatmapCellSize(size);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   if (!sessions) {
     return <div style={{ background: "#101214", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
@@ -1342,21 +1343,21 @@ function TrainingLog() {
               <div style={{ marginBottom: 10 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Last 24 weeks — days trained</span>
               </div>
-              <div ref={heatmapRef} style={{ display: "flex", gap: isMobile ? 2 : 3, width: "100%", overflow: "hidden" }}>
-                <div style={{ display: "grid", gridTemplateRows: `repeat(7, ${heatCell}px)`, gap: isMobile ? 2 : 3, marginRight: 4, flexShrink: 0 }}>
+              <div ref={heatmapGridRef} style={{ display: "flex", gap: 3, width: "100%" }}>
+                <div style={{ display: "grid", gridTemplateRows: `repeat(7, ${heatmapCellSize}px)`, gap: 3, marginRight: 3, width: 15, flexShrink: 0 }}>
                   {["M", "T", "W", "T", "F", "S", "D"].map((d, i) => (
-                    <span key={i} className="mono" style={{ fontSize: 9, color: "#4a4f56", lineHeight: `${heatCell}px` }}>{d}</span>
+                    <span key={i} className="mono" style={{ fontSize: 9, color: "#4a4f56", lineHeight: `${heatmapCellSize}px` }}>{d}</span>
                   ))}
                 </div>
                 {heatmapWeeks.map((week, wi) => (
-                  <div key={wi} style={{ display: "grid", gridTemplateRows: `repeat(7, ${heatCell}px)`, gap: isMobile ? 2 : 3, flex: 1, minWidth: 0 }}>
+                  <div key={wi} style={{ display: "grid", gridTemplateRows: `repeat(7, ${heatmapCellSize}px)`, gap: 3, flex: 1 }}>
                     {week.map((d, di) => (
                       <div
                         key={di}
                         title={d.date}
                         onClick={() => d.trained && setSelectedHeatDate(d.date)}
                         style={{
-                          width: "100%", height: heatCell, borderRadius: 3,
+                          width: "100%", height: heatmapCellSize, borderRadius: 3,
                           background: d.isFuture ? "transparent" : d.trained ? "#F2C94C" : "#1d2024",
                           border: d.isFuture ? "1px dashed #22262b" : "1px solid #22262b",
                           cursor: d.trained ? "pointer" : "default",
@@ -1572,7 +1573,7 @@ function TrainingLog() {
                   <textarea
                     value={pasteText}
                     onChange={(e) => setPasteText(e.target.value)}
-                    placeholder={"Wide grip pull ups :\n12 rep x 1 sets body weight\n9 rep x 1 sets body weight\n\nChest dips :\n12 rep x 1 sets body weight + 15kg\n4 rep x 1 sets body weight + 15kg\n10 rep x 1 sets body weight + 5kg\n10 rep x 1 sets body weight + 5kg"}
+                    placeholder={"Wide grip pull ups :\n12 rep x 1 sets body weight\n9 rep x 1 sets body weight\n\nChest dips :\n12 rep x 1 sets body weight + 15kg\n10 rep x 1 sets body weight + 5kg"}
                     rows={4}
                     className="mono"
                     style={{ width: "100%", background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box", resize: "vertical" }}
@@ -1592,7 +1593,7 @@ function TrainingLog() {
                   )}
                 </div>
 
-                <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: "160px 1fr 90px", gap: 8, marginBottom: 4, fontSize: 10, color: "#5a5f66", textTransform: "uppercase", letterSpacing: "0.04em" }}><span></span><span>Reps per set</span><span>Added kg per set</span></div>
+                <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: "160px 1fr 90px", gap: 8, marginBottom: 4, fontSize: 10, color: "#5a5f66", textTransform: "uppercase", letterSpacing: "0.04em" }}><span></span><span>Reps per set</span><span>Kg per set</span></div>
                 <div style={{ display: "grid", gap: isMobile ? 14 : 10, marginBottom: 14 }}>
                   {(editingId ? Object.keys(draft.ex) : trackedExercises.filter((name) => !RETIRED.includes(name))).map((name) => (
                     isMobile ? (
@@ -1610,7 +1611,7 @@ function TrainingLog() {
                       <div key={name} style={{ display: "grid", gridTemplateColumns: editingId ? "160px 1fr 90px" : "160px 1fr 90px 18px", gap: 10, alignItems: "center" }}>
                         <span style={{ fontSize: 13, color: colorsMap[name] || "#c9cdd3", fontWeight: 600 }}>{name}</span>
                         <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
-                        <input type="text" placeholder="15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                        <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
                         {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#5a5f66" }} />}
                       </div>
                     )
@@ -1647,13 +1648,9 @@ function TrainingLog() {
                       </div>
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {Object.keys(s.ex).filter((n) => s.ex[n]).map((name) => {
-                        const loads = s.ex[name].map((_, i) => ((s.load || {})[name] || [])[i] || 0);
-                        const hasLoad = loads.some((v) => v > 0);
-                        return (
-                          <span key={name} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${colorsMap[name] || "#9a9fa6"}14`, color: colorsMap[name] || "#9a9fa6", border: `1px solid ${colorsMap[name] || "#9a9fa6"}33` }}>{name}: {s.ex[name].join("-")}{hasLoad ? ` (+${loads.join("-")}kg)` : ""}</span>
-                        );
-                      })}
+                      {Object.keys(s.ex).filter((n) => s.ex[n]).map((name) => (
+                        <span key={name} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${colorsMap[name] || "#9a9fa6"}14`, color: colorsMap[name] || "#9a9fa6", border: `1px solid ${colorsMap[name] || "#9a9fa6"}33` }}>{name}: {s.ex[name].join("-")}{weightTag((s.load || {})[name])}</span>
+                      ))}
                     </div>
                     {s.notes && <div style={{ fontSize: 11.5, color: "#6b7078", fontStyle: "italic", marginTop: 6 }}>"{s.notes}"</div>}
                   </div>
@@ -1803,8 +1800,10 @@ function TrainingLog() {
               {Array.from(new Set([...Object.keys(compareSessions[0].ex), ...Object.keys(compareSessions[1].ex)])).filter((name) => compareSessions[0].ex[name] || compareSessions[1].ex[name]).map((name) => {
                 const a = compareSessions[0], b = compareSessions[1];
                 const repsA = a.ex[name] ? total(a.ex[name]) : null, repsB = b.ex[name] ? total(b.ex[name]) : null;
-                const volA = a.ex[name] && effLoadPerRep(a, name) != null ? Math.round(repsA * effLoadPerRep(a, name)) : null;
-                const volB = b.ex[name] && effLoadPerRep(b, name) != null ? Math.round(repsB * effLoadPerRep(b, name)) : null;
+                const volARaw = a.ex[name] ? exerciseVolume(a, name) : null;
+                const volBRaw = b.ex[name] ? exerciseVolume(b, name) : null;
+                const volA = volARaw != null ? Math.round(volARaw) : null;
+                const volB = volBRaw != null ? Math.round(volBRaw) : null;
                 return (
                   <div key={name} style={{ padding: "10px 0", borderBottom: "1px solid #1d2024" }}>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: colorsMap[name] || "#c9cdd3", marginBottom: 6 }}>{name}</div>
