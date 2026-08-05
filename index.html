@@ -77,7 +77,6 @@ const Download = (p) => <Icon {...p}><path d="M12 3v12" /><polyline points="7 10
 const Upload = (p) => <Icon {...p}><path d="M12 21V9" /><polyline points="7 14 12 9 17 14" /><path d="M4 19h16" /></Icon>;
 const GitCompare = (p) => <Icon {...p}><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5V13a3 3 0 0 0 3 3h3" /><path d="M18 15.5V11a3 3 0 0 0-3-3h-3" /></Icon>;
 const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></Icon>;
-const Filter = (p) => <Icon {...p}><polygon points="4 4 20 4 14 12.5 14 19 10 21 10 12.5 4 4" /></Icon>;
 const Settings2 = (p) => <Icon {...p}><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></Icon>;
 
 // ---- window.storage polyfill backed by localStorage (persists per-browser on GitHub Pages) ----
@@ -390,11 +389,6 @@ function TrainingLog() {
   const [sessions, setSessions] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [filter, setFilter] = useState("All");
-  // Dashboard-wide exercise scope: null = no restriction (show everything). When set, it's
-  // an explicit list of exercise names the user picked, and every KPI/chart/PR/panel on the
-  // dashboard is limited to just those — not only the PR card.
-  const [exerciseScope, setExerciseScope] = useState(null);
-  const [showExerciseFilter, setShowExerciseFilter] = useState(false);
   const [metric, setMetric] = useState("reps");
   const [range, setRange] = useState("all");
   const [timeView, setTimeView] = useState("day"); // "day" (per session) or "week" (aggregated)
@@ -424,6 +418,9 @@ function TrainingLog() {
   const [selectedHeatDate, setSelectedHeatDate] = useState(null);
   const [chartFocus, setChartFocus] = useState(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  // Which exercises show up in the PR card. null = show all (default); array = only these.
+  const [prSelection, setPrSelection] = useState(null);
+  const [showPrPicker, setShowPrPicker] = useState(false);
   // Fluid heatmap: the square size is computed from the container's actual measured width
   // (see the effect near HEATMAP_WEEKS below) rather than a fixed pixel value, so 24 weeks
   // always fit exactly without needing horizontal scroll/swipe on narrow phone screens.
@@ -433,6 +430,7 @@ function TrainingLog() {
   const TRACKED_KEY = "tracked-exercises-v1";
   const CUSTOM_LIB_KEY = "custom-exercises-v1";
   const OWNER_KEY = "owner-name-v1";
+  const PR_SELECTION_KEY = "pr-selection-v1";
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -467,6 +465,18 @@ function TrainingLog() {
         setTargetSettings(res && res.value ? JSON.parse(res.value) : {});
       } catch (e) {
         setTargetSettings({});
+      }
+    })();
+  }, []);
+
+  // Which exercises to show in the PR card (null = all — the default).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(PR_SELECTION_KEY, false);
+        setPrSelection(res && res.value ? JSON.parse(res.value) : null);
+      } catch (e) {
+        setPrSelection(null);
       }
     })();
   }, []);
@@ -511,6 +521,16 @@ function TrainingLog() {
   const persistTracked = async (next) => {
     setTrackedExercises(next);
     try { await window.storage.set(TRACKED_KEY, JSON.stringify(next), false); } catch (_) {}
+  };
+
+  const persistPrSelection = async (next) => {
+    setPrSelection(next);
+    try { await window.storage.set(PR_SELECTION_KEY, JSON.stringify(next), false); } catch (_) {}
+  };
+  const togglePrExercise = (name) => {
+    const current = prSelection == null ? [...chartExercises] : prSelection;
+    const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name];
+    persistPrSelection(next);
   };
 
   const persistCustom = async (next) => {
@@ -561,31 +581,6 @@ function TrainingLog() {
       return ia - ib;
     });
   }, [sessions, fullLibrary]);
-
-  // The exercises actually in play right now: everything if no scope is set, otherwise just
-  // the user's explicit picks (re-filtered against chartExercises so a scope pick that no
-  // longer has any logged data quietly drops out instead of leaving a dead entry around).
-  const scopedExercises = useMemo(() => (
-    exerciseScope === null ? chartExercises : chartExercises.filter((n) => exerciseScope.includes(n))
-  ), [chartExercises, exerciseScope]);
-  const inScope = (name) => scopedExercises.includes(name);
-
-  const toggleScopeExercise = (name) => {
-    setExerciseScope((prev) => {
-      const base = prev === null ? chartExercises.slice() : prev;
-      return base.includes(name) ? base.filter((n) => n !== name) : [...base, name];
-    });
-  };
-  const setScopeToGroup = (group) => setExerciseScope(chartExercises.filter((n) => muscleGroupMap[n] === group));
-  const clearScope = () => setExerciseScope(null);
-
-  // If the main chart's single-exercise selection points at something outside the current
-  // scope, fall back to "All" instead of showing a chart for an exercise that's now hidden.
-  useEffect(() => {
-    if (filter === "All") return;
-    if (filter.startsWith("group:")) { if (!scopedExercises.some((n) => muscleGroupMap[n] === filter.slice(6))) setFilter("All"); return; }
-    if (!scopedExercises.includes(filter)) setFilter("All");
-  }, [scopedExercises, filter, muscleGroupMap]);
 
   const doDeleteAllLogs = async () => {
     await persist([]);
@@ -865,7 +860,7 @@ function TrainingLog() {
   const chartData = useMemo(() => rangedSessions.map((s) => {
     const row = { date: fmtDate(s.date), fullDate: s.date };
     let totalVol = 0, anyVol = false;
-    scopedExercises.forEach((name) => {
+    chartExercises.forEach((name) => {
       if (!s.ex[name]) { row[name] = null; return; }
       if (metric === "reps") { row[name] = total(s.ex[name]); return; }
       if (metric === "1rm") { const rm = exercise1RM(s, name); row[name] = rm == null ? null : Math.round(rm); return; }
@@ -875,7 +870,7 @@ function TrainingLog() {
     });
     if (metric === "volume") row.Total = anyVol ? totalVol : null;
     return row;
-  }), [rangedSessions, metric, scopedExercises]);
+  }), [rangedSessions, metric, chartExercises]);
 
   const perSetData = useMemo(() => {
     if (filter === "All" || filter.startsWith("group:")) return [];
@@ -916,10 +911,10 @@ function TrainingLog() {
     if (!filter.startsWith("group:")) return [];
     const group = filter.slice(6);
     return rangedSessions
-      .filter((s) => scopedExercises.some((name) => muscleGroupMap[name] === group && s.ex[name]))
+      .filter((s) => chartExercises.some((name) => muscleGroupMap[name] === group && s.ex[name]))
       .map((s) => {
         let val = 0, best1RM = null;
-        scopedExercises.forEach((name) => {
+        chartExercises.forEach((name) => {
           if (muscleGroupMap[name] !== group || !s.ex[name]) return;
           if (metric === "reps") { val += total(s.ex[name]); return; }
           if (metric === "1rm") { const rm = exercise1RM(s, name); if (rm != null && (best1RM == null || rm > best1RM)) best1RM = rm; return; }
@@ -928,7 +923,7 @@ function TrainingLog() {
         });
         return { date: fmtDate(s.date), value: metric === "1rm" ? (best1RM == null ? null : Math.round(best1RM)) : Math.round(val) };
       });
-  }, [rangedSessions, filter, metric, scopedExercises, muscleGroupMap]);
+  }, [rangedSessions, filter, metric, chartExercises, muscleGroupMap]);
 
   // --- Weekly (aggregated) equivalents of the datasets above, for the Day/Week chart toggle ---
   // Sessions are bucketed into ISO weeks (Monday start, same convention as the consistency
@@ -950,7 +945,7 @@ function TrainingLog() {
   const weeklyChartData = useMemo(() => weeklySessionGroups.map(({ weekStart, sessions: weekSessions }) => {
     const row = { date: "Wk of " + fmtDate(weekStart), fullDate: weekStart };
     let totalVol = 0, anyVol = false;
-    scopedExercises.forEach((name) => {
+    chartExercises.forEach((name) => {
       let repsSum = 0, volSum = 0, best1RM = null, any = false;
       weekSessions.forEach((s) => {
         if (!s.ex[name]) return;
@@ -967,17 +962,17 @@ function TrainingLog() {
     });
     if (metric === "volume") row.Total = anyVol ? Math.round(totalVol) : null;
     return row;
-  }), [weeklySessionGroups, scopedExercises, metric]);
+  }), [weeklySessionGroups, chartExercises, metric]);
 
   const weeklyGroupChartData = useMemo(() => {
     if (!filter.startsWith("group:")) return [];
     const group = filter.slice(6);
     return weeklySessionGroups
-      .filter(({ sessions: weekSessions }) => weekSessions.some((s) => scopedExercises.some((name) => muscleGroupMap[name] === group && s.ex[name])))
+      .filter(({ sessions: weekSessions }) => weekSessions.some((s) => chartExercises.some((name) => muscleGroupMap[name] === group && s.ex[name])))
       .map(({ weekStart, sessions: weekSessions }) => {
         let val = 0, best1RM = null;
         weekSessions.forEach((s) => {
-          scopedExercises.forEach((name) => {
+          chartExercises.forEach((name) => {
             if (muscleGroupMap[name] !== group || !s.ex[name]) return;
             if (metric === "reps") { val += total(s.ex[name]); return; }
             if (metric === "1rm") { const rm = exercise1RM(s, name); if (rm != null && (best1RM == null || rm > best1RM)) best1RM = rm; return; }
@@ -987,7 +982,7 @@ function TrainingLog() {
         });
         return { date: "Wk of " + fmtDate(weekStart), value: metric === "1rm" ? (best1RM == null ? null : Math.round(best1RM)) : Math.round(val) };
       });
-  }, [weeklySessionGroups, filter, metric, scopedExercises, muscleGroupMap]);
+  }, [weeklySessionGroups, filter, metric, chartExercises, muscleGroupMap]);
 
   // Per-set breakdown doesn't aggregate cleanly across a week (different session/set counts),
   // so the weekly view for a single exercise collapses to just its weekly Total line.
@@ -1048,7 +1043,7 @@ function TrainingLog() {
     return total(latest.ex[name]) - total(first.ex[name]);
   };
 
-  const sessionVolume = (s) => Object.keys(s.ex).filter(inScope).reduce((sum, name) => {
+  const sessionVolume = (s) => Object.keys(s.ex).reduce((sum, name) => {
     if (!s.ex[name]) return sum;
     const v = exerciseVolume(s, name);
     return v == null ? sum : sum + v;
@@ -1060,12 +1055,12 @@ function TrainingLog() {
     const firstVol = sessionVolume(first);
     const cumulative = sessions.reduce((sum, s) => sum + sessionVolume(s), 0);
     return { latestVol, delta: latestVol - firstVol, cumulative };
-  }, [sessions, latest, first, scopedExercises]);
+  }, [sessions, latest, first]);
 
   const groupVolumeLatest = useMemo(() => {
     if (!latest) return [];
     const totals = {}; GROUPS.forEach((g) => (totals[g] = 0));
-    Object.keys(latest.ex).filter(inScope).forEach((name) => {
+    Object.keys(latest.ex).forEach((name) => {
       const v = exerciseVolume(latest, name);
       if (v == null) return;
       const group = muscleGroupMap[name] || "Custom";
@@ -1074,7 +1069,7 @@ function TrainingLog() {
     });
     const grand = Object.values(totals).reduce((a, b) => a + b, 0) || 1;
     return GROUPS.map((g) => ({ group: g, kg: Math.round(totals[g] || 0), pct: Math.round(((totals[g] || 0) / grand) * 100) }));
-  }, [latest, muscleGroupMap, scopedExercises]);
+  }, [latest, muscleGroupMap]);
 
   // PRs are tracked by TOTAL session volume (all sets for that exercise, summed) rather than a
   // single best set — one big set can flatter a session that was otherwise unremarkable, while
@@ -1303,51 +1298,6 @@ function TrainingLog() {
 
         {tab === "dashboard" && (
           <>
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 12, marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }} onClick={() => setShowExerciseFilter((v) => !v)}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <Filter size={14} color="#F2C94C" />
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#c9cdd3" }}>
-                    Filter: {exerciseScope === null ? "All exercises" : (scopedExercises.length ? `${scopedExercises.length} exercise${scopedExercises.length === 1 ? "" : "s"} selected` : "0 selected")}
-                  </span>
-                </div>
-                <span className="mono" style={{ fontSize: 11, color: "#6b7078", transform: showExerciseFilter ? "rotate(180deg)" : "none", display: "inline-block" }}>▾</span>
-              </div>
-              {showExerciseFilter && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 8 }}>This controls every KPI, chart, and PR on the dashboard below — pick a group to jump straight to it, or check/uncheck individual exercises.</div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                    <button onClick={clearScope} style={{ cursor: "pointer", padding: "5px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: exerciseScope === null ? "1px solid #F5F3EE" : "1px solid #22262b", background: exerciseScope === null ? "#F5F3EE1a" : "#101214", color: exerciseScope === null ? "#F5F3EE" : "#9a9fa6" }}>All</button>
-                    {GROUPS.map((g) => (
-                      <button key={g} onClick={() => setScopeToGroup(g)} style={{ cursor: "pointer", padding: "5px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: `1px solid ${GROUP_COLORS[g]}`, background: "#101214", color: GROUP_COLORS[g] }}>{g}</button>
-                    ))}
-                  </div>
-                  <div style={{ display: "grid", gap: 10 }}>
-                    {GROUPS.map((g) => {
-                      const exList = chartExercises.filter((n) => muscleGroupMap[n] === g);
-                      if (!exList.length) return null;
-                      return (
-                        <div key={g}>
-                          <div style={{ fontSize: 10, color: GROUP_COLORS[g], fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>{g}</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {exList.map((name) => {
-                              const checked = inScope(name);
-                              const color = colorsMap[name] || GROUP_COLORS[g];
-                              return (
-                                <label key={name} onClick={() => toggleScopeExercise(name)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "5px 10px", borderRadius: 999, border: checked ? `1px solid ${color}` : "1px solid #22262b", background: checked ? `${color}1a` : "#101214", color: checked ? color : "#6b7078" }}>
-                                  {name}
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
@@ -1364,12 +1314,15 @@ function TrainingLog() {
               </div>
 
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                  <Award size={14} color="#F2C94C" />
-                  <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (estimated 1RM, all-time)</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Award size={14} color="#F2C94C" />
+                    <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (estimated 1RM, all-time)</span>
+                  </div>
+                  <Settings2 size={14} onClick={() => setShowPrPicker(true)} title="Choose which exercises to show" style={{ cursor: "pointer", color: "#5a5f66", flexShrink: 0 }} />
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
-                  {scopedExercises.map((name) => {
+                  {chartExercises.filter((name) => prSelection == null || prSelection.includes(name)).map((name) => {
                     const pr = prMap[name];
                     if (!pr || pr.best1RM < 0) return null;
                     const age = prAgeLabel(pr.daysAgo);
@@ -1386,8 +1339,8 @@ function TrainingLog() {
                       </div>
                     );
                   })}
-                  {scopedExercises.filter((name) => prMap[name] && prMap[name].best1RM >= 0).length === 0 && (
-                    <div style={{ fontSize: 12, color: "#5a5f66" }}>No PRs match this filter yet.</div>
+                  {prSelection != null && prSelection.length === 0 && (
+                    <div style={{ fontSize: 11.5, color: "#5a5f66", fontStyle: "italic" }}>No exercises selected — tap <Settings2 size={10} style={{ verticalAlign: "-1px" }} /> above to choose some.</div>
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: "#4a4f56", marginTop: 8 }} className="mono">1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), best set of each session</div>
@@ -1491,7 +1444,7 @@ function TrainingLog() {
             <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 4 }}>Volume by muscle group — latest session ({latest ? fmtDate(latest.date) : ""})</div>
               <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 12 }}>
-                {GROUPS.map((g) => `${g}: ${scopedExercises.filter((n) => muscleGroupMap[n] === g).join(" + ") || "—"}`).join(" · ")}
+                {GROUPS.map((g) => `${g}: ${chartExercises.filter((n) => muscleGroupMap[n] === g).join(" + ") || "—"}`).join(" · ")}
               </div>
               <div style={{ display: "grid", gap: 8 }}>
                 {groupVolumeLatest.map((g) => {
@@ -1538,11 +1491,11 @@ function TrainingLog() {
             </div>
 
             <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
-              {GROUPS.filter((g) => scopedExercises.some((n) => muscleGroupMap[n] === g)).map((g) => {
+              {GROUPS.map((g) => {
                 const groupValue = "group:" + g;
                 const groupActive = filter === groupValue || activeGroup === g;
                 const gColor = GROUP_COLORS[g];
-                const groupExercises = scopedExercises.filter((n) => muscleGroupMap[n] === g);
+                const groupExercises = chartExercises.filter((n) => muscleGroupMap[n] === g);
                 return (
                   <div key={g} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5 }}>
                     <button className="pill" onClick={() => changeFilter(groupValue)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: `1px solid ${gColor}`, background: groupActive ? `${gColor}2a` : "transparent", color: gColor, fontFamily: "'Inter', sans-serif", minWidth: 46, textAlign: "center" }}>{g}</button>
@@ -1560,7 +1513,8 @@ function TrainingLog() {
 
             {filter === "All" && metric === "reps" && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 16 }}>
-                {scopedExercises.map((name) => {
+                {chartExercises.map((name) => {
+                  const d = deltaFor(name);
                   const latestTotal = latest && latest.ex[name] ? total(latest.ex[name]) : null;
                   return (
                     <div key={name} style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 10, padding: "12px 14px" }}>
@@ -1580,7 +1534,7 @@ function TrainingLog() {
                   return filter === "All"
                     ? `${agg} ${yLabel} per ${timeView === "week" ? "week" : "session"}, by exercise`
                     : filter.startsWith("group:")
-                    ? `${filter.slice(6)} — ${agg.toLowerCase()} ${yLabel} per ${timeView === "week" ? "week" : "session"} (${scopedExercises.filter((n) => muscleGroupMap[n] === filter.slice(6)).join(" + ")})`
+                    ? `${filter.slice(6)} — ${agg.toLowerCase()} ${yLabel} per ${timeView === "week" ? "week" : "session"} (${chartExercises.filter((n) => muscleGroupMap[n] === filter.slice(6)).join(" + ")})`
                     : timeView === "week"
                     ? `${filter} — ${yLabel} per week`
                     : `${filter} — ${yLabel} per set across sessions`;
@@ -1594,7 +1548,7 @@ function TrainingLog() {
                     <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
                     <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
-                    {scopedExercises.map((name) => (
+                    {chartExercises.map((name) => (
                       <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={chartFocus === name ? 3 : 2.2} strokeOpacity={chartFocus && chartFocus !== name ? 0.18 : 1} dot={{ r: 3, fillOpacity: chartFocus && chartFocus !== name ? 0.18 : 1 }} connectNulls />
                     ))}
                     {metric === "volume" && (
@@ -1859,6 +1813,36 @@ function TrainingLog() {
               </div>
             ))}
             <button onClick={() => { setShowLibrary(false); setShowAddExercise(true); }} style={{ marginTop: 4, width: "100%", background: "#2a2e33", color: "#F5F3EE", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Add an exercise not listed here</button>
+          </div>
+        </div>
+      )}
+
+      {showPrPicker && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowPrPicker(false)}>
+          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 420, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Choose PR exercises</span>
+              <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowPrPicker(false)} />
+            </div>
+            <div style={{ fontSize: 11.5, color: "#6b7078", marginBottom: 14, lineHeight: 1.5 }}>
+              Pick which exercises show up in the PR card. Doesn't affect the charts above.
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button onClick={() => persistPrSelection(null)} className="mono" style={{ fontSize: 11, fontWeight: 700, color: "#9a9fa6", background: "transparent", border: "1px solid #2a2e33", borderRadius: 999, padding: "4px 10px", cursor: "pointer" }}>Select all</button>
+              <button onClick={() => persistPrSelection([])} className="mono" style={{ fontSize: 11, fontWeight: 700, color: "#9a9fa6", background: "transparent", border: "1px solid #2a2e33", borderRadius: 999, padding: "4px 10px", cursor: "pointer" }}>Clear all</button>
+            </div>
+            <div style={{ display: "grid", gap: 2 }}>
+              {chartExercises.map((name) => {
+                const checked = prSelection == null || prSelection.includes(name);
+                return (
+                  <label key={name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "6px 2px", borderBottom: "1px solid #1d2024", cursor: "pointer", color: checked ? "#F5F3EE" : "#6b7078" }}>
+                    <input type="checkbox" checked={checked} onChange={() => togglePrExercise(name)} style={{ accentColor: "#F2C94C", width: 14, height: 14, cursor: "pointer", flexShrink: 0 }} />
+                    {name}
+                  </label>
+                );
+              })}
+            </div>
+            <button onClick={() => setShowPrPicker(false)} style={{ marginTop: 14, width: "100%", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Done</button>
           </div>
         </div>
       )}
