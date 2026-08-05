@@ -392,6 +392,9 @@ function TrainingLog() {
   // Separate from the main chart's exercise filter above — the PR list can get long once
   // you're tracking a lot of exercises, so it gets its own lightweight group selector.
   const [prGroupFilter, setPrGroupFilter] = useState("All");
+  // "active" hides exercises you've since untracked (stopped doing) even though they still
+  // have historical PRs; "all" shows every exercise ever logged, including retired ones.
+  const [prScope, setPrScope] = useState("active");
   const [metric, setMetric] = useState("reps");
   const [range, setRange] = useState("all");
   const [timeView, setTimeView] = useState("day"); // "day" (per session) or "week" (aggregated)
@@ -1291,18 +1294,24 @@ function TrainingLog() {
               </div>
 
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                     <Award size={14} color="#F2C94C" />
                     <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>PRs (estimated 1RM, all-time)</span>
                   </div>
-                  <select value={prGroupFilter} onChange={(e) => setPrGroupFilter(e.target.value)} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 6px", color: "#c9cdd3", fontSize: 11, flexShrink: 0 }}>
-                    <option value="All">All</option>
-                    {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
-                  </select>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <select value={prScope} onChange={(e) => setPrScope(e.target.value)} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 6px", color: "#c9cdd3", fontSize: 11 }}>
+                      <option value="active">Active only</option>
+                      <option value="all">All (incl. retired)</option>
+                    </select>
+                    <select value={prGroupFilter} onChange={(e) => setPrGroupFilter(e.target.value)} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 6px", color: "#c9cdd3", fontSize: 11 }}>
+                      <option value="All">All groups</option>
+                      {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
-                  {chartExercises.filter((name) => prGroupFilter === "All" || muscleGroupMap[name] === prGroupFilter).map((name) => {
+                  {chartExercises.filter((name) => (prScope === "all" || trackedExercises.includes(name)) && (prGroupFilter === "All" || muscleGroupMap[name] === prGroupFilter)).map((name) => {
                     const pr = prMap[name];
                     if (!pr || pr.best1RM < 0) return null;
                     const age = prAgeLabel(pr.daysAgo);
@@ -1319,6 +1328,9 @@ function TrainingLog() {
                       </div>
                     );
                   })}
+                  {chartExercises.filter((name) => (prScope === "all" || trackedExercises.includes(name)) && (prGroupFilter === "All" || muscleGroupMap[name] === prGroupFilter) && prMap[name] && prMap[name].best1RM >= 0).length === 0 && (
+                    <div style={{ fontSize: 12, color: "#5a5f66" }}>No PRs match this filter yet.</div>
+                  )}
                 </div>
                 <div style={{ fontSize: 10, color: "#4a4f56", marginTop: 8 }} className="mono">1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), best set of each session</div>
               </div>
