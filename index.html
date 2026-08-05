@@ -389,6 +389,9 @@ function TrainingLog() {
   const [sessions, setSessions] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [filter, setFilter] = useState("All");
+  // Separate from the main chart's exercise filter above — the PR list can get long once
+  // you're tracking a lot of exercises, so it gets its own lightweight group selector.
+  const [prGroupFilter, setPrGroupFilter] = useState("All");
   const [metric, setMetric] = useState("reps");
   const [range, setRange] = useState("all");
   const [timeView, setTimeView] = useState("day"); // "day" (per session) or "week" (aggregated)
@@ -1288,12 +1291,18 @@ function TrainingLog() {
               </div>
 
               <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                  <Award size={14} color="#F2C94C" />
-                  <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (estimated 1RM, all-time)</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <Award size={14} color="#F2C94C" />
+                    <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>PRs (estimated 1RM, all-time)</span>
+                  </div>
+                  <select value={prGroupFilter} onChange={(e) => setPrGroupFilter(e.target.value)} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 6px", color: "#c9cdd3", fontSize: 11, flexShrink: 0 }}>
+                    <option value="All">All</option>
+                    {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                  </select>
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
-                  {chartExercises.map((name) => {
+                  {chartExercises.filter((name) => prGroupFilter === "All" || muscleGroupMap[name] === prGroupFilter).map((name) => {
                     const pr = prMap[name];
                     if (!pr || pr.best1RM < 0) return null;
                     const age = prAgeLabel(pr.daysAgo);
