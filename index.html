@@ -78,6 +78,8 @@ const Upload = (p) => <Icon {...p}><path d="M12 21V9" /><polyline points="7 14 1
 const GitCompare = (p) => <Icon {...p}><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5V13a3 3 0 0 0 3 3h3" /><path d="M18 15.5V11a3 3 0 0 0-3-3h-3" /></Icon>;
 const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></Icon>;
 const Settings2 = (p) => <Icon {...p}><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></Icon>;
+const Waves = (p) => <Icon {...p}><path d="M2 6c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 12c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 18c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /></Icon>;
+const ChevronDown = (p) => <Icon {...p}><polyline points="6 9 12 15 18 9" /></Icon>;
 
 // ---- window.storage polyfill backed by localStorage (persists per-browser on GitHub Pages) ----
 window.storage = {
@@ -383,7 +385,726 @@ const migrate = (loaded) =>
 const TABS = [
   { id: "dashboard", label: "Dashboard", Icon: LayoutGrid },
   { id: "history", label: "History & Log", Icon: History },
+  { id: "swim", label: "Swimming", Icon: Waves },
 ];
+
+// =====================================================================================
+// SWIMMING — FIT file parsing + swim dashboard. Self-contained: its own storage keys,
+// its own state, its own render tree. Does not touch any calisthenics state/logic above.
+// =====================================================================================
+
+// ---- Minimal client-side Garmin .FIT binary parser -----------------------------------
+// Implements just enough of the FIT protocol (definition/data messages, normal +
+// compressed-timestamp headers, little/big-endian) to pull session/length/record
+// messages out of a swim activity. Not a general-purpose FIT SDK.
+const FIT_BASE_TYPES = {
+  0x00: "enum", 0x01: "sint8", 0x02: "uint8", 0x83: "sint16", 0x84: "uint16",
+  0x85: "sint32", 0x86: "uint32", 0x07: "string", 0x88: "float32", 0x89: "float64",
+  0x0a: "uint8z", 0x8b: "uint16z", 0x8c: "uint32z", 0x0d: "byte", 0x8e: "sint64",
+  0x8f: "uint64", 0x90: "uint64z",
+};
+const FIT_INVALID = {
+  enum: 0xff, sint8: 0x7f, uint8: 0xff, sint16: 0x7fff, uint16: 0xffff,
+  sint32: 0x7fffffff, uint32: 0xffffffff, uint8z: 0, uint16z: 0, uint32z: 0, byte: 0xff,
+};
+const FIT_EPOCH_OFFSET = 631065600; // seconds between Unix epoch and FIT epoch (1989-12-31T00:00:00Z)
+
+function fitTimestampToDate(raw) {
+  if (raw == null) return null;
+  return new Date((raw + FIT_EPOCH_OFFSET) * 1000);
+}
+
+// Parses raw FIT bytes into arrays of loosely-typed message records, keyed by field number
+// (e.g. `f253` = field 253 = timestamp on most message types). Global message numbers used:
+// 18 = session, 19 = lap, 101 = length, 20 = record.
+function parseFitBinary(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  const byteLength = arrayBuffer.byteLength;
+  if (byteLength < 14) throw new Error("File too small to be a valid .FIT file.");
+  const headerSize = view.getUint8(0);
+  const sig = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+  if (sig !== ".FIT") throw new Error("Not a recognized .FIT file (missing signature).");
+  const dataSize = view.getUint32(4, true);
+  const end = Math.min(headerSize + dataSize, byteLength - 2);
+
+  const localDefs = {};
+  let lastTimestamp = null;
+  const messages = { 18: [], 19: [], 101: [], 20: [] }; // session, lap, length, record
+
+  function readScalar(off, baseTypeName, littleEndian) {
+    switch (baseTypeName) {
+      case "enum": case "uint8": case "uint8z": case "byte": return view.getUint8(off);
+      case "sint8": return view.getInt8(off);
+      case "uint16": case "uint16z": return view.getUint16(off, littleEndian);
+      case "sint16": return view.getInt16(off, littleEndian);
+      case "uint32": case "uint32z": return view.getUint32(off, littleEndian);
+      case "sint32": return view.getInt32(off, littleEndian);
+      case "float32": return view.getFloat32(off, littleEndian);
+      case "float64": return view.getFloat64(off, littleEndian);
+      case "string": return null; // strings unused for our fields; skip decoding
+      default: return view.getUint8(off);
+    }
+  }
+
+  function readDataMessage(def, startOff) {
+    let off = startOff;
+    const rec = {};
+    for (const f of def.fields) {
+      const typeName = FIT_BASE_TYPES[f.baseType] || "byte";
+      // Fields we care about are always single scalars; if a field's declared size is
+      // larger than one element (array field), just read the first element and skip the rest.
+      const val = readScalar(off, typeName, def.littleEndian);
+      if (val != null && val !== FIT_INVALID[typeName]) rec["f" + f.fieldNum] = val;
+      off += f.size;
+    }
+    for (const df of def.devFields) off += df.size; // developer fields: skip raw bytes, unused
+    return { rec, newOffset: off };
+  }
+
+  let offset = headerSize;
+  while (offset < end) {
+    const headerByte = view.getUint8(offset); offset += 1;
+    const isCompressed = (headerByte & 0x80) !== 0;
+    let globalMesgNum, rec, newOffset;
+
+    if (isCompressed) {
+      const localType = (headerByte >> 5) & 0x03;
+      const timeOffset = headerByte & 0x1f;
+      const def = localDefs[localType];
+      if (!def) break; // malformed / unsupported stream — stop rather than misread
+      ({ rec, newOffset: offset } = readDataMessage(def, offset));
+      if (lastTimestamp != null) {
+        const base = lastTimestamp - (lastTimestamp & 0x1f);
+        let ts = base + timeOffset;
+        if (timeOffset < (lastTimestamp & 0x1f)) ts += 32;
+        lastTimestamp = ts;
+      }
+      if (rec.f253 == null && lastTimestamp != null) rec.f253 = lastTimestamp;
+      globalMesgNum = def.globalMesgNum;
+    } else {
+      const isDefinition = (headerByte & 0x40) !== 0;
+      const localType = headerByte & 0x0f;
+      if (isDefinition) {
+        const hasDevFields = (headerByte & 0x20) !== 0;
+        offset += 1; // reserved byte
+        const arch = view.getUint8(offset); offset += 1;
+        const littleEndian = arch === 0;
+        const gmn = view.getUint16(offset, littleEndian); offset += 2;
+        const numFields = view.getUint8(offset); offset += 1;
+        const fields = [];
+        for (let i = 0; i < numFields; i++) {
+          fields.push({ fieldNum: view.getUint8(offset), size: view.getUint8(offset + 1), baseType: view.getUint8(offset + 2) });
+          offset += 3;
+        }
+        const devFields = [];
+        if (hasDevFields) {
+          const numDev = view.getUint8(offset); offset += 1;
+          for (let i = 0; i < numDev; i++) {
+            devFields.push({ fieldNum: view.getUint8(offset), size: view.getUint8(offset + 1), devIndex: view.getUint8(offset + 2) });
+            offset += 3;
+          }
+        }
+        localDefs[localType] = { globalMesgNum: gmn, littleEndian, fields, devFields };
+        continue;
+      } else {
+        const def = localDefs[localType];
+        if (!def) break;
+        ({ rec, newOffset: offset } = readDataMessage(def, offset));
+        if (rec.f253 != null) lastTimestamp = rec.f253;
+        globalMesgNum = def.globalMesgNum;
+      }
+    }
+    if (messages[globalMesgNum]) messages[globalMesgNum].push(rec);
+  }
+  return { sessionMsgs: messages[18], lapMsgs: messages[19], lengthMsgs: messages[101], recordMsgs: messages[20] };
+}
+
+const SWIM_STROKE_NAMES = { 0: "freestyle", 1: "backstroke", 2: "breaststroke", 3: "butterfly", 4: "drill", 5: "mixed", 6: "im" };
+const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", unknown: "Unknown" };
+const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078" };
+// Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
+// only to flag likely sensor glitches, never to silently drop data outside this filter.
+const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130 };
+
+// Turns raw parsed FIT messages into a fully-computed swim session object, applying the
+// data-quality filtering rules (phantom lengths, implausible cadence) before any metric
+// is derived from the length data.
+function processSwimFit(parsed, fileName) {
+  const { sessionMsgs, lengthMsgs, recordMsgs } = parsed;
+  if (!lengthMsgs || lengthMsgs.length === 0) throw new Error("No per-length swim data found in this file (is it a pool-swim activity?).");
+  const sessionRec = sessionMsgs && sessionMsgs[0] ? sessionMsgs[0] : {};
+
+  const poolLength = sessionRec.f44 != null ? sessionRec.f44 / 100 : null; // meters
+  const sessionCalories = sessionRec.f11 != null ? sessionRec.f11 : null;
+  const reportedDistanceRaw = sessionRec.f9 != null ? sessionRec.f9 / 100 : null; // informational only, cross-checked below
+  const sessionStart = fitTimestampToDate(sessionRec.f2 != null ? sessionRec.f2 : sessionRec.f253);
+
+  const rawLengths = lengthMsgs.map((l) => {
+    const stroke = SWIM_STROKE_NAMES[l.f7] || "unknown";
+    const lengthType = l.f12 === 1 ? "active" : l.f12 === 0 ? "idle" : "unknown";
+    const totalStrokes = l.f5 != null ? l.f5 : 0;
+    const avgCadence = l.f9 != null ? l.f9 : 0;
+    const elapsedSec = l.f3 != null ? l.f3 / 1000 : (l.f4 != null ? l.f4 / 1000 : 0);
+    const startTime = fitTimestampToDate(l.f2 != null ? l.f2 : l.f253);
+    const calories = l.f11 != null ? l.f11 : null;
+    return { stroke, lengthType, totalStrokes, avgCadence, elapsedSec, startTime, calories };
+  });
+
+  const lengths = rawLengths.map((len, index) => {
+    let glitch = null;
+    if (len.lengthType === "active") {
+      if (len.totalStrokes === 0 && len.avgCadence === 0) {
+        glitch = "phantom length (0 strokes, 0 cadence)";
+      } else {
+        const maxC = SWIM_MAX_PLAUSIBLE_CADENCE[len.stroke] || 130;
+        if (len.avgCadence > maxC) glitch = `implausible cadence (${len.avgCadence} spm > ${maxC} plausible max for ${SWIM_STROKE_LABELS[len.stroke]})`;
+      }
+    }
+    const swolf = len.lengthType === "active" && !glitch ? Math.round(len.elapsedSec + len.totalStrokes) : null;
+    return { ...len, index, glitch, swolf };
+  });
+
+  const validActive = lengths.filter((l) => l.lengthType === "active" && !l.glitch);
+  const excludedActive = lengths.filter((l) => l.lengthType === "active" && l.glitch);
+  const idleLengths = lengths.filter((l) => l.lengthType === "idle");
+
+  const distanceValidated = poolLength != null ? Math.round(validActive.length * poolLength * 100) / 100 : null;
+  const swimTimeSec = validActive.reduce((a, l) => a + l.elapsedSec, 0);
+  const restTimeSec = idleLengths.reduce((a, l) => a + l.elapsedSec, 0);
+
+  // Cross-check the FIT session-level total_distance against our validated length-based
+  // count rather than trusting it outright — surfaced in the quality note if they disagree.
+  let distanceMismatchNote = null;
+  if (reportedDistanceRaw != null && distanceValidated != null && Math.abs(reportedDistanceRaw - distanceValidated) > (poolLength || 25) * 0.5) {
+    distanceMismatchNote = `FIT file reported ${reportedDistanceRaw}m at the session level, which disagrees with the ${distanceValidated}m validated from length records — using the validated figure.`;
+  }
+
+  let qualityNote = null;
+  if (excludedActive.length > 0) {
+    const phantomCount = excludedActive.filter((l) => l.glitch.startsWith("phantom")).length;
+    const cadenceCount = excludedActive.length - phantomCount;
+    const parts = [];
+    if (phantomCount) parts.push(`${phantomCount} phantom (0 strokes/cadence)`);
+    if (cadenceCount) parts.push(`${cadenceCount} implausible-cadence`);
+    qualityNote = `${excludedActive.length} of ${validActive.length + excludedActive.length} active lengths excluded: ${parts.join(", ")}.`;
+  }
+  if (distanceMismatchNote) qualityNote = qualityNote ? qualityNote + " " + distanceMismatchNote : distanceMismatchNote;
+
+  // Per-stroke session averages
+  const strokeGroups = {};
+  validActive.forEach((l) => {
+    if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = { swolfs: [], cadences: [], distPerStroke: [] };
+    if (l.swolf != null) strokeGroups[l.stroke].swolfs.push(l.swolf);
+    if (l.avgCadence > 0) strokeGroups[l.stroke].cadences.push(l.avgCadence);
+    if (l.totalStrokes > 0 && poolLength) strokeGroups[l.stroke].distPerStroke.push(poolLength / l.totalStrokes);
+  });
+  const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+  const strokeStats = {};
+  Object.keys(strokeGroups).forEach((stroke) => {
+    const g = strokeGroups[stroke];
+    strokeStats[stroke] = {
+      count: g.swolfs.length,
+      avgSwolf: avg(g.swolfs),
+      avgCadence: avg(g.cadences),
+      avgDistPerStroke: avg(g.distPerStroke),
+    };
+  });
+
+  // Reconstruct reps/sets from consecutive active lengths (a run broken by any idle length,
+  // in original recorded order) and compute pace per 100m for each.
+  const reps = [];
+  let currentRep = null;
+  lengths.forEach((l) => {
+    if (l.lengthType === "active" && !l.glitch) {
+      if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timeSec: 0, strokeSet: new Set() };
+      currentRep.lengthCount += 1;
+      currentRep.timeSec += l.elapsedSec;
+      currentRep.strokeSet.add(l.stroke);
+    } else if (l.lengthType === "idle") {
+      if (currentRep) { reps.push(currentRep); currentRep = null; }
+    }
+  });
+  if (currentRep) reps.push(currentRep);
+  const repSummaries = poolLength ? reps.map((r) => {
+    const distance = r.lengthCount * poolLength;
+    const pace100 = r.timeSec > 0 && distance > 0 ? (r.timeSec / distance) * 100 : null;
+    return { lengthCount: r.lengthCount, distance, timeSec: r.timeSec, pace100, stroke: r.strokeSet.size === 1 ? Array.from(r.strokeSet)[0] : "mixed" };
+  }) : [];
+
+  // Average HR from record messages within the session's timeframe (if the device recorded HR).
+  const hrValues = (recordMsgs || []).map((r) => r.f3).filter((v) => v != null && v > 0);
+  const avgHR = hrValues.length ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : null;
+  const pace100Overall = swimTimeSec > 0 && distanceValidated ? (swimTimeSec / distanceValidated) * 100 : null;
+
+  const dateISO = sessionStart ? toISODate(sessionStart) : new Date().toISOString().slice(0, 10);
+
+  return {
+    id: "swim-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+    fileName,
+    date: dateISO,
+    startTime: sessionStart ? sessionStart.toISOString() : null,
+    poolLength,
+    calories: sessionCalories,
+    distance: distanceValidated,
+    swimTimeSec,
+    restTimeSec,
+    pace100Overall,
+    avgHR,
+    totalActiveLengths: validActive.length + excludedActive.length,
+    validActiveLengths: validActive.length,
+    excludedCount: excludedActive.length,
+    qualityNote,
+    strokeStats,
+    lengths,
+    reps: repSummaries,
+    isCssTest: false,
+    cssTest: null, // { t200, t400 } seconds, entered manually — see SwimmingTab
+  };
+}
+
+const fmtMinSec = (totalSec) => {
+  if (totalSec == null || !isFinite(totalSec)) return "—";
+  const s = Math.round(totalSec);
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${String(rem).padStart(2, "0")}`;
+};
+const fmtPace100 = (secPer100) => (secPer100 == null ? "—" : `${fmtMinSec(secPer100)}/100m`);
+
+function SwimmingTab({ isMobile }) {
+  const [sessions, setSessions] = useState(null);
+  const [loadErr, setLoadErr] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [strokeFilter, setStrokeFilter] = useState("all");
+  const [cssDraftFor, setCssDraftFor] = useState(null); // session id currently editing CSS test values
+  const [cssDraft, setCssDraft] = useState({ t200: "", t400: "" });
+  const swimFileInputRef = useRef(null);
+  const SWIM_KEY = "swim-sessions-v1";
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(SWIM_KEY, false);
+        setSessions(res && res.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        setSessions([]);
+      }
+    })();
+  }, []);
+
+  const persist = async (next) => {
+    setSessions(next);
+    try { await window.storage.set(SWIM_KEY, JSON.stringify(next), false); } catch (_) {}
+  };
+
+  const handleFitUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setUploading(true);
+    setUploadMsg("");
+    const added = [];
+    const errors = [];
+    for (const file of files) {
+      try {
+        const buf = await file.arrayBuffer();
+        const parsed = parseFitBinary(buf);
+        const swimSession = processSwimFit(parsed, file.name);
+        added.push(swimSession);
+      } catch (err) {
+        errors.push(`${file.name}: ${err.message || "failed to parse"}`);
+      }
+    }
+    if (added.length) {
+      const next = [...(sessions || []), ...added].sort((a, b) => (a.date < b.date ? 1 : -1));
+      await persist(next);
+    }
+    setUploading(false);
+    const parts = [];
+    if (added.length) parts.push(`Imported ${added.length} swim session${added.length > 1 ? "s" : ""}.`);
+    if (errors.length) parts.push(`Failed: ${errors.join(" · ")}`);
+    setUploadMsg(parts.join(" "));
+    if (swimFileInputRef.current) swimFileInputRef.current.value = "";
+  };
+
+  const deleteSession = async (id) => {
+    const next = (sessions || []).filter((s) => s.id !== id);
+    await persist(next);
+  };
+
+  const saveCssTest = async (id) => {
+    const t200 = parseFloat(cssDraft.t200), t400 = parseFloat(cssDraft.t400);
+    if (!t200 || !t400 || t400 <= t200) { setCssDraftFor(null); return; }
+    const cssSpeed = (400 - 200) / (t400 - t200); // m/s
+    const pace100 = cssSpeed > 0 ? 100 / cssSpeed : null;
+    const next = (sessions || []).map((s) => (s.id === id ? { ...s, isCssTest: true, cssTest: { t200, t400, cssSpeed, pace100 } } : s));
+    await persist(next);
+    setCssDraftFor(null);
+    setCssDraft({ t200: "", t400: "" });
+  };
+
+  const todayStr = toISODate(new Date());
+
+  const streak = useMemo(() => {
+    if (!sessions || sessions.length === 0) return null;
+    const weekKeySet = new Set(sessions.map((s) => toISODate(mondayOf(s.date))));
+    const currentMonday = mondayOf(todayStr);
+    let wStreak = 0, firstIter = true;
+    let cursor = new Date(currentMonday);
+    for (let i = 0; i < 104; i++) {
+      const key = toISODate(cursor);
+      if (weekKeySet.has(key)) wStreak++;
+      else if (!firstIter) break;
+      firstIter = false;
+      cursor.setDate(cursor.getDate() - 7);
+    }
+    const dayKeySet = new Set(sessions.map((s) => s.date));
+    let dStreak = 0; let dCursor = new Date(todayStr + "T00:00:00");
+    // Day streak starts counting from today/yesterday backward; if nothing logged today it
+    // still counts an active streak through yesterday.
+    if (!dayKeySet.has(toISODate(dCursor))) dCursor.setDate(dCursor.getDate() - 1);
+    for (let i = 0; i < 365; i++) {
+      const key = toISODate(dCursor);
+      if (dayKeySet.has(key)) { dStreak++; dCursor.setDate(dCursor.getDate() - 1); } else break;
+    }
+    const sorted = [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const daysSinceLast = dayDiff(sorted[sorted.length - 1].date, todayStr);
+    return { weekStreak: wStreak, dayStreak: dStreak, daysSinceLast, totalSessions: sessions.length };
+  }, [sessions, todayStr]);
+
+  const sortedSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => (a.date < b.date ? 1 : -1)) : []), [sessions]);
+
+  const allStrokesSeen = useMemo(() => {
+    const set = new Set();
+    (sessions || []).forEach((s) => Object.keys(s.strokeStats || {}).forEach((k) => set.add(k)));
+    return Array.from(set);
+  }, [sessions]);
+
+  // Trend series, oldest -> newest, one point per session.
+  const trendData = useMemo(() => {
+    const chron = sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
+    return chron.map((s) => {
+      const point = { date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall, avgHR: s.avgHR };
+      allStrokesSeen.forEach((stroke) => {
+        const st = s.strokeStats && s.strokeStats[stroke];
+        point[`swolf_${stroke}`] = st ? st.avgSwolf : null;
+        point[`cadence_${stroke}`] = st ? st.avgCadence : null;
+        point[`dps_${stroke}`] = st ? st.avgDistPerStroke : null;
+      });
+      return point;
+    });
+  }, [sessions, allStrokesSeen]);
+
+  const cssTrendData = useMemo(() => {
+    const chron = sessions ? [...sessions].filter((s) => s.isCssTest && s.cssTest).sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
+    return chron.map((s) => ({ date: s.date, label: fmtDate(s.date), cssPace100: s.cssTest.pace100, cssSpeed: s.cssTest.cssSpeed }));
+  }, [sessions]);
+
+  if (sessions === null) {
+    return <div style={{ color: "#6b7078", fontSize: 13, padding: "24px 0" }}>Loading swim data…</div>;
+  }
+
+  const cardStyle = { background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: isMobile ? 14 : 18, marginBottom: 18 };
+  const labelStyle = { fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 };
+
+  return (
+    <div>
+      {/* Upload */}
+      <div style={cardStyle}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: uploadMsg ? 10 : 0 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE", marginBottom: 3 }}>Import swim activity</div>
+            <div style={{ fontSize: 12, color: "#6b7078" }}>Upload Garmin <span className="mono">.FIT</span> files (pool swims) — parsed entirely in your browser, nothing is uploaded anywhere.</div>
+          </div>
+          <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#56CCF2", color: "#101214", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
+            <Upload size={14} /> {uploading ? "Parsing…" : "Upload .FIT"}
+            <input ref={swimFileInputRef} type="file" accept=".fit" multiple onChange={handleFitUpload} disabled={uploading} />
+          </label>
+        </div>
+        {uploadMsg && <div style={{ fontSize: 12, color: uploadMsg.includes("Failed") ? "#E63946" : "#6FCF97", marginTop: 4 }}>{uploadMsg}</div>}
+      </div>
+
+      {sessions.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7078", fontSize: 13 }}>
+          No swim sessions yet — upload a .FIT file to get started.
+        </div>
+      ) : (
+        <>
+          {/* Streak */}
+          <div style={cardStyle}>
+            <div style={{ ...labelStyle, marginBottom: 12 }}>Streak</div>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 12 }}>
+              <div>
+                <div className="disp" style={{ fontSize: 26, fontWeight: 700, color: "#56CCF2" }}>{streak.weekStreak}</div>
+                <div style={{ fontSize: 11, color: "#9a9fa6" }}>Week streak</div>
+              </div>
+              <div>
+                <div className="disp" style={{ fontSize: 26, fontWeight: 700, color: "#F5F3EE" }}>{streak.dayStreak}</div>
+                <div style={{ fontSize: 11, color: "#9a9fa6" }}>Day streak</div>
+              </div>
+              <div>
+                <div className="disp" style={{ fontSize: 26, fontWeight: 700, color: "#F5F3EE" }}>{streak.totalSessions}</div>
+                <div style={{ fontSize: 11, color: "#9a9fa6" }}>Sessions logged</div>
+              </div>
+              <div>
+                <div className="disp" style={{ fontSize: 26, fontWeight: 700, color: streak.daysSinceLast > 7 ? "#E63946" : "#F5F3EE" }}>{streak.daysSinceLast}d</div>
+                <div style={{ fontSize: 11, color: "#9a9fa6" }}>Since last swim</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Trend charts */}
+          <div style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <div style={labelStyle}>Trends</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {["all", ...allStrokesSeen].map((s) => (
+                  <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
+                    cursor: "pointer", background: strokeFilter === s ? "#22262b" : "transparent",
+                    border: "1px solid " + (strokeFilter === s ? "#3a3f45" : "#22262b"), color: strokeFilter === s ? "#F5F3EE" : "#8a8f98",
+                    borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                  }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Pace at HR */}
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#c9cdd3", marginBottom: 8 }}>Pace &amp; heart rate over time</div>
+              {trendData.some((d) => d.avgHR != null) ? (
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                    <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                    <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
+                    <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                    <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v, name) => name === "Pace" ? [fmtPace100(v), name] : [v ? `${v} bpm` : "—", name]} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                    <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ fontSize: 12, color: "#6b7078", padding: "16px 0" }}>No heart-rate data found in any uploaded session — showing pace alone.</div>
+              )}
+              {!trendData.some((d) => d.avgHR != null) && trendData.some((d) => d.pace100 != null) && (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                    <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                    <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
+                    <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                    <Line type="monotone" dataKey="pace100" name="Pace /100m" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* SWOLF by stroke */}
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#c9cdd3", marginBottom: 8 }}>SWOLF over time (by stroke — only compare across sessions in the same pool length)</div>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                  <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                  <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                  <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {(strokeFilter === "all" ? allStrokesSeen : [strokeFilter]).map((stroke) => (
+                    <Line key={stroke} type="monotone" dataKey={`swolf_${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Stroke rate / cadence by stroke */}
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#c9cdd3", marginBottom: 8 }}>Stroke rate over time (spm, by stroke)</div>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                  <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                  <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                  <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {(strokeFilter === "all" ? allStrokesSeen : [strokeFilter]).map((stroke) => (
+                    <Line key={stroke} type="monotone" dataKey={`cadence_${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Distance per stroke */}
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#c9cdd3", marginBottom: 8 }}>Distance per stroke over time (m, by stroke)</div>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                  <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                  <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                  <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => (v != null ? v.toFixed(2) + "m" : "—")} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {(strokeFilter === "all" ? allStrokesSeen : [strokeFilter]).map((stroke) => (
+                    <Line key={stroke} type="monotone" dataKey={`dps_${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* CSS trend */}
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#c9cdd3", marginBottom: 8 }}>Critical Swim Speed (CSS) over time</div>
+              {cssTrendData.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#6b7078", background: "#101214", border: "1px dashed #22262b", borderRadius: 10, padding: "12px 14px" }}>
+                  No CSS test logged yet. CSS isn't estimated from casual sessions — mark a real 200m/400m time-trial session below ("Log as CSS test") to start this chart.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                    <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                    <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
+                    <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                    <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#2EC4B6" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          {/* Session log */}
+          <div style={cardStyle}>
+            <div style={{ ...labelStyle, marginBottom: 12 }}>Session log</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {sortedSessions.map((s) => {
+                const isOpen = expandedId === s.id;
+                return (
+                  <div key={s.id} style={{ border: "1px solid #22262b", borderRadius: 10, overflow: "hidden" }}>
+                    <div onClick={() => setExpandedId(isOpen ? null : s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", cursor: "pointer", background: "#101214", flexWrap: "wrap", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <ChevronDown size={14} style={{ color: "#6b7078", flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE", display: "flex", alignItems: "center", gap: 6 }}>
+                            {fmtDateFull(s.date)}
+                            {s.isCssTest && <span className="mono" style={{ fontSize: 9.5, color: "#2EC4B6", border: "1px solid #2EC4B655", borderRadius: 5, padding: "1px 5px" }}>CSS TEST</span>}
+                            {s.qualityNote && <AlertTriangle size={12} style={{ color: "#F2994A" }} title={s.qualityNote} />}
+                          </div>
+                          <div className="mono" style={{ fontSize: 11, color: "#6b7078" }}>{s.fileName}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
+                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{s.distance != null ? `${s.distance}m` : "—"}</div><div style={{ color: "#6b7078", fontSize: 10 }}>distance</div></div>
+                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{fmtMinSec(s.swimTimeSec)}</div><div style={{ color: "#6b7078", fontSize: 10 }}>swim time</div></div>
+                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{s.calories != null ? s.calories : "—"}</div><div style={{ color: "#6b7078", fontSize: 10 }}>kcal</div></div>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div style={{ padding: 14, background: "#16181b" }}>
+                        {s.qualityNote && (
+                          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#101214", border: "1px dashed #F2994A55", borderRadius: 8, padding: "8px 10px", fontSize: 11.5, color: "#F2994A", marginBottom: 12 }}>
+                            <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> {s.qualityNote}
+                          </div>
+                        )}
+                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
+                          <div><div style={{ fontSize: 10.5, color: "#6b7078" }}>Pool length</div><div className="mono" style={{ fontSize: 13, color: "#F5F3EE" }}>{s.poolLength != null ? `${s.poolLength}m` : "—"}</div></div>
+                          <div><div style={{ fontSize: 10.5, color: "#6b7078" }}>Rest time</div><div className="mono" style={{ fontSize: 13, color: "#F5F3EE" }}>{fmtMinSec(s.restTimeSec)}</div></div>
+                          <div><div style={{ fontSize: 10.5, color: "#6b7078" }}>Overall pace</div><div className="mono" style={{ fontSize: 13, color: "#F5F3EE" }}>{fmtPace100(s.pace100Overall)}</div></div>
+                          <div><div style={{ fontSize: 10.5, color: "#6b7078" }}>Avg HR</div><div className="mono" style={{ fontSize: 13, color: "#F5F3EE" }}>{s.avgHR != null ? `${s.avgHR} bpm` : "—"}</div></div>
+                        </div>
+
+                        {Object.keys(s.strokeStats || {}).length > 0 && (
+                          <div style={{ marginBottom: 14 }}>
+                            <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6 }}>Averages by stroke</div>
+                            <div style={{ display: "grid", gap: 6 }}>
+                              {Object.entries(s.strokeStats).map(([stroke, st]) => (
+                                <div key={stroke} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0", borderBottom: "1px solid #1d2024" }}>
+                                  <span style={{ color: SWIM_STROKE_COLORS[stroke], fontWeight: 600 }}>{SWIM_STROKE_LABELS[stroke]} <span style={{ color: "#6b7078", fontWeight: 400 }}>({st.count} lengths)</span></span>
+                                  <span className="mono" style={{ color: "#c9cdd3" }}>SWOLF {st.avgSwolf != null ? st.avgSwolf.toFixed(1) : "—"} · {st.avgCadence != null ? st.avgCadence.toFixed(0) : "—"}spm · {st.avgDistPerStroke != null ? st.avgDistPerStroke.toFixed(2) + "m/stroke" : "—"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {s.reps && s.reps.length > 0 && (
+                          <div style={{ marginBottom: 14 }}>
+                            <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6 }}>Reps (consecutive active lengths between rests)</div>
+                            <div style={{ display: "grid", gap: 4, maxHeight: 140, overflowY: "auto" }}>
+                              {s.reps.map((r, i) => (
+                                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#c9cdd3" }}>
+                                  <span>Rep {i + 1} · {r.lengthCount}×{s.poolLength}m ({SWIM_STROKE_LABELS[r.stroke] || r.stroke})</span>
+                                  <span className="mono">{fmtMinSec(r.timeSec)} · {fmtPace100(r.pace100)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6 }}>Length-by-length ({s.lengths.length} lengths — glitches flagged, not deleted)</div>
+                          <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #22262b", borderRadius: 8 }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+                              <thead style={{ position: "sticky", top: 0, background: "#101214" }}>
+                                <tr>
+                                  <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>#</th>
+                                  <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Type</th>
+                                  <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Stroke</th>
+                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Time</th>
+                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Strokes</th>
+                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Cadence</th>
+                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>SWOLF</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {s.lengths.map((l) => (
+                                  <tr key={l.index} style={{ background: l.glitch ? "#E6394615" : "transparent", borderTop: "1px solid #1d2024" }}>
+                                    <td className="mono" style={{ padding: "5px 8px", color: "#6b7078" }}>{l.index + 1}</td>
+                                    <td style={{ padding: "5px 8px", color: l.lengthType === "idle" ? "#6b7078" : "#c9cdd3" }}>{l.lengthType}{l.glitch ? " ⚠" : ""}</td>
+                                    <td style={{ padding: "5px 8px", color: SWIM_STROKE_COLORS[l.stroke] || "#c9cdd3" }}>{l.lengthType === "active" ? SWIM_STROKE_LABELS[l.stroke] : "—"}</td>
+                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.elapsedSec.toFixed(1)}s</td>
+                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.lengthType === "active" ? l.totalStrokes : "—"}</td>
+                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.lengthType === "active" ? l.avgCadence : "—"}</td>
+                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.swolf != null ? l.swolf : "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {s.lengths.some((l) => l.glitch) && (
+                            <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 6 }}>⚠ rows highlighted in red were excluded from distance/pace/SWOLF/cadence metrics as likely sensor glitches, but kept here for reference.</div>
+                          )}
+                        </div>
+
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          {!s.isCssTest && cssDraftFor !== s.id && (
+                            <button onClick={() => { setCssDraftFor(s.id); setCssDraft({ t200: "", t400: "" }); }} style={{ cursor: "pointer", background: "#16181b", border: "1px solid #2EC4B655", color: "#2EC4B6", borderRadius: 8, padding: "7px 12px", fontWeight: 600, fontSize: 11.5 }}>Log as CSS test</button>
+                          )}
+                          {cssDraftFor === s.id && (
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <input type="number" placeholder="200m time (s)" value={cssDraft.t200} onChange={(e) => setCssDraft({ ...cssDraft, t200: e.target.value })} className="mono" style={{ width: 120, background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <input type="number" placeholder="400m time (s)" value={cssDraft.t400} onChange={(e) => setCssDraft({ ...cssDraft, t400: e.target.value })} className="mono" style={{ width: 120, background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <button onClick={() => saveCssTest(s.id)} style={{ cursor: "pointer", background: "#2EC4B6", color: "#101214", border: "none", borderRadius: 8, padding: "7px 12px", fontWeight: 700, fontSize: 11.5 }}>Save</button>
+                              <button onClick={() => setCssDraftFor(null)} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 8, padding: "7px 12px", fontWeight: 600, fontSize: 11.5 }}>Cancel</button>
+                            </div>
+                          )}
+                          {s.isCssTest && s.cssTest && (
+                            <span className="mono" style={{ fontSize: 11.5, color: "#2EC4B6" }}>CSS pace: {fmtPace100(s.cssTest.pace100)} ({s.cssTest.cssSpeed.toFixed(2)} m/s)</span>
+                          )}
+                          <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 8, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function TrainingLog() {
   const [sessions, setSessions] = useState(null);
@@ -1607,6 +2328,8 @@ function TrainingLog() {
             </div>
           </>
         )}
+
+        {tab === "swim" && <SwimmingTab isMobile={isMobile} />}
 
         {tab === "history" && (
           <>
