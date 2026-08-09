@@ -104,6 +104,9 @@ const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><circle cx="1
 const Settings2 = (p) => <Icon {...p}><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></Icon>;
 const Waves = (p) => <Icon {...p}><path d="M2 6c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 12c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 18c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /></Icon>;
 const ChevronDown = (p) => <Icon {...p}><polyline points="6 9 12 15 18 9" /></Icon>;
+const TrendingDown = (p) => <Icon {...p}><polyline points="3 7 9 13 13 9 21 17" /><polyline points="21 10 21 17 14 17" /></Icon>;
+const Clock = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></Icon>;
+const Info = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><line x1="12" y1="11" x2="12" y2="16" /><line x1="12" y1="8" x2="12" y2="8.01" /></Icon>;
 const Sparkles = (p) => <Icon {...p}><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z" /><path d="M5 17l.8 2.2L8 20l-2.2.8L5 23l-.8-2.2L2 20l2.2-.8L5 17z" /><path d="M19 15l.7 1.8L21.5 17.5l-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7L19 15z" /></Icon>;
 
 // ---- window.storage polyfill backed by localStorage (persists per-browser on GitHub Pages) ----
@@ -925,6 +928,321 @@ function zScoreOf(v, stats) {
   return stats.std > 0 ? (v - stats.mean) / stats.std : 0;
 }
 
+// ============================================================================================
+// SWIM INSIGHTS — rule-based, fully local/deterministic interpretation engine.
+// No AI, no network calls. Every function below is a pure function over data the app already
+// computes (trendData / chronSessions) and returns either null (not enough signal to say
+// anything responsible) or a structured insight object. Thresholds are centralized so they can
+// be tuned in one place without touching the generator logic.
+// ============================================================================================
+const INSIGHT_THRESHOLDS = {
+  paceMeaningfulPct: 0.025,   // ~2.5% pace change to be worth mentioning
+  swolfMeaningfulPct: 0.03,   // ~3%
+  dpsMeaningfulPct: 0.03,     // ~3% distance-per-stroke change
+  cadenceMeaningfulPct: 0.04, // stroke-rate tolerance — noisier metric, wider band
+  hrMeaningfulBpm: 3,         // absolute bpm difference floor — don't read into 1-2bpm noise
+  recentWindow: 3,            // "latest session" comparisons use the last N sessions as "recent"
+  minBaselineWindow: 2,       // need at least this many sessions before the recent window
+  minPointsForPB: 4,          // minimum comparable sessions before calling something a personal best
+  mediumTermWeeks: 6,         // "improvement over time" lookback
+  frequencyGapMultiplier: 1.6,// gap-since-last-swim vs. typical gap, before nudging "time to swim"
+};
+
+// Semantic categories — color is always paired with an icon + title/text, never the sole signal.
+const INSIGHT_CATEGORIES = {
+  positive:     { color: "#6FCF97", bg: "rgba(111,207,151,0.12)", Icon: TrendingUp,     label: "Improving" },
+  neutral:      { color: "#56CCF2", bg: "rgba(86,204,242,0.12)",  Icon: Info,           label: "Steady" },
+  warning:      { color: "#F2994A", bg: "rgba(242,153,74,0.12)",  Icon: TrendingDown,   label: "Watch" },
+  achievement:  { color: "#F2C94C", bg: "rgba(242,201,76,0.14)",  Icon: Award,          label: "Personal best" },
+  reminder:     { color: "#BB86FC", bg: "rgba(187,134,252,0.12)", Icon: Clock,          label: "Reminder" },
+  insufficient: { color: "#6b7078", bg: "rgba(107,112,120,0.10)", Icon: Info,           label: "Building baseline" },
+};
+
+const avgOf = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+
+// Splits a chronological (oldest→newest) series of {date, v} points into a "recent window"
+// (last N) and everything before it as "baseline". Returns null when there isn't enough data
+// on both sides to make a responsible comparison.
+function splitRecentBaseline(points, recentWindow, minBaseline) {
+  if (points.length < recentWindow + minBaseline) return null;
+  const recent = points.slice(-recentWindow);
+  const baseline = points.slice(0, points.length - recentWindow);
+  return { recent, baseline, recentAvg: avgOf(recent.map((p) => p.v)), baselineAvg: avgOf(baseline.map((p) => p.v)) };
+}
+
+const pctChange = (recentAvg, baselineAvg) => (baselineAvg == null || baselineAvg === 0 || recentAvg == null ? null : (recentAvg - baselineAvg) / baselineAvg);
+
+// Extracts a clean, null-free, oldest→newest {date, v} series for one stroke's metric (or the
+// whole-session series when stroke is null) from trendData.
+function extractSeries(trendData, stroke, field) {
+  const key = stroke ? `${field}_${stroke}` : field;
+  return trendData.map((d) => ({ date: d.date, v: d[key] })).filter((p) => p.v != null);
+}
+
+// ---- 1. Personal best -----------------------------------------------------------------------
+// Only fires when the LATEST comparable point is strictly the best in its own history — never
+// inferred from a short recent window.
+function generatePersonalBestInsight(strokeLabel, paceSeries, swolfSeries) {
+  const th = INSIGHT_THRESHOLDS;
+  const checkBest = (series, label, unitFmt) => {
+    if (series.length < th.minPointsForPB) return null;
+    const latest = series[series.length - 1];
+    const priorBest = Math.min(...series.slice(0, -1).map((p) => p.v));
+    if (latest.v < priorBest) {
+      return { label, value: latest.v, unitFmt };
+    }
+    return null;
+  };
+  const paceBest = checkBest(paceSeries, "pace", fmtPace100);
+  if (paceBest) {
+    return {
+      id: "pb-pace", category: "achievement", priority: 1, confidence: "high",
+      title: `New ${strokeLabel} pace best`,
+      message: `Your latest ${strokeLabel.toLowerCase()} pace of ${fmtPace100(paceBest.value)} is the fastest in your available history for this stroke.`,
+      metrics: [{ label: "Pace", value: fmtPace100(paceBest.value) }],
+    };
+  }
+  const swolfBest = checkBest(swolfSeries, "swolf", (v) => Math.round(v));
+  if (swolfBest) {
+    return {
+      id: "pb-swolf", category: "achievement", priority: 1, confidence: "high",
+      title: "New efficiency best",
+      message: `This is your lowest comparable SWOLF for ${strokeLabel.toLowerCase()} — ${Math.round(swolfBest.value)}, better than anything else in your history for this stroke.`,
+      metrics: [{ label: "SWOLF", value: Math.round(swolfBest.value) }],
+    };
+  }
+  return null;
+}
+
+// ---- 2. Medium-term improvement (~6 weeks) --------------------------------------------------
+function generateImprovementInsight(strokeLabel, paceSeries, swolfSeries, dpsSeries, weeks) {
+  const th = INSIGHT_THRESHOLDS;
+  if (paceSeries.length < th.minPointsForPB) return null;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - weeks * 7);
+  const cutoffStr = toISODate(cutoff);
+  const recent = paceSeries.filter((p) => p.date >= cutoffStr);
+  const older = paceSeries.filter((p) => p.date < cutoffStr);
+  if (recent.length < 2 || older.length < 2) return null;
+  const recentAvg = avgOf(recent.map((p) => p.v)), olderAvg = avgOf(older.map((p) => p.v));
+  const pct = pctChange(recentAvg, olderAvg);
+  if (pct == null || Math.abs(pct) < th.paceMeaningfulPct) return null;
+  const improving = pct < 0; // lower pace = faster
+  const pctAbs = Math.round(Math.abs(pct) * 1000) / 10;
+
+  // Check whether swolf/dps moved in a way consistent with an efficiency story over the same window.
+  const swolfRecent = swolfSeries.filter((p) => p.date >= cutoffStr), swolfOlder = swolfSeries.filter((p) => p.date < cutoffStr);
+  const dpsRecent = dpsSeries.filter((p) => p.date >= cutoffStr), dpsOlder = dpsSeries.filter((p) => p.date < cutoffStr);
+  const swolfPct = swolfRecent.length >= 2 && swolfOlder.length >= 2 ? pctChange(avgOf(swolfRecent.map((p) => p.v)), avgOf(swolfOlder.map((p) => p.v))) : null;
+  const dpsPct = dpsRecent.length >= 2 && dpsOlder.length >= 2 ? pctChange(avgOf(dpsRecent.map((p) => p.v)), avgOf(dpsOlder.map((p) => p.v))) : null;
+
+  if (improving) {
+    let extra = "";
+    if (swolfPct != null && swolfPct < -th.swolfMeaningfulPct && dpsPct != null && dpsPct > th.dpsMeaningfulPct) {
+      extra = " SWOLF decreased and distance per stroke increased over the same window — that combination is consistent with improved efficiency rather than just swimming harder.";
+    } else if (swolfPct != null && swolfPct < -th.swolfMeaningfulPct) {
+      extra = " SWOLF also decreased over the same window, which points toward better efficiency.";
+    }
+    return {
+      id: "improve-pace", category: "positive", priority: 2, confidence: recent.length >= 3 ? "high" : "medium",
+      title: "You're getting faster",
+      message: `Your ${strokeLabel.toLowerCase()} pace improved ${pctAbs}% over the last ${weeks} weeks compared to your baseline before that.${extra}`,
+      metrics: [{ label: "Pace", value: `${pctAbs}% faster` }],
+    };
+  }
+  return {
+    id: "decline-pace", category: "warning", priority: 2, confidence: recent.length >= 3 ? "high" : "medium",
+    title: "Pace has slipped recently",
+    message: `Your ${strokeLabel.toLowerCase()} pace is ${pctAbs}% slower over the last ${weeks} weeks compared to your baseline before that. Worth keeping an eye on, not necessarily a problem.`,
+    metrics: [{ label: "Pace", value: `${pctAbs}% slower` }],
+  };
+}
+
+// ---- 3. Strong / weak latest session ---------------------------------------------------------
+function generateLatestSessionInsight(strokeLabel, paceSeries) {
+  const th = INSIGHT_THRESHOLDS;
+  const split = splitRecentBaseline(paceSeries, 1, th.recentWindow + th.minBaselineWindow - 1);
+  if (!split) return null;
+  const baselineRecent = paceSeries.slice(-(th.recentWindow + 1), -1); // the window just before the latest
+  if (baselineRecent.length < 2) return null;
+  const latest = paceSeries[paceSeries.length - 1];
+  const baselineAvg = avgOf(baselineRecent.map((p) => p.v));
+  const pct = pctChange(latest.v, baselineAvg);
+  if (pct == null || Math.abs(pct) < th.paceMeaningfulPct) return null;
+  const pctAbs = Math.round(Math.abs(pct) * 1000) / 10;
+  if (pct < 0) {
+    return {
+      id: "latest-strong", category: "positive", priority: 3, confidence: "medium",
+      title: "Strong latest session",
+      message: `Your latest ${strokeLabel.toLowerCase()} swim was faster than your recent baseline — pace was ${pctAbs}% quicker than your last few sessions.`,
+      metrics: [{ label: "Pace", value: `${pctAbs}% faster than recent baseline` }],
+    };
+  }
+  return {
+    id: "latest-weak", category: "warning", priority: 3, confidence: "medium",
+    title: "Slower than your recent average",
+    message: `Your latest ${strokeLabel.toLowerCase()} swim was ${pctAbs}% slower than your last few sessions. Could just be an off day — one session isn't a trend.`,
+    metrics: [{ label: "Pace", value: `${pctAbs}% slower than recent baseline` }],
+  };
+}
+
+// ---- 5/6. Pace vs. stroke rate, pace vs. stroke distance --------------------------------------
+function generatePaceRelationshipInsight(strokeLabel, paceSeries, otherSeries, otherField, weeks) {
+  const th = INSIGHT_THRESHOLDS;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - weeks * 7);
+  const cutoffStr = toISODate(cutoff);
+  const pRecent = paceSeries.filter((p) => p.date >= cutoffStr), pOlder = paceSeries.filter((p) => p.date < cutoffStr);
+  const oRecent = otherSeries.filter((p) => p.date >= cutoffStr), oOlder = otherSeries.filter((p) => p.date < cutoffStr);
+  if (pRecent.length < 2 || pOlder.length < 2 || oRecent.length < 2 || oOlder.length < 2) return null;
+  const pacePct = pctChange(avgOf(pRecent.map((p) => p.v)), avgOf(pOlder.map((p) => p.v)));
+  const otherPct = pctChange(avgOf(oRecent.map((p) => p.v)), avgOf(oOlder.map((p) => p.v)));
+  if (pacePct == null || otherPct == null || pacePct >= -th.paceMeaningfulPct) return null; // only interpret when pace actually improved
+  const pacePctAbs = Math.round(Math.abs(pacePct) * 1000) / 10;
+
+  if (otherField === "cadence") {
+    const th2 = th.cadenceMeaningfulPct;
+    if (Math.abs(otherPct) < th2) {
+      return {
+        id: "rel-strokerate-stable", category: "positive", priority: 5, confidence: "medium",
+        title: "Faster without higher turnover",
+        message: `Your ${strokeLabel.toLowerCase()} pace improved ${pacePctAbs}% while stroke rate stayed about the same. That suggests the improvement is coming from covering more distance per stroke rather than just turning over faster.`,
+        metrics: [{ label: "Pace", value: `${pacePctAbs}% faster` }, { label: "Stroke rate", value: "stable" }],
+      };
+    }
+    if (otherPct > th2) {
+      return {
+        id: "rel-strokerate-up", category: "neutral", priority: 5, confidence: "medium",
+        title: "Faster, with more turnover",
+        message: `Your ${strokeLabel.toLowerCase()} pace improved ${pacePctAbs}%, but stroke rate also increased. You're moving faster, though the data suggests greater turnover is contributing to it.`,
+        metrics: [{ label: "Pace", value: `${pacePctAbs}% faster` }, { label: "Stroke rate", value: "up" }],
+      };
+    }
+  }
+  if (otherField === "dps") {
+    const th2 = th.dpsMeaningfulPct;
+    if (otherPct > th2) {
+      return {
+        id: "rel-strokedist-up", category: "positive", priority: 6, confidence: "medium",
+        title: "More distance per stroke",
+        message: `You're swimming ${strokeLabel.toLowerCase()} ${pacePctAbs}% faster while covering more distance with each stroke. This is consistent with improving efficiency.`,
+        metrics: [{ label: "Pace", value: `${pacePctAbs}% faster` }, { label: "Distance/stroke", value: "up" }],
+      };
+    }
+    if (otherPct < -th2) {
+      return {
+        id: "rel-strokedist-down", category: "neutral", priority: 6, confidence: "medium",
+        title: "Faster, but not necessarily more efficient",
+        message: `Your ${strokeLabel.toLowerCase()} pace improved ${pacePctAbs}%, although distance per stroke decreased. The improvement may be coming from increased stroke turnover rather than efficiency.`,
+        metrics: [{ label: "Pace", value: `${pacePctAbs}% faster` }, { label: "Distance/stroke", value: "down" }],
+      };
+    }
+  }
+  return null;
+}
+
+// ---- 7. Pace vs. heart rate --------------------------------------------------------------------
+// HR is only ever recorded whole-session in this app (not per-stroke), so this always compares
+// whole-session pace against whole-session HR — never a specific stroke's pace.
+function generateHeartRateInsight(overallPaceSeries, hrSeries, weeks, strokeFilterActive) {
+  const th = INSIGHT_THRESHOLDS;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - weeks * 7);
+  const cutoffStr = toISODate(cutoff);
+  const pRecent = overallPaceSeries.filter((p) => p.date >= cutoffStr), pOlder = overallPaceSeries.filter((p) => p.date < cutoffStr);
+  const hRecent = hrSeries.filter((p) => p.date >= cutoffStr), hOlder = hrSeries.filter((p) => p.date < cutoffStr);
+  if (pRecent.length < 2 || pOlder.length < 2 || hRecent.length < 2 || hOlder.length < 2) return null;
+  const pacePct = pctChange(avgOf(pRecent.map((p) => p.v)), avgOf(pOlder.map((p) => p.v)));
+  if (pacePct == null || pacePct >= -th.paceMeaningfulPct) return null;
+  const hrRecentAvg = avgOf(hRecent.map((p) => p.v)), hrOlderAvg = avgOf(hOlder.map((p) => p.v));
+  const hrDiff = hrRecentAvg - hrOlderAvg;
+  const pacePctAbs = Math.round(Math.abs(pacePct) * 1000) / 10;
+  const caveat = strokeFilterActive ? " (heart rate reflects the whole session, not just this stroke)" : "";
+  if (Math.abs(hrDiff) < th.hrMeaningfulBpm) {
+    return {
+      id: "hr-similar-effort", category: "positive", priority: 7, confidence: "medium",
+      title: "Faster at similar effort",
+      message: `Your recent pace is ${pacePctAbs}% faster while average heart rate stayed close to your usual baseline${caveat}. That's a positive sign for aerobic performance.`,
+      metrics: [{ label: "Pace", value: `${pacePctAbs}% faster` }, { label: "Avg HR", value: "~unchanged" }],
+    };
+  }
+  if (hrDiff > th.hrMeaningfulBpm) {
+    return {
+      id: "hr-more-effort", category: "neutral", priority: 7, confidence: "medium",
+      title: "Faster, but with more effort",
+      message: `Pace improved ${pacePctAbs}%, although average heart rate was also higher than your normal baseline${caveat}.`,
+      metrics: [{ label: "Pace", value: `${pacePctAbs}% faster` }, { label: "Avg HR", value: `+${Math.round(hrDiff)} bpm` }],
+    };
+  }
+  return null;
+}
+
+// ---- 8. Training frequency / "time to swim" ----------------------------------------------------
+function generateFrequencyInsight(chronSessions, todayStr) {
+  if (chronSessions.length < 3) return null;
+  const recent = chronSessions.slice(-8);
+  const gaps = [];
+  for (let i = 1; i < recent.length; i++) gaps.push(dayDiff(recent[i - 1].date, recent[i].date));
+  if (gaps.length < 2) return null;
+  const sortedGaps = [...gaps].sort((a, b) => a - b);
+  const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+  if (medianGap <= 0) return null;
+  const daysSinceLast = dayDiff(chronSessions[chronSessions.length - 1].date, todayStr);
+  if (daysSinceLast < medianGap * INSIGHT_THRESHOLDS.frequencyGapMultiplier || daysSinceLast < 3) return null;
+  const perWeek = Math.max(1, Math.round((7 / medianGap) * 10) / 10);
+  return {
+    id: "frequency-gap", category: "reminder", priority: 8, confidence: "medium",
+    title: "Time to swim",
+    message: `You haven't logged a swim in ${daysSinceLast} days. You normally swim around ${perWeek} time${perWeek === 1 ? "" : "s"} per week — a swim today would bring you back toward your usual rhythm.`,
+    metrics: [{ label: "Days since last swim", value: daysSinceLast }],
+  };
+}
+
+// ---- Orchestration: gather everything applicable, rank, dedupe, return top 1-3 -----------------
+function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel, todayStr, strokeFilterActive }) {
+  if (!chronSessions || chronSessions.length === 0) return [];
+  if (chronSessions.length === 1) {
+    return [{
+      id: "baseline", category: "insufficient", priority: 99, confidence: "n/a",
+      title: "Build your baseline",
+      message: "Keep logging swims. Once MatWorkout has a few comparable sessions, Insights will start identifying meaningful pace, efficiency and consistency trends.",
+      metrics: [],
+    }];
+  }
+  if (!activeStroke) return [];
+  const paceSeries = extractSeries(trendData, activeStroke, "pace100");
+  const swolfSeries = extractSeries(trendData, activeStroke, "swolf");
+  const cadenceSeries = extractSeries(trendData, activeStroke, "cadence");
+  const dpsSeries = extractSeries(trendData, activeStroke, "dps");
+  const overallPaceSeries = extractSeries(trendData, null, "pace100");
+  const hrSeries = extractSeries(trendData, null, "avgHR");
+
+  if (paceSeries.length < 2) {
+    return [{
+      id: "baseline", category: "insufficient", priority: 99, confidence: "n/a",
+      title: "Build your baseline",
+      message: `Not enough comparable ${strokeLabel.toLowerCase()} sessions yet to interpret a trend. Keep logging and Insights will fill in.`,
+      metrics: [],
+    }];
+  }
+
+  const weeks = INSIGHT_THRESHOLDS.mediumTermWeeks;
+  const candidates = [
+    generatePersonalBestInsight(strokeLabel, paceSeries, swolfSeries),
+    generateImprovementInsight(strokeLabel, paceSeries, swolfSeries, dpsSeries, weeks),
+    generateLatestSessionInsight(strokeLabel, paceSeries),
+    generatePaceRelationshipInsight(strokeLabel, paceSeries, cadenceSeries, "cadence", weeks),
+    generatePaceRelationshipInsight(strokeLabel, paceSeries, dpsSeries, "dps", weeks),
+    generateHeartRateInsight(overallPaceSeries, hrSeries, weeks, strokeFilterActive),
+    generateFrequencyInsight(chronSessions, todayStr),
+  ].filter(Boolean);
+
+  // Dedup: a personal-best or medium-term improvement already tells the "getting faster" story,
+  // so suppress the more granular single-session verdict to avoid three cards saying the same thing.
+  const hasBigStory = candidates.some((c) => c.id === "pb-pace" || c.id === "improve-pace");
+  const deduped = candidates.filter((c) => !(hasBigStory && (c.id === "latest-strong")));
+
+  deduped.sort((a, b) => a.priority - b.priority);
+  return deduped.slice(0, 3);
+}
+
 function SwimmingTab({ isMobile }) {
   const [sessions, setSessions] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
@@ -932,6 +1250,7 @@ function SwimmingTab({ isMobile }) {
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
   const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "hr", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
+  const [compareMode, setCompareMode] = useState("cadence"); // "cadence" | "dps" — Pace+StrokeRate vs Pace+StrokeDistance overlay
   const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
   const [distanceDraft, setDistanceDraft] = useState("");
   const [activityStrokeFilter, setActivityStrokeFilter] = useState({}); // { [sessionId]: strokeName | "all" } — per-session pace chart filter
@@ -1624,6 +1943,58 @@ function SwimmingTab({ isMobile }) {
             </div>
           </div>
 
+          {/* Insights — rule-based, deterministic interpretation of your swim data. No AI, no
+              network calls: every line below is generated locally from data already computed
+              above (trendData / chronSessions). See buildSwimInsights and its generator
+              functions near the top of the file. */}
+          <div style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+              <Sparkles size={13} color="#F2C94C" />
+              <div style={{ ...labelStyle, marginBottom: 0 }}>Insights</div>
+            </div>
+            {(() => {
+              const strokeLabel = activeStroke ? SWIM_STROKE_LABELS[activeStroke] : "Swim";
+              const swimInsights = buildSwimInsights({
+                chronSessions, trendData, activeStroke, strokeLabel, todayStr,
+                strokeFilterActive: strokeFilter !== "all",
+              });
+              if (swimInsights.length === 0) {
+                return <div style={{ fontSize: 12.5, color: "#6b7078" }}>Log a swim to start seeing insights here.</div>;
+              }
+              return (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {swimInsights.map((ins) => {
+                    const cat = INSIGHT_CATEGORIES[ins.category];
+                    return (
+                      <div key={ins.id} style={{
+                        background: cat.bg, borderLeft: `3px solid ${cat.color}`, borderRadius: 10,
+                        padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start",
+                      }}>
+                        <cat.Icon size={16} color={cat.color} style={{ flexShrink: 0, marginTop: 1 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE" }}>{ins.title}</span>
+                            <span className="mono" style={{ fontSize: 9, color: cat.color, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>{cat.label}</span>
+                          </div>
+                          <div style={{ fontSize: 12.5, color: "#c9cdd3", lineHeight: 1.5 }}>{ins.message}</div>
+                          {ins.metrics.length > 0 && (
+                            <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                              {ins.metrics.map((m, i) => (
+                                <div key={i} className="mono" style={{ fontSize: 10.5, color: "#8a8f98" }}>
+                                  {m.label.toUpperCase()} <span style={{ color: "#F5F3EE", fontWeight: 700 }}>{m.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
           {/* Trends — compact sparkline cards, tap to expand */}
           <div style={cardStyle}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
@@ -1734,6 +2105,96 @@ function SwimmingTab({ isMobile }) {
                 </ResponsiveContainer>
               )}
             </div>
+          </div>
+
+          {/* Compare — new, optional Pace+StrokeRate / Pace+StrokeDistance overlay. Additive to
+              the Trends chart above, not a replacement. Reuses the same z-score normalization
+              approach as the Pace/HR overlay in Trends (see expandedChartFor) so two
+              differently-scaled metrics can be read on one axis without one visually dominating
+              the other. Respects the current stroke filter and Day/Week toggle. */}
+          <div style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              <div style={{ ...labelStyle, marginBottom: 0 }}>Compare</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {[["cadence", "Pace + Stroke Rate"], ["dps", "Pace + Stroke Distance"]].map(([v, l]) => (
+                  <button key={v} onClick={() => setCompareMode(v)} className="pill" style={{
+                    cursor: "pointer", background: compareMode === v ? "#23262d" : "transparent",
+                    border: "1px solid " + (compareMode === v ? "#3a3f45" : "#23262d"),
+                    color: compareMode === v ? "#F5F3EE" : "#8a8f98",
+                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                  }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {(() => {
+              if (!activeStroke) return <div style={{ fontSize: 12, color: "#6b7078" }}>No stroke data yet.</div>;
+              const otherKey = compareMode === "cadence" ? `cadence_${activeStroke}` : `dps_${activeStroke}`;
+              const otherLabel = compareMode === "cadence" ? "Stroke rate" : "Distance/stroke";
+              const otherFmt = compareMode === "cadence" ? (v) => `${fmtNum(v, 1)} spm` : (v) => `${fmtNum(v, 2)}m`;
+              const paceStats = computeMeanStd(trendDataView.map((d) => d[paceDataKey]));
+              const otherStats = computeMeanStd(trendDataView.map((d) => d[otherKey]));
+              const pairedCount = trendDataView.filter((d) => d[paceDataKey] != null && d[otherKey] != null).length;
+              const normalizedData = trendDataView.map((d) => ({
+                ...d,
+                paceZ: paceStats ? (() => { const z = zScoreOf(d[paceDataKey], paceStats); return z == null ? null : -z; })() : null,
+                otherZ: otherStats ? zScoreOf(d[otherKey], otherStats) : null,
+              }));
+              const strokeLabel = SWIM_STROKE_LABELS[activeStroke];
+              const zTooltipFormatter = (v, name, props) => {
+                if (name === "Pace") return [fmtPace100(props.payload[paceDataKey]), name];
+                if (name === otherLabel) return [props.payload[otherKey] != null ? otherFmt(props.payload[otherKey]) : "—", name];
+                return [v, name];
+              };
+              return (
+                <div>
+                  <div style={{ fontSize: 10.5, color: "#6b7078", marginBottom: 10 }}>
+                    {strokeLabel}{strokeFilter === "all" && " — your primary stroke shown; this session set contains multiple swim types, use the filter above to narrow"}
+                  </div>
+                  {pairedCount < 2 ? (
+                    pairedCount === 0 ? (
+                      <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
+                        No sessions yet with both pace and {otherLabel.toLowerCase()} recorded for {strokeLabel.toLowerCase()}.
+                      </div>
+                    ) : (
+                      <>
+                        {(() => {
+                          const only = trendDataView.find((d) => d[paceDataKey] != null && d[otherKey] != null) || trendDataView[0];
+                          return (
+                            <div style={{ display: "flex", gap: 28, padding: "18px 4px 8px" }}>
+                              <div>
+                                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pace</div>
+                                <div style={{ fontSize: 21, fontWeight: 700, color: "#56CCF2" }}>{fmtPace100(only[paceDataKey])}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>{otherLabel}</div>
+                                <div style={{ fontSize: 21, fontWeight: 700, color: "#F2C94C" }}>{only[otherKey] != null ? otherFmt(only[otherKey]) : "—"}</div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>Log one more comparable swim to see these actually plotted against each other.</div>
+                      </>
+                    )
+                  ) : (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
+                        <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                        <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`} domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]} />
+                        <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
+                        <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Line type="monotone" dataKey="paceZ" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke="#F2C94C" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                  <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 8 }}>
+                    Both lines are shown as standard deviations from their own average (σ) so pace and {otherLabel.toLowerCase()} — different units and scales — can be read on one axis; real values are in the tooltip. Pace is flipped so "up" always means faster, matching "up" for {otherLabel.toLowerCase()}.
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Session detail — the length-by-length drill-down. History & Log has a lighter
