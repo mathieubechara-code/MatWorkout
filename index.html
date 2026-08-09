@@ -1685,14 +1685,12 @@ function SwimmingTab({ isMobile }) {
     return chron.map((s) => ({ date: s.date, label: fmtDate(s.date), cssPace100: s.cssTest.pace100, cssSpeed: s.cssTest.cssSpeed }));
   }, [sessions]);
 
-  // ---- Distance by swim type: latest session vs 6-week average weekly volume ----------
+  // ---- Distance by swim type: latest session vs 6-week total, plus stroke mix ----------
   // For each stroke seen, shows the distance swum in that stroke during the most recent
-  // session that included it, alongside the average *weekly* volume in that stroke over the
-  // last 6 calendar weeks (Mon-Sun, including the current in-progress week). Weeks with no
-  // swimming count as 0 toward that average — this is a genuine "weekly average volume"
-  // figure (sum ÷ 6), not merely an average over the weeks you happened to swim, and it's
-  // calendar-week based rather than session-count based (unlike the avg6Of used elsewhere
-  // in this file, which averages the last 6 *sessions*).
+  // session that included it, the raw *total* distance in that stroke over the last 6
+  // calendar weeks (Mon-Sun, including the current in-progress week — no division, so a
+  // single 900m session shows as 900m, not amortized down to 150m/week), and that stroke's
+  // % share of total swim distance across all strokes over the same 6-week window.
   const strokeDistanceStats = useMemo(() => {
     if (!sessions || sessions.length === 0 || allStrokesSeen.length === 0) return [];
     const currentMonday = mondayOf(todayStr);
@@ -1702,7 +1700,7 @@ function SwimmingTab({ isMobile }) {
       weekKeys.push(toISODate(d));
     }
     const weekKeySet = new Set(weekKeys);
-    return allStrokesSeen.map((stroke) => {
+    const rows = allStrokesSeen.map((stroke) => {
       // Latest: most recent session (sortedSessions is newest-first) that included this stroke.
       let latest = null;
       for (let i = 0; i < sortedSessions.length; i++) {
@@ -1713,17 +1711,19 @@ function SwimmingTab({ isMobile }) {
           break;
         }
       }
-      const weekTotals = {};
-      weekKeys.forEach((wk) => { weekTotals[wk] = 0; });
+      let sixWeekTotal = 0;
       sessions.forEach((s) => {
         const wk = toISODate(mondayOf(s.date));
         if (!weekKeySet.has(wk)) return;
         const st = s.strokeStats && s.strokeStats[stroke];
-        if (st && st.count > 0 && s.poolLength != null) weekTotals[wk] += st.count * s.poolLength;
+        if (st && st.count > 0 && s.poolLength != null) sixWeekTotal += st.count * s.poolLength;
       });
-      const sixWeekAvg = Object.values(weekTotals).reduce((a, b) => a + b, 0) / 6;
-      return { stroke, latest, sixWeekAvg: Math.round(sixWeekAvg) };
-    }).sort((a, b) => (b.latest ? b.latest.distance : 0) - (a.latest ? a.latest.distance : 0));
+      return { stroke, latest, sixWeekTotal: Math.round(sixWeekTotal) };
+    });
+    const grandTotal = rows.reduce((a, r) => a + r.sixWeekTotal, 0);
+    return rows
+      .map((r) => ({ ...r, pct: grandTotal > 0 ? (r.sixWeekTotal / grandTotal) * 100 : null }))
+      .sort((a, b) => b.sixWeekTotal - a.sixWeekTotal);
   }, [sessions, sortedSessions, allStrokesSeen, todayStr]);
 
   // ---- Swim PR card -------------------------------------------------------------------
@@ -2121,30 +2121,37 @@ function SwimmingTab({ isMobile }) {
             </div>
           </div>
 
-          {/* Distance by swim type — latest session vs 6-week average weekly volume, per
-              stroke. See strokeDistanceStats above for how "6-week avg" is computed. */}
+          {/* Distance by swim type — latest session vs 6-week total distance, plus each
+              stroke's % share of total distance over that same 6-week window. See
+              strokeDistanceStats above for exactly how these are computed. */}
           {strokeDistanceStats.length > 0 && (
             <div style={cardStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
                 <TrendingUp size={13} color="#56CCF2" />
                 <div style={{ ...labelStyle, marginBottom: 0 }}>Distance by swim type</div>
               </div>
-              <div style={{ display: "grid", gap: 10 }}>
-                {strokeDistanceStats.map(({ stroke, latest, sixWeekAvg }) => (
-                  <div key={stroke} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 4, background: SWIM_STROKE_COLORS[stroke], flexShrink: 0 }} />
-                      <span style={{ fontSize: 12.5, color: "#c9cdd3" }}>{SWIM_STROKE_LABELS[stroke]}</span>
+              <div style={{ display: "grid", gap: 14 }}>
+                {strokeDistanceStats.map(({ stroke, latest, sixWeekTotal, pct }) => (
+                  <div key={stroke}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 5 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 4, background: SWIM_STROKE_COLORS[stroke], flexShrink: 0 }} />
+                        <span style={{ fontSize: 12.5, color: "#c9cdd3" }}>{SWIM_STROKE_LABELS[stroke]}</span>
+                        <span className="mono" style={{ fontSize: 10.5, color: "#6b7078" }}>{pct != null ? `${pct.toFixed(0)}%` : "—"}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
+                        <div style={{ textAlign: "right" }}>
+                          <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE" }}>{latest ? `${latest.distance}m` : "—"}</div>
+                          <div style={{ fontSize: 9, color: "#5a5f66" }}>latest</div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: "#9a9fa6" }}>{sixWeekTotal}m</div>
+                          <div style={{ fontSize: 9, color: "#5a5f66" }}>6-wk total</div>
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
-                      <div style={{ textAlign: "right" }}>
-                        <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE" }}>{latest ? `${latest.distance}m` : "—"}</div>
-                        <div style={{ fontSize: 9, color: "#5a5f66" }}>latest</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: "#9a9fa6" }}>{sixWeekAvg}m</div>
-                        <div style={{ fontSize: 9, color: "#5a5f66" }}>6-wk avg/wk</div>
-                      </div>
+                    <div style={{ height: 5, borderRadius: 3, background: "#20232a", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pct != null ? Math.max(pct, pct > 0 ? 2 : 0) : 0}%`, background: SWIM_STROKE_COLORS[stroke], borderRadius: 3 }} />
                     </div>
                   </div>
                 ))}
