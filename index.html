@@ -959,15 +959,27 @@ const INSIGHT_CATEGORIES = {
 };
 
 const avgOf = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+// Median of comparable recent/baseline values — preferred over a plain mean as the primary
+// basis for interpretation, since a single unusual session, drill set, or recording glitch can
+// skew a mean but has much less effect on a median. Standard deviation is intentionally not used
+// here to decide whether the swimmer improved; it remains available elsewhere only as an
+// optional secondary/confidence signal (e.g. the Compare chart's z-score axis).
+const medianOf = (arr) => {
+  if (!arr.length) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
 
 // Splits a chronological (oldest→newest) series of {date, v} points into a "recent window"
 // (last N) and everything before it as "baseline". Returns null when there isn't enough data
-// on both sides to make a responsible comparison.
+// on both sides to make a responsible comparison. Uses the median of each window as the
+// representative "typical" value (see medianOf above) rather than a mean.
 function splitRecentBaseline(points, recentWindow, minBaseline) {
   if (points.length < recentWindow + minBaseline) return null;
   const recent = points.slice(-recentWindow);
   const baseline = points.slice(0, points.length - recentWindow);
-  return { recent, baseline, recentAvg: avgOf(recent.map((p) => p.v)), baselineAvg: avgOf(baseline.map((p) => p.v)) };
+  return { recent, baseline, recentAvg: medianOf(recent.map((p) => p.v)), baselineAvg: medianOf(baseline.map((p) => p.v)) };
 }
 
 const pctChange = (recentAvg, baselineAvg) => (baselineAvg == null || baselineAvg === 0 || recentAvg == null ? null : (recentAvg - baselineAvg) / baselineAvg);
@@ -1023,7 +1035,7 @@ function generateImprovementInsight(strokeLabel, paceSeries, swolfSeries, dpsSer
   const recent = paceSeries.filter((p) => p.date >= cutoffStr);
   const older = paceSeries.filter((p) => p.date < cutoffStr);
   if (recent.length < 2 || older.length < 2) return null;
-  const recentAvg = avgOf(recent.map((p) => p.v)), olderAvg = avgOf(older.map((p) => p.v));
+  const recentAvg = medianOf(recent.map((p) => p.v)), olderAvg = medianOf(older.map((p) => p.v));
   const pct = pctChange(recentAvg, olderAvg);
   if (pct == null || Math.abs(pct) < th.paceMeaningfulPct) return null;
   const improving = pct < 0; // lower pace = faster
@@ -1032,8 +1044,8 @@ function generateImprovementInsight(strokeLabel, paceSeries, swolfSeries, dpsSer
   // Check whether swolf/dps moved in a way consistent with an efficiency story over the same window.
   const swolfRecent = swolfSeries.filter((p) => p.date >= cutoffStr), swolfOlder = swolfSeries.filter((p) => p.date < cutoffStr);
   const dpsRecent = dpsSeries.filter((p) => p.date >= cutoffStr), dpsOlder = dpsSeries.filter((p) => p.date < cutoffStr);
-  const swolfPct = swolfRecent.length >= 2 && swolfOlder.length >= 2 ? pctChange(avgOf(swolfRecent.map((p) => p.v)), avgOf(swolfOlder.map((p) => p.v))) : null;
-  const dpsPct = dpsRecent.length >= 2 && dpsOlder.length >= 2 ? pctChange(avgOf(dpsRecent.map((p) => p.v)), avgOf(dpsOlder.map((p) => p.v))) : null;
+  const swolfPct = swolfRecent.length >= 2 && swolfOlder.length >= 2 ? pctChange(medianOf(swolfRecent.map((p) => p.v)), medianOf(swolfOlder.map((p) => p.v))) : null;
+  const dpsPct = dpsRecent.length >= 2 && dpsOlder.length >= 2 ? pctChange(medianOf(dpsRecent.map((p) => p.v)), medianOf(dpsOlder.map((p) => p.v))) : null;
 
   if (improving) {
     let extra = "";
@@ -1065,7 +1077,7 @@ function generateLatestSessionInsight(strokeLabel, paceSeries) {
   const baselineRecent = paceSeries.slice(-(th.recentWindow + 1), -1); // the window just before the latest
   if (baselineRecent.length < 2) return null;
   const latest = paceSeries[paceSeries.length - 1];
-  const baselineAvg = avgOf(baselineRecent.map((p) => p.v));
+  const baselineAvg = medianOf(baselineRecent.map((p) => p.v));
   const pct = pctChange(latest.v, baselineAvg);
   if (pct == null || Math.abs(pct) < th.paceMeaningfulPct) return null;
   const pctAbs = Math.round(Math.abs(pct) * 1000) / 10;
@@ -1093,8 +1105,8 @@ function generatePaceRelationshipInsight(strokeLabel, paceSeries, otherSeries, o
   const pRecent = paceSeries.filter((p) => p.date >= cutoffStr), pOlder = paceSeries.filter((p) => p.date < cutoffStr);
   const oRecent = otherSeries.filter((p) => p.date >= cutoffStr), oOlder = otherSeries.filter((p) => p.date < cutoffStr);
   if (pRecent.length < 2 || pOlder.length < 2 || oRecent.length < 2 || oOlder.length < 2) return null;
-  const pacePct = pctChange(avgOf(pRecent.map((p) => p.v)), avgOf(pOlder.map((p) => p.v)));
-  const otherPct = pctChange(avgOf(oRecent.map((p) => p.v)), avgOf(oOlder.map((p) => p.v)));
+  const pacePct = pctChange(medianOf(pRecent.map((p) => p.v)), medianOf(pOlder.map((p) => p.v)));
+  const otherPct = pctChange(medianOf(oRecent.map((p) => p.v)), medianOf(oOlder.map((p) => p.v)));
   if (pacePct == null || otherPct == null || pacePct >= -th.paceMeaningfulPct) return null; // only interpret when pace actually improved
   const pacePctAbs = Math.round(Math.abs(pacePct) * 1000) / 10;
 
@@ -1149,9 +1161,9 @@ function generateHeartRateInsight(overallPaceSeries, hrSeries, weeks, strokeFilt
   const pRecent = overallPaceSeries.filter((p) => p.date >= cutoffStr), pOlder = overallPaceSeries.filter((p) => p.date < cutoffStr);
   const hRecent = hrSeries.filter((p) => p.date >= cutoffStr), hOlder = hrSeries.filter((p) => p.date < cutoffStr);
   if (pRecent.length < 2 || pOlder.length < 2 || hRecent.length < 2 || hOlder.length < 2) return null;
-  const pacePct = pctChange(avgOf(pRecent.map((p) => p.v)), avgOf(pOlder.map((p) => p.v)));
+  const pacePct = pctChange(medianOf(pRecent.map((p) => p.v)), medianOf(pOlder.map((p) => p.v)));
   if (pacePct == null || pacePct >= -th.paceMeaningfulPct) return null;
-  const hrRecentAvg = avgOf(hRecent.map((p) => p.v)), hrOlderAvg = avgOf(hOlder.map((p) => p.v));
+  const hrRecentAvg = medianOf(hRecent.map((p) => p.v)), hrOlderAvg = medianOf(hOlder.map((p) => p.v));
   const hrDiff = hrRecentAvg - hrOlderAvg;
   const pacePctAbs = Math.round(Math.abs(pacePct) * 1000) / 10;
   const caveat = strokeFilterActive ? " (heart rate reflects the whole session, not just this stroke)" : "";
