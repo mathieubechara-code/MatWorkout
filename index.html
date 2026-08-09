@@ -2420,9 +2420,10 @@ function SwimmingTab({ isMobile }) {
                     const interp = selectedComparePoint ? sessionInterp : trendInterp;
                     const cat = interp ? INSIGHT_CATEGORIES[interp.category] : null;
 
-                    // Custom dot renderer: tap/click a session to make it the focus (see item 4/6).
-                    // Selected dot enlarges and lightens; every other dot dims so the selection reads
-                    // clearly, while the full trend line stays visible underneath.
+                    // Custom dot renderer: purely visual now (see item 4/6) — selection itself is
+                    // driven by the chart-level onClick above, not this dot's own click, since that's
+                    // what reliably registers on mobile taps. Selected dot enlarges and lightens,
+                    // every other dot dims so the selection reads clearly against the full trend line.
                     const makeDot = (color) => (dotProps) => {
                       const { cx, cy, payload, index } = dotProps;
                       if (cx == null || cy == null) return null;
@@ -2437,8 +2438,6 @@ function SwimmingTab({ isMobile }) {
                           stroke={color}
                           strokeWidth={isSelected ? 2 : 1}
                           opacity={isDimmed ? 0.3 : 1}
-                          style={{ cursor: "pointer" }}
-                          onClick={() => setSelectedComparePoint(isSelected ? null : payload.date)}
                         />
                       );
                     };
@@ -2481,15 +2480,30 @@ function SwimmingTab({ isMobile }) {
                           </div>
                         )}
                         <ResponsiveContainer width="100%" height={220}>
-                          <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                          <LineChart
+                            data={normalizedData}
+                            margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                            onClick={(e) => {
+                              // Chart-level click/tap handler, not per-dot: this uses Recharts' own
+                              // touch-tracking (the same mechanism that already drives the Tooltip),
+                              // which reliably hit-tests on mobile taps — a raw onClick on a 3px SVG
+                              // dot circle does not, since the tracking layer intercepts the touch
+                              // first. activePayload carries the full row (including its date) for
+                              // whichever x-position was tapped.
+                              if (!e || !e.activePayload || !e.activePayload.length) return;
+                              const clickedDate = e.activePayload[0].payload.date;
+                              if (clickedDate == null) return;
+                              setSelectedComparePoint((prev) => (prev === clickedDate ? null : clickedDate));
+                            }}
+                          >
                             <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                             <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                             <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`} domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]} />
                             <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
                             <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                             <Legend wrapperStyle={{ fontSize: 11 }} />
-                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={makeDot("#56CCF2")} connectNulls />
-                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={makeDot(otherColor)} connectNulls />
+                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={makeDot("#56CCF2")} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
+                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={makeDot(otherColor)} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
                           </LineChart>
                         </ResponsiveContainer>
                         <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 8 }}>
