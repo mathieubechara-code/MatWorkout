@@ -748,34 +748,47 @@ function processSwimFit(parsed, fileName) {
   };
 }
 
-// Sessions parsed before per-stroke pace was added to processSwimFit have strokeStats
-// objects missing the `pace100` field (avgSwolf/avgCadence/avgDistPerStroke were already
-// there). Rather than requiring a re-upload of the original .FIT file, recompute it from
-// the session's own stored `lengths` — the same grouping logic processSwimFit uses at
-// parse time. Returns the session unchanged if nothing needs backfilling.
+// Sessions parsed before per-length and per-stroke pace were added to processSwimFit are
+// missing the `pace100` field in two places: on each entry in `lengths` (used by the
+// "Pace over this session" chart) and on each stroke in `strokeStats` (used by the per-
+// stroke trend cards). Rather than requiring a re-upload of the original .FIT file, both
+// are recomputed from data already stored on the session — elapsedSec/poolLength for
+// per-length pace, the same grouping processSwimFit uses at parse time for per-stroke
+// pace. Returns the session unchanged if nothing needs backfilling.
 function backfillSwimSessionStrokeStats(session) {
-  if (!session || !session.strokeStats || !session.lengths) return session;
-  const strokes = Object.keys(session.strokeStats);
-  const needsBackfill = strokes.some((k) => session.strokeStats[k] && session.strokeStats[k].pace100 == null);
-  if (!needsBackfill) return session;
+  if (!session || !session.lengths) return session;
 
-  const validActive = session.lengths.filter((l) => l.lengthType === "active" && !l.glitch);
-  const groups = {};
-  validActive.forEach((l) => {
-    if (!groups[l.stroke]) groups[l.stroke] = { timeSec: 0, lengthCount: 0 };
-    groups[l.stroke].timeSec += l.elapsedSec;
-    groups[l.stroke].lengthCount += 1;
-  });
+  const lengthsNeedBackfill = session.lengths.some((l) => l.lengthType === "active" && !l.glitch && l.pace100 == null);
+  const fixedLengths = lengthsNeedBackfill
+    ? session.lengths.map((l) => {
+        if (l.lengthType !== "active" || l.glitch || l.pace100 != null || !session.poolLength) return l;
+        return { ...l, pace100: (l.elapsedSec / session.poolLength) * 100 };
+      })
+    : session.lengths;
 
-  const nextStrokeStats = {};
-  strokes.forEach((stroke) => {
-    const existing = session.strokeStats[stroke];
-    const g = groups[stroke];
-    const strokeDistance = g && session.poolLength != null ? g.lengthCount * session.poolLength : null;
-    const recomputedPace100 = g && g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null;
-    nextStrokeStats[stroke] = { ...existing, pace100: existing.pace100 != null ? existing.pace100 : recomputedPace100 };
-  });
-  return { ...session, strokeStats: nextStrokeStats };
+  const strokes = session.strokeStats ? Object.keys(session.strokeStats) : [];
+  const strokeStatsNeedBackfill = strokes.some((k) => session.strokeStats[k] && session.strokeStats[k].pace100 == null);
+  let fixedStrokeStats = session.strokeStats;
+  if (strokeStatsNeedBackfill) {
+    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && !l.glitch);
+    const groups = {};
+    validActive.forEach((l) => {
+      if (!groups[l.stroke]) groups[l.stroke] = { timeSec: 0, lengthCount: 0 };
+      groups[l.stroke].timeSec += l.elapsedSec;
+      groups[l.stroke].lengthCount += 1;
+    });
+    fixedStrokeStats = {};
+    strokes.forEach((stroke) => {
+      const existing = session.strokeStats[stroke];
+      const g = groups[stroke];
+      const strokeDistance = g && session.poolLength != null ? g.lengthCount * session.poolLength : null;
+      const recomputedPace100 = g && g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null;
+      fixedStrokeStats[stroke] = { ...existing, pace100: existing.pace100 != null ? existing.pace100 : recomputedPace100 };
+    });
+  }
+
+  if (!lengthsNeedBackfill && !strokeStatsNeedBackfill) return session;
+  return { ...session, lengths: fixedLengths, strokeStats: fixedStrokeStats };
 }
 
 // Runs the backfill across a whole session list. Returns { sessions, changed } so callers
