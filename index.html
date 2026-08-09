@@ -1217,6 +1217,85 @@ function generateFrequencyInsight(chronSessions, todayStr) {
   };
 }
 
+// ---- 9. Compare chart trend interpretation -----------------------------------------------------
+// Turns the currently-displayed Compare chart (primary metric = pace or SWOLF, both
+// "lower is better"; secondary metric = cadence, distance/stroke, or HR) into one short,
+// plain-language line. Deliberately mirrors the raw/median-based approach used everywhere else
+// in Insights (see medianOf above) rather than reasoning from standard deviation — the chart's
+// z-score axis is a display technique only, not part of this decision.
+function generateCompareTrendInterpretation(compareMode, primaryPoints, secPoints, weeks) {
+  const th = INSIGHT_THRESHOLDS;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - weeks * 7);
+  const cutoffStr = toISODate(cutoff);
+  const pRecent = primaryPoints.filter((p) => p.date >= cutoffStr), pOlder = primaryPoints.filter((p) => p.date < cutoffStr);
+  const sRecent = secPoints.filter((p) => p.date >= cutoffStr), sOlder = secPoints.filter((p) => p.date < cutoffStr);
+  if (pRecent.length < 2 || pOlder.length < 2 || sRecent.length < 2 || sOlder.length < 2) return null;
+
+  const primaryRecentMed = medianOf(pRecent.map((p) => p.v)), primaryOlderMed = medianOf(pOlder.map((p) => p.v));
+  const primaryPct = pctChange(primaryRecentMed, primaryOlderMed); // negative = improved (pace & SWOLF are both lower-is-better)
+  const primaryTh = compareMode === "swolfhr" ? th.swolfMeaningfulPct : th.paceMeaningfulPct;
+  const primaryImproved = primaryPct != null && primaryPct <= -primaryTh;
+  const primaryWorse = primaryPct != null && primaryPct >= primaryTh;
+  const primaryPctAbs = primaryPct != null ? Math.round(Math.abs(primaryPct) * 1000) / 10 : null;
+
+  const isHrSecondary = compareMode === "hr" || compareMode === "swolfhr";
+  const secRecentMed = medianOf(sRecent.map((p) => p.v)), secOlderMed = medianOf(sOlder.map((p) => p.v));
+  let secUp, secDown, secPctAbs;
+  if (isHrSecondary) {
+    const diff = secRecentMed - secOlderMed;
+    secUp = diff > th.hrMeaningfulBpm;
+    secDown = diff < -th.hrMeaningfulBpm;
+  } else {
+    const secPct = pctChange(secRecentMed, secOlderMed);
+    const secTh = compareMode === "cadence" ? th.cadenceMeaningfulPct : th.dpsMeaningfulPct;
+    secUp = secPct != null && secPct > secTh;
+    secDown = secPct != null && secPct < -secTh;
+    secPctAbs = secPct != null ? Math.round(Math.abs(secPct) * 1000) / 10 : null;
+  }
+  const secStable = !secUp && !secDown;
+
+  // ---- Pace + Stroke Rate ----
+  if (compareMode === "cadence") {
+    if (primaryImproved && secStable) return { category: "positive", headline: "Faster without higher turnover.", detail: `Pace improved ${primaryPctAbs}% while stroke rate stayed about the same.` };
+    if (primaryImproved && secUp) return { category: "neutral", headline: "Faster through turnover.", detail: `Pace improved ${primaryPctAbs}%, but stroke rate increased as well.` };
+    if (primaryImproved && secDown) return { category: "positive", headline: "Faster with a longer stroke.", detail: `Pace improved ${primaryPctAbs}% while stroke rate decreased — likely more distance per stroke.` };
+    if (!primaryWorse && secUp) return { category: "neutral", headline: "Turnover up, speed unchanged.", detail: "Stroke rate increased without a meaningful pace improvement." };
+    if (primaryWorse && secStable) return { category: "warning", headline: "Pace has slipped.", detail: `Pace is ${primaryPctAbs}% slower while stroke rate stayed about the same.` };
+    if (primaryWorse) return { category: "warning", headline: "Slower, turnover changed too.", detail: `Pace is ${primaryPctAbs}% slower, alongside a change in stroke rate.` };
+    return { category: "neutral", headline: "Steady.", detail: "Pace and stroke rate have both stayed about the same recently." };
+  }
+
+  // ---- Pace + Stroke Distance ----
+  if (compareMode === "dps") {
+    if (primaryImproved && secUp) return { category: "positive", headline: "More efficient.", detail: `Pace improved ${primaryPctAbs}% while distance per stroke increased.` };
+    if (primaryImproved && secDown) return { category: "neutral", headline: "Faster, but not more efficient.", detail: `Pace improved ${primaryPctAbs}% while distance per stroke decreased.` };
+    if (primaryImproved && secStable) return { category: "positive", headline: "Efficiency is stable.", detail: `Pace improved ${primaryPctAbs}% while distance per stroke stayed about the same.` };
+    if (!primaryWorse && secUp) return { category: "positive", headline: "More efficient, pace steady.", detail: "Distance per stroke increased without a meaningful pace change yet." };
+    if (!primaryWorse && secDown) return { category: "warning", headline: "Less efficient, pace steady.", detail: "Distance per stroke decreased without a meaningful pace change." };
+    if (primaryWorse && secDown) return { category: "warning", headline: "Slower and less efficient.", detail: "Pace slipped alongside a drop in distance per stroke." };
+    if (primaryWorse) return { category: "warning", headline: "Pace has slipped.", detail: `Pace is ${primaryPctAbs}% slower.` };
+    return { category: "neutral", headline: "Steady.", detail: "Pace and distance per stroke have both stayed about the same recently." };
+  }
+
+  // ---- Pace + HR ----
+  if (compareMode === "hr") {
+    if (primaryImproved && secStable) return { category: "positive", headline: "Faster at similar effort.", detail: `Pace improved ${primaryPctAbs}% while heart rate stayed close to its usual level.` };
+    if (primaryImproved && secDown) return { category: "positive", headline: "Faster with less effort.", detail: `Pace improved ${primaryPctAbs}% while heart rate was also lower than usual.` };
+    if (primaryImproved && secUp) return { category: "neutral", headline: "Faster, but with more effort.", detail: `Pace improved ${primaryPctAbs}%, though heart rate was also higher than usual.` };
+    if (!primaryWorse && secUp) return { category: "warning", headline: "More effort, speed unchanged.", detail: "Heart rate increased without a meaningful pace improvement." };
+    if (primaryWorse) return { category: "warning", headline: "Pace has slipped.", detail: `Pace is ${primaryPctAbs}% slower.` };
+    return { category: "neutral", headline: "Steady.", detail: "Pace and heart rate have both stayed about the same recently." };
+  }
+
+  // ---- SWOLF + HR ----
+  if (primaryImproved && secStable) return { category: "positive", headline: "More efficient at similar effort.", detail: "Stroke efficiency improved while heart rate stayed close to its usual level." };
+  if (primaryImproved && secDown) return { category: "positive", headline: "More efficient with less effort.", detail: "Stroke efficiency improved while heart rate was also lower than usual." };
+  if (primaryImproved && secUp) return { category: "neutral", headline: "More efficient, but with more effort.", detail: "Stroke efficiency improved, though heart rate was also higher than usual." };
+  if (!primaryWorse && secUp) return { category: "warning", headline: "More effort, efficiency unchanged.", detail: "Heart rate increased without a meaningful efficiency improvement." };
+  if (primaryWorse) return { category: "warning", headline: "Efficiency has slipped.", detail: `SWOLF is ${primaryPctAbs}% worse than its recent baseline.` };
+  return { category: "neutral", headline: "Steady.", detail: "Efficiency and heart rate have both stayed about the same recently." };
+}
+
 // ---- Orchestration: gather everything applicable, rank, dedupe, return top 1-3 -----------------
 function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel, todayStr, strokeFilterActive }) {
   if (!chronSessions || chronSessions.length === 0) return [];
@@ -2230,23 +2309,42 @@ function SwimmingTab({ isMobile }) {
                         <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>Log one more comparable swim to see these actually plotted against each other.</div>
                       </>
                     )
-                  ) : (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
-                        <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                        <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`} domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]} />
-                        <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
-                        <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                        <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                  <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 8 }}>
-                    Both lines are shown as standard deviations from their own average (σ) so {primaryLabel.toLowerCase()} and {otherLabel.toLowerCase()} — different units and scales — can be read on one axis; real values are in the tooltip. {primaryLabel} is flipped so "up" always means better {primaryLabel.toLowerCase()} — watch whether {otherLabel.toLowerCase()} rises and falls with it.
-                  </div>
+                  ) : (() => {
+                    const primaryPoints = trendDataView.map((d) => ({ date: d.date, v: d[primaryKey] })).filter((p) => p.v != null);
+                    const secPoints = trendDataView.map((d) => ({ date: d.date, v: d[otherKey] })).filter((p) => p.v != null);
+                    const interp = generateCompareTrendInterpretation(compareMode, primaryPoints, secPoints, INSIGHT_THRESHOLDS.mediumTermWeeks);
+                    const cat = interp ? INSIGHT_CATEGORIES[interp.category] : null;
+                    return (
+                      <>
+                        {interp ? (
+                          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: cat.bg, border: `1px solid ${cat.color}33`, borderRadius: 14, padding: "10px 12px", marginBottom: 12 }}>
+                            <cat.Icon size={14} style={{ color: cat.color, flexShrink: 0, marginTop: 1 }} />
+                            <div>
+                              <div style={{ fontSize: 12.5, fontWeight: 700, color: cat.color }}>{interp.headline}</div>
+                              <div style={{ fontSize: 11.5, color: "#c9cdd3", marginTop: 1 }}>{interp.detail}</div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11.5, color: "#6b7078", marginBottom: 12 }}>Not enough comparable sessions yet to interpret this trend — keep logging and this will fill in.</div>
+                        )}
+                        <ResponsiveContainer width="100%" height={220}>
+                          <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
+                            <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                            <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`} domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]} />
+                            <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
+                            <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
+                            <Legend wrapperStyle={{ fontSize: 11 }} />
+                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                          </LineChart>
+                        </ResponsiveContainer>
+                        <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 8 }}>
+                          Chart lines are normalized (σ) purely so {primaryLabel.toLowerCase()} and {otherLabel.toLowerCase()} — different units and scales — can be read on one shared axis; real values are in the tooltip, and the interpretation above is based on your actual session data, not this normalization. {primaryLabel} is flipped so "up" always means better {primaryLabel.toLowerCase()}.
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })()}
