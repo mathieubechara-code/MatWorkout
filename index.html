@@ -12,17 +12,24 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Workout Log" />
-<meta name="theme-color" content="#101214" />
+<meta name="theme-color" content="#0c0d10" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <style>
-  html, body { margin: 0; padding: 0; background: #101214; }
+  html, body { margin: 0; padding: 0; background: #0c0d10; }
   #root { min-height: 100vh; }
+  body {
+    background:
+      radial-gradient(ellipse 900px 500px at 20% -10%, rgba(242,201,76,0.07), transparent 60%),
+      radial-gradient(ellipse 800px 500px at 100% 0%, rgba(86,204,242,0.06), transparent 55%),
+      #0c0d10;
+    background-attachment: fixed;
+  }
   :root {
-    --bg: #101214;
-    --card: #16181b;
-    --card-2: #1a1d21;
-    --border: #22262b;
-    --border-2: #2a2e33;
+    --bg: #0c0d10;
+    --card: #15171b;
+    --card-2: #191c21;
+    --border: #23262d;
+    --border-2: #2b2e36;
     --text: #F5F3EE;
     --text-dim: #9a9fa6;
     --text-dimmer: #6b7078;
@@ -31,8 +38,8 @@
     --accent-blue: #56CCF2;
     --positive: #6FCF97;
     --negative: #E63946;
-    --radius: 12px;
-    --radius-sm: 8px;
+    --radius: 20px;
+    --radius-sm: 14px;
   }
 </style>
 
@@ -909,7 +916,7 @@ function SwimmingTab({ isMobile }) {
     return <div style={{ color: "#6b7078", fontSize: 13, padding: "24px 0" }}>Loading swim data…</div>;
   }
 
-  const cardStyle = { background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: isMobile ? 14 : 18, marginBottom: 18 };
+  const cardStyle = { background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: isMobile ? 14 : 18, marginBottom: 18 };
   const labelStyle = { fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 };
 
   // ---- Compact "bevel" sparkline trend cards ------------------------------------------
@@ -1012,8 +1019,8 @@ function SwimmingTab({ isMobile }) {
         <span style={{ fontSize: 10.5, color: "#6b7078" }}>Overlay:</span>
         {options.map((opt) => (
           <button key={opt.value} onClick={() => setChartOverlaySel((prev) => ({ ...prev, [key]: opt.value }))} className="pill" style={{
-            cursor: "pointer", background: overlay === opt.value ? "#22262b" : "transparent",
-            border: "1px solid " + (overlay === opt.value ? "#3a3f45" : "#22262b"),
+            cursor: "pointer", background: overlay === opt.value ? "#23262d" : "transparent",
+            border: "1px solid " + (overlay === opt.value ? "#3a3f45" : "#23262d"),
             color: overlay === opt.value ? "#F5F3EE" : "#8a8f98",
             borderRadius: 7, padding: "3px 8px", fontSize: 10.5, fontWeight: 600,
           }}>{opt.label}</button>
@@ -1087,7 +1094,7 @@ function SwimmingTab({ isMobile }) {
             <>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                   <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                   <YAxis
                     tick={{ fill: "#6b7078", fontSize: 10.5 }}
@@ -1095,7 +1102,7 @@ function SwimmingTab({ isMobile }) {
                     domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
                   />
                   <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
-                  <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={zTooltipFormatter} />
+                  <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="paceZ" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                   <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -1109,10 +1116,10 @@ function SwimmingTab({ isMobile }) {
           ) : (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                 <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                 <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                 <Line type="monotone" dataKey="pace100" name="Pace /100m" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
@@ -1139,10 +1146,10 @@ function SwimmingTab({ isMobile }) {
           {overlaySelector}
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
               <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 2", "dataMax + 2"]} />
-              <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={tooltipFormatter} />
+              <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
                 <Line key={stroke} type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -1240,7 +1247,7 @@ function SwimmingTab({ isMobile }) {
         {overlaySelector}
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
             <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
             <YAxis
               tick={{ fill: "#6b7078", fontSize: 10.5 }}
@@ -1248,7 +1255,7 @@ function SwimmingTab({ isMobile }) {
               domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
             />
             <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
-            <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={zTooltipFormatter} />
+            <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             {strokesToShow.map((stroke) => (
               <Line key={stroke} type="monotone" dataKey={`z_${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -1273,7 +1280,7 @@ function SwimmingTab({ isMobile }) {
       ) : (
         <>
           {/* PR card — top, matching the Workout tab's emphasis on PRs first */}
-          <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+          <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
               <Award size={14} color="#56CCF2" />
               <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Swim PRs</span>
@@ -1303,7 +1310,7 @@ function SwimmingTab({ isMobile }) {
           </div>
 
           {/* Streak — small, secondary to PR */}
-          <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 16px", marginBottom: 18 }}>
+          <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 16px", marginBottom: 18 }}>
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
               <div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#56CCF2" }}>{streak.weekStreak}</div>
@@ -1332,9 +1339,9 @@ function SwimmingTab({ isMobile }) {
                 <div style={{ display: "flex", gap: 4 }}>
                   {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
                     <button key={v} onClick={() => setSwimTimeView(v)} className="pill" style={{
-                      cursor: "pointer", background: swimTimeView === v ? "#22262b" : "transparent",
-                      border: "1px solid " + (swimTimeView === v ? "#3a3f45" : "#22262b"), color: swimTimeView === v ? "#F5F3EE" : "#8a8f98",
-                      borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                      cursor: "pointer", background: swimTimeView === v ? "#23262d" : "transparent",
+                      border: "1px solid " + (swimTimeView === v ? "#3a3f45" : "#23262d"), color: swimTimeView === v ? "#F5F3EE" : "#8a8f98",
+                      borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
                     }}>{l}</button>
                   ))}
                 </div>
@@ -1342,9 +1349,9 @@ function SwimmingTab({ isMobile }) {
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {["all", ...allStrokesSeen].map((s) => (
                       <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
-                        cursor: "pointer", background: strokeFilter === s ? "#22262b" : "transparent",
-                        border: "1px solid " + (strokeFilter === s ? "#3a3f45" : "#22262b"), color: strokeFilter === s ? "#F5F3EE" : "#8a8f98",
-                        borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                        cursor: "pointer", background: strokeFilter === s ? "#23262d" : "transparent",
+                        border: "1px solid " + (strokeFilter === s ? "#3a3f45" : "#23262d"), color: strokeFilter === s ? "#F5F3EE" : "#8a8f98",
+                        borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
                       }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
                     ))}
                   </div>
@@ -1352,10 +1359,10 @@ function SwimmingTab({ isMobile }) {
                 {metricCards.length > 0 && (
                   <button onClick={toggleExpandAllMetrics} className="pill" style={{
                     display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-                    background: allMetricsExpanded ? "#22262b" : "transparent",
-                    border: "1px solid " + (allMetricsExpanded ? "#3a3f45" : "#22262b"),
+                    background: allMetricsExpanded ? "#23262d" : "transparent",
+                    border: "1px solid " + (allMetricsExpanded ? "#3a3f45" : "#23262d"),
                     color: allMetricsExpanded ? "#F5F3EE" : "#8a8f98",
-                    borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
                   }}>
                     <ChevronDown size={12} style={{ transform: allMetricsExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
                     {allMetricsExpanded ? "Collapse all" : "Expand all"}
@@ -1368,7 +1375,7 @@ function SwimmingTab({ isMobile }) {
                 const isOpen = expandedMetrics.has(card.key);
                 const pts = sparkPoints(card.series);
                 return (
-                  <div key={card.key} style={{ background: "#101214", border: `1px solid ${isOpen ? card.color + "88" : "#22262b"}`, borderRadius: 10, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
+                  <div key={card.key} style={{ background: "#0c0d10", border: `1px solid ${isOpen ? card.color + "88" : "#23262d"}`, borderRadius: 16, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 600, color: "#c9cdd3" }}>{card.title}</div>
@@ -1382,7 +1389,7 @@ function SwimmingTab({ isMobile }) {
                         <button
                           onClick={(e) => { e.stopPropagation(); toggleMetric(card.key); }}
                           title={isOpen ? "Collapse chart" : "Expand chart"}
-                          style={{ cursor: "pointer", background: isOpen ? `${card.color}22` : "transparent", border: `1px solid ${isOpen ? card.color + "55" : "#2a2e33"}`, borderRadius: 6, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                          style={{ cursor: "pointer", background: isOpen ? `${card.color}22` : "transparent", border: `1px solid ${isOpen ? card.color + "55" : "#2b2e36"}`, borderRadius: 6, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
                         >
                           <ChevronDown size={12} style={{ color: isOpen ? card.color : "#8a8f98", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
                         </button>
@@ -1411,16 +1418,16 @@ function SwimmingTab({ isMobile }) {
             <div style={{ marginTop: 18 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: "#c9cdd3", marginBottom: 8 }}>Critical Swim Speed (CSS) over time</div>
               {cssTrendData.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#6b7078", background: "#101214", border: "1px dashed #22262b", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 12, color: "#6b7078", background: "#0c0d10", border: "1px dashed #22262b", borderRadius: 16, padding: "12px 14px" }}>
                   No CSS test logged yet. CSS isn't estimated from casual sessions — mark a session as a CSS test at upload time (in History &amp; Log) to start this chart.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                     <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                     <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                    <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                    <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                     <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#2EC4B6" strokeWidth={2} dot={{ r: 4 }} connectNulls />
                   </LineChart>
                 </ResponsiveContainer>
@@ -1437,8 +1444,8 @@ function SwimmingTab({ isMobile }) {
               {sortedSessions.map((s) => {
                 const isOpen = expandedId === s.id;
                 return (
-                  <div key={s.id} style={{ border: "1px solid #22262b", borderRadius: 10, overflow: "hidden" }}>
-                    <div onClick={() => setExpandedId(isOpen ? null : s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", cursor: "pointer", background: "#101214", flexWrap: "wrap", gap: 8 }}>
+                  <div key={s.id} style={{ border: "1px solid #22262b", borderRadius: 16, overflow: "hidden" }}>
+                    <div onClick={() => setExpandedId(isOpen ? null : s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", cursor: "pointer", background: "#0c0d10", flexWrap: "wrap", gap: 8 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                         <ChevronDown size={14} style={{ color: "#6b7078", flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
                         <div>
@@ -1459,7 +1466,7 @@ function SwimmingTab({ isMobile }) {
                     {isOpen && (
                       <div style={{ padding: "12px 14px", borderTop: "1px solid #1d2024" }}>
                         {s.qualityNote && (
-                          <div style={{ fontSize: 11.5, color: "#F2994A", background: "#F2994A14", border: "1px solid #F2994A33", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>{s.qualityNote}</div>
+                          <div style={{ fontSize: 11.5, color: "#F2994A", background: "#F2994A14", border: "1px solid #F2994A33", borderRadius: 12, padding: "8px 10px", marginBottom: 10 }}>{s.qualityNote}</div>
                         )}
                         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 12, fontSize: 12 }}>
                           <div><div style={{ color: "#6b7078", fontSize: 10 }}>Pool length</div><div className="mono" style={{ color: "#c9cdd3" }}>{s.poolLength != null ? `${s.poolLength}m` : "—"}</div></div>
@@ -1520,7 +1527,7 @@ function SwimmingTab({ isMobile }) {
                           {s.isCssTest && s.cssTest && (
                             <span className="mono" style={{ fontSize: 11.5, color: "#2EC4B6" }}>CSS pace: {fmtPace100(s.cssTest.pace100)} ({s.cssTest.cssSpeed.toFixed(2)} m/s)</span>
                           )}
-                          <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 8, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
+                          <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 12, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
                         </div>
                       </div>
                     )}
@@ -2710,7 +2717,7 @@ function TrainingLog() {
   };
 
   if (!sessions) {
-    return <div style={{ background: "#101214", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
+    return <div style={{ background: "#0c0d10", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
   }
   const setColor = (i) => ["#F2C94C", "#E63946", "#56CCF2", "#6FCF97"][i % 4];
   const yLabel = metric === "reps" ? "reps" : metric === "1rm" ? "1RM" : "kg";
@@ -2728,15 +2735,15 @@ function TrainingLog() {
   const compareSessions = selectedCompare.length === 2 ? selectedCompare.map((id) => sessions.find((s) => s.id === id)).sort((a, b) => a.date.localeCompare(b.date)) : null;
 
   return (
-    <div style={{ background: "#101214", minHeight: "100vh", color: "#E8E6E1", fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
+    <div style={{ background: "#0c0d10", minHeight: "100vh", color: "#E8E6E1", fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
-        .disp { font-family: 'Oswald', sans-serif; letter-spacing: 0.02em; }
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        .disp { font-family: 'Manrope', sans-serif; letter-spacing: -0.02em; font-weight: 800; }
         .mono { font-family: 'JetBrains Mono', monospace; }
-        .pill { transition: all 0.15s ease; }
+        .pill { transition: all 0.18s ease; }
         .pill:hover { transform: translateY(-1px); }
         ::-webkit-scrollbar { height: 6px; width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #2a2e33; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #2b2e36; border-radius: 6px; }
         input[type="text"], input[type="date"], input[type="number"], textarea { color-scheme: dark; }
         textarea { font-family: 'Inter', sans-serif; resize: vertical; }
         .file-btn { position: relative; overflow: hidden; }
@@ -2764,10 +2771,10 @@ function TrainingLog() {
                 onKeyDown={(e) => { if (e.key === "Enter") saveOwnerName(); if (e.key === "Escape") setEditingName(false); }}
                 placeholder="Your name"
                 className="disp"
-                style={{ fontSize: "clamp(20px, 5vw, 28px)", fontWeight: 700, color: "#F5F3EE", background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "4px 10px", minWidth: 160 }}
+                style={{ fontSize: "clamp(20px, 5vw, 28px)", fontWeight: 700, color: "#F5F3EE", background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "4px 10px", minWidth: 160 }}
               />
-              <button onClick={saveOwnerName} style={{ background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Save</button>
-              <button onClick={() => setEditingName(false)} style={{ background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 12px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+              <button onClick={saveOwnerName} style={{ background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "6px 12px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Save</button>
+              <button onClick={() => setEditingName(false)} style={{ background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 12px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
             </div>
           ) : (
             <h1
@@ -2784,12 +2791,14 @@ function TrainingLog() {
             <span style={{ fontSize: 13, color: "#9a9fa6", fontWeight: 600 }}>{sessions.length} Sessions Logged</span>
             <span className="mono" style={{ fontSize: 12, color: "#6b7078" }}>{first ? fmtDateFull(first.date) : ""} → {latest ? fmtDateFull(latest.date) : ""}</span>
           </div>
-          <div style={{ display: "flex", gap: 2, overflowX: "auto" }}>
+          <div style={{ display: "flex", gap: 4, overflowX: "auto", background: "#0c0d10", border: "1px solid #22262b", borderRadius: 18, padding: 4 }}>
             {TABS.map(({ id, label, Icon }) => (
               <button key={id} onClick={() => setTab(id)} style={{
-                display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "none", border: "none", whiteSpace: "nowrap",
-                padding: "9px 12px", fontSize: 12.5, fontWeight: 600, color: tab === id ? "#F2C94C" : "#6b7078",
-                borderBottom: tab === id ? "2px solid #F2C94C" : "2px solid transparent", fontFamily: "'Inter', sans-serif",
+                display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", whiteSpace: "nowrap",
+                padding: "9px 14px", fontSize: 12.5, fontWeight: 700, color: tab === id ? "#0c0d10" : "#9a9fa6",
+                background: tab === id ? "linear-gradient(135deg, #FFDD7A, #F2C94C)" : "transparent",
+                borderRadius: 22, fontFamily: "'Inter', sans-serif", transition: "background 0.2s ease, color 0.2s ease",
+                boxShadow: tab === id ? "0 4px 14px -4px #F2C94C66" : "none",
               }}>
                 <Icon size={14} /> {label}
               </button>
@@ -2802,13 +2811,13 @@ function TrainingLog() {
 
         {tab === "dashboard" && (
           <>
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Status</div>
               <div style={{ fontSize: 13.5, color: "#F5F3EE", lineHeight: 1.5 }}>{statusBlurb}</div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14 }}>
+              <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Dumbbell size={13} color="#F2C94C" />
                   <span style={{ fontSize: 10.5, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Workout streak</span>
@@ -2816,7 +2825,7 @@ function TrainingLog() {
                 <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{consistency ? consistency.streak : 0}<span className="mono" style={{ fontSize: 11, color: "#6b7078" }}> wks</span></div>
                 <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 2 }}>{consistency ? (consistency.daysSinceLast === 0 ? "today" : `${consistency.daysSinceLast}d ago`) : "no sessions yet"} →</div>
               </div>
-              <div onClick={() => setTab("swim")} style={{ cursor: "pointer", background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14 }}>
+              <div onClick={() => setTab("swim")} style={{ cursor: "pointer", background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Waves size={13} color="#56CCF2" />
                   <span style={{ fontSize: 10.5, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Swim streak</span>
@@ -2827,7 +2836,7 @@ function TrainingLog() {
             </div>
 
             {/* Bodyweight — tap to expand into the trend chart, with an optional target weight */}
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 14, marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", cursor: "pointer" }} onClick={() => setWeightExpanded((v) => !v)}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -2842,7 +2851,7 @@ function TrainingLog() {
                 </div>
                 <div style={{
                   display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 7,
-                  background: weightExpanded ? "#F2C94C18" : "#1a1d21", border: `1px solid ${weightExpanded ? "#F2C94C55" : "#22262b"}`, flexShrink: 0,
+                  background: weightExpanded ? "#F2C94C18" : "#191c21", border: `1px solid ${weightExpanded ? "#F2C94C55" : "#23262d"}`, flexShrink: 0,
                 }}>
                   <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: weightExpanded ? "#F2C94C" : "#8a8f98" }}>{weightExpanded ? "Collapse" : "Expand"}</span>
                   <ChevronDown size={12} style={{ color: weightExpanded ? "#F2C94C" : "#8a8f98", transform: weightExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
@@ -2858,13 +2867,13 @@ function TrainingLog() {
               {weightExpanded && (
                 <div style={{ marginTop: 14 }} onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                    <div style={{ display: "flex", gap: 4, background: "#101214", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                      {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setWeightTimeView(v)} style={{ cursor: "pointer", padding: "5px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: "none", background: weightTimeView === v ? "#F2C94C" : "transparent", color: weightTimeView === v ? "#101214" : "#9a9fa6" }}>{l}</button>))}
+                    <div style={{ display: "flex", gap: 4, background: "#0c0d10", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                      {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setWeightTimeView(v)} style={{ cursor: "pointer", padding: "5px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: "none", background: weightTimeView === v ? "#F2C94C" : "transparent", color: weightTimeView === v ? "#0c0d10" : "#9a9fa6" }}>{l}</button>))}
                     </div>
                     {editingWeightTarget ? (
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <input type="number" step="0.1" placeholder="target kg" value={weightTargetDraft} onChange={(e) => setWeightTargetDraft(e.target.value)} className="mono" style={{ width: 90, background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
-                        <button onClick={saveWeightTarget} style={{ cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 6, padding: "6px 10px", fontWeight: 700, fontSize: 11.5 }}>Save</button>
+                        <input type="number" step="0.1" placeholder="target kg" value={weightTargetDraft} onChange={(e) => setWeightTargetDraft(e.target.value)} className="mono" style={{ width: 90, background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                        <button onClick={saveWeightTarget} style={{ cursor: "pointer", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 6, padding: "6px 10px", fontWeight: 700, fontSize: 11.5 }}>Save</button>
                         <button onClick={() => setEditingWeightTarget(false)} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 6, padding: "6px 10px", fontWeight: 600, fontSize: 11.5 }}>Cancel</button>
                       </div>
                     ) : (
@@ -2876,10 +2885,10 @@ function TrainingLog() {
                   {dashBodyweightSeries.length >= 2 ? (
                     <ResponsiveContainer width="100%" height={140}>
                       <LineChart data={dashBodyweightSeries} margin={{ top: 5, right: 16, left: -10, bottom: 0 }}>
-                        <CartesianGrid stroke="#22262b" vertical={false} />
+                        <CartesianGrid stroke="#23262d" vertical={false} />
                         <XAxis dataKey="date" stroke="#6b7078" fontSize={11} />
                         <YAxis stroke="#6b7078" fontSize={11} domain={targetWeight != null ? [(dataMin) => Math.min(dataMin - 1, targetWeight - 1), (dataMax) => Math.max(dataMax + 1, targetWeight + 1)] : ["dataMin - 1", "dataMax + 1"]} />
-                        <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                        <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} />
                         {targetWeight != null && <ReferenceLine y={targetWeight} stroke="#F2C94C" strokeDasharray="4 4" />}
                         <Line type="monotone" dataKey="kg" stroke="#56CCF2" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
                       </LineChart>
@@ -2891,7 +2900,7 @@ function TrainingLog() {
               )}
             </div>
 
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>
                   {combinedRenderedWeekCount > 0
@@ -2906,7 +2915,7 @@ function TrainingLog() {
                     <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#56CCF2", display: "inline-block" }} /> swim</span>
                     <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#6FCF97", display: "inline-block" }} /> both</span>
                   </div>
-                  <select value={dashHeatmapWeekCount} onChange={(e) => setDashHeatmapWeekCount(Number(e.target.value))} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 8px", color: "#c9cdd3", fontSize: 11, cursor: "pointer" }}>
+                  <select value={dashHeatmapWeekCount} onChange={(e) => setDashHeatmapWeekCount(Number(e.target.value))} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 8px", color: "#c9cdd3", fontSize: 11, cursor: "pointer" }}>
                     {[8, 12, 24, 52].map((n) => (<option key={n} value={n}>{n} wks</option>))}
                   </select>
                 </div>
@@ -2934,7 +2943,7 @@ function TrainingLog() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <Dumbbell size={13} color="#F2C94C" />
@@ -2949,14 +2958,14 @@ function TrainingLog() {
                   <div style={{ display: "grid", gap: 8 }}>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Start date</div>
-                      <input type="date" value={targetDraft.startDate} onChange={(e) => setTargetDraft({ ...targetDraft, startDate: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="date" value={targetDraft.startDate} onChange={(e) => setTargetDraft({ ...targetDraft, startDate: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Weeks</div>
-                      <input type="number" min="1" value={targetDraft.weeks} onChange={(e) => setTargetDraft({ ...targetDraft, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="number" min="1" value={targetDraft.weeks} onChange={(e) => setTargetDraft({ ...targetDraft, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={saveTargetSettings} style={{ flex: 1, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
+                      <button onClick={saveTargetSettings} style={{ flex: 1, background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
                       <button onClick={() => setEditingTarget(false)} style={{ flex: 1, background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 0", fontWeight: 600, fontSize: 11.5, cursor: "pointer" }}>Cancel</button>
                     </div>
                   </div>
@@ -2972,7 +2981,7 @@ function TrainingLog() {
                   )
                 ) : <div style={{ fontSize: 12, color: "#6b7078" }}>No workouts logged yet.</div>}
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <Waves size={13} color="#56CCF2" />
@@ -2987,14 +2996,14 @@ function TrainingLog() {
                   <div style={{ display: "grid", gap: 8 }}>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Start date</div>
-                      <input type="date" value={swimTargetDraftDash.startDate} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, startDate: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="date" value={swimTargetDraftDash.startDate} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, startDate: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Weeks</div>
-                      <input type="number" min="1" value={swimTargetDraftDash.weeks} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="number" min="1" value={swimTargetDraftDash.weeks} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={saveSwimTargetDash} style={{ flex: 1, background: "#56CCF2", color: "#101214", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
+                      <button onClick={saveSwimTargetDash} style={{ flex: 1, background: "#56CCF2", color: "#0c0d10", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
                       <button onClick={() => setEditingSwimTargetDash(false)} style={{ flex: 1, background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 0", fontWeight: 600, fontSize: 11.5, cursor: "pointer" }}>Cancel</button>
                     </div>
                   </div>
@@ -3074,7 +3083,7 @@ function TrainingLog() {
         {tab === "workout" && (
           <>
             {/* PR card — top, matching the Swim tab's emphasis on PRs first */}
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <Award size={14} color="#F2C94C" />
@@ -3109,25 +3118,25 @@ function TrainingLog() {
 
             {/* Streak + Volume — small, secondary to PR */}
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Streak</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{consistency ? consistency.streak : 0}<span className="mono" style={{ fontSize: 10, color: "#6b7078" }}> wks</span></div>
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Last session</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{consistency ? (consistency.daysSinceLast === 0 ? "today" : `${consistency.daysSinceLast}d`) : "—"}</div>
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Volume — latest</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{volumeKpi ? Math.round(volumeKpi.latestVol).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#6b7078" }}> kg</span></div>
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Lifetime volume</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{volumeKpi ? Math.round(volumeKpi.cumulative).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#6b7078" }}> kg</span></div>
               </div>
             </div>
 
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 18 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 4 }}>Volume by muscle group — latest session ({latest ? fmtDate(latest.date) : ""})</div>
               <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 12 }}>
                 {GROUPS.map((g) => `${g}: ${chartExercises.filter((n) => muscleGroupMap[n] === g).join(" + ") || "—"}`).join(" · ")}
@@ -3136,7 +3145,7 @@ function TrainingLog() {
                 {groupVolumeLatest.map((g) => {
                   const isActive = activeGroup === g.group;
                   return (
-                    <div key={g.group} onClick={() => changeFilter("group:" + g.group)} style={{ cursor: "pointer", borderRadius: 8, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
+                    <div key={g.group} onClick={() => changeFilter("group:" + g.group)} style={{ cursor: "pointer", borderRadius: 12, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
                         <span style={{ color: GROUP_COLORS[g.group], fontWeight: 600 }}>{g.group}</span>
                         <span className="mono" style={{ color: "#c9cdd3" }}>{g.kg.toLocaleString()} kg ({g.pct}%)</span>
@@ -3149,16 +3158,16 @@ function TrainingLog() {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-              <button className="pill" onClick={() => changeFilter("All")} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700, border: filter === "All" ? "1px solid #F5F3EE" : "1px solid #22262b", background: filter === "All" ? "#F5F3EE1a" : "#16181b", color: filter === "All" ? "#F5F3EE" : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>All</button>
+              <button className="pill" onClick={() => changeFilter("All")} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700, border: filter === "All" ? "1px solid #F5F3EE" : "1px solid #22262b", background: filter === "All" ? "#F5F3EE1a" : "#15171b", color: filter === "All" ? "#F5F3EE" : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>All</button>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                  {["reps", "volume", "1rm"].map((m) => (<button key={m} onClick={() => setMetric(m)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: metric === m ? "#F2C94C" : "transparent", color: metric === m ? "#101214" : "#9a9fa6" }}>{m === "reps" ? "Reps" : m === "volume" ? "Volume (kg)" : "1RM (kg)"}</button>))}
+                <div style={{ display: "flex", gap: 4, background: "#15171b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {["reps", "volume", "1rm"].map((m) => (<button key={m} onClick={() => setMetric(m)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: metric === m ? "#F2C94C" : "transparent", color: metric === m ? "#0c0d10" : "#9a9fa6" }}>{m === "reps" ? "Reps" : m === "volume" ? "Volume (kg)" : "1RM (kg)"}</button>))}
                 </div>
-                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                  {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setTimeView(v)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: timeView === v ? "#F2C94C" : "transparent", color: timeView === v ? "#101214" : "#9a9fa6" }}>{l}</button>))}
+                <div style={{ display: "flex", gap: 4, background: "#15171b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setTimeView(v)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: timeView === v ? "#F2C94C" : "transparent", color: timeView === v ? "#0c0d10" : "#9a9fa6" }}>{l}</button>))}
                 </div>
-                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                  {[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([v, l]) => (<button key={v} onClick={() => setRange(v)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: range === v ? "#F2C94C" : "transparent", color: range === v ? "#101214" : "#9a9fa6" }}>{l}</button>))}
+                <div style={{ display: "flex", gap: 4, background: "#15171b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([v, l]) => (<button key={v} onClick={() => setRange(v)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: range === v ? "#F2C94C" : "transparent", color: range === v ? "#0c0d10" : "#9a9fa6" }}>{l}</button>))}
                 </div>
               </div>
             </div>
@@ -3176,7 +3185,7 @@ function TrainingLog() {
                       const active = filter === name;
                       const color = colorsMap[name];
                       return (
-                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #22262b", background: active ? `${color}1a` : "#16181b", color: active ? color : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>{name}</button>
+                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #22262b", background: active ? `${color}1a` : "#15171b", color: active ? color : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>{name}</button>
                       );
                     })}
                   </div>
@@ -3190,7 +3199,7 @@ function TrainingLog() {
                   const d = deltaFor(name);
                   const latestTotal = latest && latest.ex[name] ? total(latest.ex[name]) : null;
                   return (
-                    <div key={name} style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 10, padding: "12px 14px" }}>
+                    <div key={name} style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 16, padding: "12px 14px" }}>
                       <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4, fontWeight: 600 }}>{name}</div>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}><span className="disp" style={{ fontSize: 22, fontWeight: 700, color: colorsMap[name] }}>{latestTotal ?? "—"}</span><span className="mono" style={{ fontSize: 11, color: "#6b7078" }}>reps</span></div>
                       {d !== null && (<div style={{ fontSize: 11, color: d >= 0 ? "#6FCF97" : "#E63946", marginTop: 2, display: "flex", alignItems: "center", gap: 3 }}><TrendingUp size={11} /> {d >= 0 ? "+" : ""}{d} since {fmtDate(first.date)}</div>)}
@@ -3200,7 +3209,7 @@ function TrainingLog() {
               </div>
             )}
 
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
+            <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, padding: "18px 14px 8px", marginBottom: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>
                 {(() => {
                   const agg = metric === "1rm" ? "Peak" : "Total";
@@ -3218,8 +3227,8 @@ function TrainingLog() {
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
                   <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
                     {chartExercises.map((name) => (
                       <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={chartFocus === name ? 3 : 2.2} strokeOpacity={chartFocus && chartFocus !== name ? 0.18 : 1} dot={{ r: 3, fillOpacity: chartFocus && chartFocus !== name ? 0.18 : 1 }} connectNulls />
@@ -3230,20 +3239,20 @@ function TrainingLog() {
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
                   <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => [`${v} ${yLabel}`, filter.slice(6)]} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => [`${v} ${yLabel}`, filter.slice(6)]} />
                     <Line type="monotone" dataKey="value" stroke={GROUP_COLORS[filter.slice(6)]} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : timeView === "week" ? (
                   <LineChart data={weeklySingleData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} />
                     <Line type="monotone" dataKey="Total" stroke={colorsMap[filter] || "#F5F3EE"} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : (
                   <LineChart data={perSetData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
                     {Array.from({ length: maxSets }).map((_, i) => {
                       const key = "Set " + (i + 1);
@@ -3262,20 +3271,20 @@ function TrainingLog() {
             )}
 
             {loadableSet.has(filter) && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, padding: "18px 14px 8px", marginBottom: 14 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>{filter} — added external load (kg), kept separate from reps</div>
                 <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Shown on its own so reps and load never blend into one misleading number — 12 reps @ +5kg isn't directly comparable to 10 reps @ +15kg.</div>
                 <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
                   <LineChart data={loadStepDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} />
                     <Line type="stepAfter" dataKey="Added load (kg)" stroke="#E63946" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             )}
 
-            <div style={{ background: "#101214", border: "1px dashed #22262b", borderRadius: 10, padding: "10px 14px", fontSize: 11, color: "#6b7078", marginBottom: 8 }}>
+            <div style={{ background: "#0c0d10", border: "1px dashed #22262b", borderRadius: 16, padding: "10px 14px", fontSize: 11, color: "#6b7078", marginBottom: 8 }}>
               "First logged session" ({first ? fmtDateFull(first.date) : ""}) is just your earliest entry — used only as a fixed reference point for comparisons, not a training assumption.
             </div>
           </>
@@ -3348,13 +3357,13 @@ function TrainingLog() {
         {tab === "history" && (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", background: "#101214", border: "1px solid #22262b", borderRadius: 10, padding: 3 }}>
+              <div style={{ display: "flex", background: "#0c0d10", border: "1px solid #22262b", borderRadius: 16, padding: 3 }}>
                 {[{ id: "workout", label: "Workout", Icon: Dumbbell }, { id: "swim", label: "Swim", Icon: Waves }, { id: "all", label: "All", Icon: LayoutGrid }].map(({ id, label, Icon }) => (
                   <button key={id} onClick={() => setViewMode(id)} style={{
-                    display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", borderRadius: 8,
+                    display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", borderRadius: 12,
                     padding: "7px 14px", fontSize: 12.5, fontWeight: 700,
                     background: viewMode === id ? (id === "swim" ? "#56CCF2" : id === "all" ? "#F5F3EE" : "#F2C94C") : "transparent",
-                    color: viewMode === id ? "#101214" : "#8a8f98",
+                    color: viewMode === id ? "#0c0d10" : "#8a8f98",
                   }}><Icon size={13} /> {label}</button>
                 ))}
               </div>
@@ -3363,28 +3372,28 @@ function TrainingLog() {
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
               {viewMode === "workout" && !showForm && (
-                <button onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}><Plus size={16} /> Log new session</button>
+                <button onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 16, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}><Plus size={16} /> Log new session</button>
               )}
-              <button onClick={exportJSON} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export {viewMode === "workout" ? "workout" : viewMode === "swim" ? "swim" : "all"} JSON</button>
+              <button onClick={exportJSON} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export {viewMode === "workout" ? "workout" : viewMode === "swim" ? "swim" : "all"} JSON</button>
               {viewMode === "workout" && (
-                <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export CSV</button>
+                <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export CSV</button>
               )}
               {viewMode !== "swim" ? (
-                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
+                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
                   <Upload size={14} /> Import JSON
                   <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImport} />
                 </label>
               ) : (
-                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
+                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
                   <Upload size={14} /> Import .FIT
                   <input ref={swimImportInputRef} type="file" accept=".fit" multiple onChange={handleSwimFitUpload} disabled={swimUploading} />
                 </label>
               )}
               {viewMode === "workout" && selectedCompare.length === 2 && (
-                <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 10, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
+                <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 16, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
               )}
               {viewMode === "workout" && sessions.length > 0 && (
-                <button onClick={() => setConfirmDeleteAll(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
+                <button onClick={() => setConfirmDeleteAll(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
               )}
             </div>
 
@@ -3392,13 +3401,13 @@ function TrainingLog() {
             {viewMode === "workout" && selectedCompare.length > 0 && selectedCompare.length < 2 && (<div style={{ fontSize: 12, color: "#6b7078", marginBottom: 12 }}>Select one more session to compare.</div>)}
 
             {viewMode === "swim" && (
-              <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 18, marginBottom: 22 }}>
+              <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 18, marginBottom: 22 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE", marginBottom: 3 }}>Log new swim session</div>
                     <div style={{ fontSize: 12, color: "#6b7078" }}>Upload Garmin <span className="mono">.FIT</span> files (pool swims) — parsed entirely in your browser, nothing is uploaded anywhere.</div>
                   </div>
-                  <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#56CCF2", color: "#101214", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
+                  <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#56CCF2", color: "#0c0d10", border: "none", borderRadius: 16, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
                     <Upload size={14} /> {swimUploading ? "Parsing…" : "Upload .FIT"}
                     <input ref={swimFileInputRef} type="file" accept=".fit" multiple onChange={handleSwimFitUpload} disabled={swimUploading} />
                   </label>
@@ -3410,7 +3419,7 @@ function TrainingLog() {
                 {swimUploadMsg && <div style={{ fontSize: 12, color: swimUploadMsg.includes("Failed") ? "#E63946" : "#6FCF97", marginTop: 8 }}>{swimUploadMsg}</div>}
 
                 {pendingCssUpload && (
-                  <div style={{ marginTop: 14, background: "#101214", border: "1px dashed #2a2e33", borderRadius: 10, padding: 14 }}>
+                  <div style={{ marginTop: 14, background: "#0c0d10", border: "1px dashed #2a2e33", borderRadius: 16, padding: 14 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: "#F5F3EE", marginBottom: 10 }}>Confirm CSS test times</div>
                     <div style={{ display: "grid", gap: 12 }}>
                       {pendingCssUpload.drafts.map((d, idx) => (
@@ -3419,11 +3428,11 @@ function TrainingLog() {
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                             <div>
                               <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>200m time (s) {d.auto200 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
-                              <input type="number" placeholder="e.g. 165.5" value={d.t200} onChange={(e) => updatePendingCssDraft(idx, "t200", e.target.value)} className="mono" style={{ width: 130, background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <input type="number" placeholder="e.g. 165.5" value={d.t200} onChange={(e) => updatePendingCssDraft(idx, "t200", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
                             </div>
                             <div>
                               <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>400m time (s) {d.auto400 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
-                              <input type="number" placeholder="e.g. 345.0" value={d.t400} onChange={(e) => updatePendingCssDraft(idx, "t400", e.target.value)} className="mono" style={{ width: 130, background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <input type="number" placeholder="e.g. 345.0" value={d.t400} onChange={(e) => updatePendingCssDraft(idx, "t400", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
                             </div>
                           </div>
                           {!d.auto200 && !d.auto400 && (
@@ -3433,8 +3442,8 @@ function TrainingLog() {
                       ))}
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                      <button onClick={confirmPendingCssUpload} style={{ cursor: "pointer", background: "#2EC4B6", color: "#101214", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, fontSize: 12.5 }}>Save session{pendingCssUpload.drafts.length > 1 ? "s" : ""}</button>
-                      <button onClick={cancelPendingCssUpload} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 8, padding: "8px 16px", fontWeight: 600, fontSize: 12.5 }}>Discard</button>
+                      <button onClick={confirmPendingCssUpload} style={{ cursor: "pointer", background: "#2EC4B6", color: "#0c0d10", border: "none", borderRadius: 12, padding: "8px 16px", fontWeight: 700, fontSize: 12.5 }}>Save session{pendingCssUpload.drafts.length > 1 ? "s" : ""}</button>
+                      <button onClick={cancelPendingCssUpload} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 12, padding: "8px 16px", fontWeight: 600, fontSize: 12.5 }}>Discard</button>
                     </div>
                   </div>
                 )}
@@ -3442,18 +3451,18 @@ function TrainingLog() {
             )}
 
             {viewMode === "workout" && showForm && (
-              <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 18, marginBottom: 22 }}>
+              <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 18, marginBottom: 22 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                   <span style={{ fontWeight: 700, fontSize: 15 }}>{editingId ? "Edit session" : "New session"}</span>
                   <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={cancelForm} />
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Date</div><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
-                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Bodyweight (kg)</div><input type="number" step="0.1" placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
-                  <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Label (optional)</div><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} /></div>
+                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Date</div><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
+                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Bodyweight (kg)</div><input type="number" step="0.1" placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
+                  <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Label (optional)</div><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} /></div>
                 </div>
 
-                <div style={{ background: "#101214", border: "1px dashed #2a2e33", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                <div style={{ background: "#0c0d10", border: "1px dashed #2a2e33", borderRadius: 16, padding: 12, marginBottom: 16 }}>
                   <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6 }}>Paste your workout summary — parses it and fills the fields below for you to review</div>
                   <textarea
                     value={pasteText}
@@ -3461,12 +3470,12 @@ function TrainingLog() {
                     placeholder={"Wide grip pull ups :\n12 rep x 1 sets body weight\n9 rep x 1 sets body weight\n\nChest dips :\n12 rep x 1 sets body weight + 15kg\n10 rep x 1 sets body weight + 5kg"}
                     rows={4}
                     className="mono"
-                    style={{ width: "100%", background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box", resize: "vertical" }}
+                    style={{ width: "100%", background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box", resize: "vertical" }}
                   />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button onClick={handleParseFill} style={{ marginTop: 8, background: "#2a2e33", color: "#F5F3EE", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Parse & fill</button>
-                    <button onClick={() => setShowLibrary(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Exercise reference</button>
-                    <button onClick={() => setShowAddExercise(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>+ Add exercise</button>
+                    <button onClick={handleParseFill} style={{ marginTop: 8, background: "#2b2e36", color: "#F5F3EE", border: "none", borderRadius: 12, padding: "8px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Parse & fill</button>
+                    <button onClick={() => setShowLibrary(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Exercise reference</button>
+                    <button onClick={() => setShowAddExercise(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>+ Add exercise</button>
                   </div>
                   {parseNote && <div style={{ fontSize: 11.5, color: "#F2C94C", marginTop: 8, lineHeight: 1.5 }}>{parseNote}</div>}
                   {unmatchedNames.length > 0 && (
@@ -3488,15 +3497,15 @@ function TrainingLog() {
                           {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#5a5f66", flexShrink: 0 }} />}
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8 }}>
-                          <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
-                          <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
+                          <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
+                          <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
                         </div>
                       </div>
                     ) : (
                       <div key={name} style={{ display: "grid", gridTemplateColumns: editingId ? "160px 1fr 90px" : "160px 1fr 90px 18px", gap: 10, alignItems: "center" }}>
                         <span style={{ fontSize: 13, color: colorsMap[name] || "#c9cdd3", fontWeight: 600 }}>{name}</span>
-                        <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
-                        <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                        <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                        <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
                         {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#5a5f66" }} />}
                       </div>
                     )
@@ -3506,13 +3515,13 @@ function TrainingLog() {
                   )}
                 </div>
                 <div style={{ marginBottom: 4, fontSize: 11, color: "#8a8f98" }}>Notes (optional — soreness, sleep, how it felt)</div>
-                <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
-                <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
+                <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
               </div>
             )}
 
             {viewMode === "workout" && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Workout sessions ({sessions.length}) · select up to 2 to compare</div>
                 <div style={{ maxHeight: 520, overflowY: "auto" }}>
                   {[...sessions].reverse().map((s, idx) => (
@@ -3547,7 +3556,7 @@ function TrainingLog() {
             )}
 
             {viewMode === "swim" && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Swim sessions ({(swimSessions || []).length}) · full breakdown lives on the Swimming tab</div>
                 <div style={{ maxHeight: 520, overflowY: "auto" }}>
                   {[...(swimSessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1)).map((s, idx, arr) => (
@@ -3572,7 +3581,7 @@ function TrainingLog() {
             )}
 
             {viewMode === "all" && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>All sessions ({sessions.length + (swimSessions || []).length})</div>
                 <div style={{ maxHeight: 520, overflowY: "auto" }}>
                   {[
@@ -3599,46 +3608,46 @@ function TrainingLog() {
       </div>
 
       {confirmDelete && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 360, width: "100%" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 360, width: "100%" }}>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <AlertTriangle size={20} color="#E63946" style={{ flexShrink: 0 }} />
               <div><div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>Delete this session?</div><div style={{ fontSize: 12.5, color: "#9a9fa6" }}>{fmtDateFull(confirmDelete.date)}{confirmDelete.kind === "swim" ? ` — swim, ${confirmDelete.distance || "?"}m` : ` — "${confirmDelete.label}"`} will be permanently removed. This can't be undone.</div></div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmDelete(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => doDelete(confirmDelete.id, confirmDelete.kind)} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete</button>
+              <button onClick={() => setConfirmDelete(null)} style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => doDelete(confirmDelete.id, confirmDelete.kind)} style={{ padding: "8px 16px", borderRadius: 12, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete</button>
             </div>
           </div>
         </div>
       )}
 
       {confirmDeleteAll && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 360, width: "100%" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 360, width: "100%" }}>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <AlertTriangle size={20} color="#E63946" style={{ flexShrink: 0 }} />
               <div><div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>Delete ALL logs?</div><div style={{ fontSize: 12.5, color: "#9a9fa6" }}>All {sessions.length} session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.</div></div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmDeleteAll(false)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={doDeleteAllLogs} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete all</button>
+              <button onClick={() => setConfirmDeleteAll(false)} style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={doDeleteAllLogs} style={{ padding: "8px 16px", borderRadius: 12, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete all</button>
             </div>
           </div>
         </div>
       )}
 
       {selectedHeatDate && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setSelectedHeatDate(null)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: "20px 28px" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setSelectedHeatDate(null)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: "20px 28px" }} onClick={(e) => e.stopPropagation()}>
             <div className="disp" style={{ fontSize: 20, fontWeight: 700, color: "#F5F3EE" }}>{fmtDateFull(selectedHeatDate)}</div>
           </div>
         </div>
       )}
 
       {showLibrary && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowLibrary(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowLibrary(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Exercise reference</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowLibrary(false)} />
@@ -3672,14 +3681,14 @@ function TrainingLog() {
                 </div>
               </div>
             ))}
-            <button onClick={() => { setShowLibrary(false); setShowAddExercise(true); }} style={{ marginTop: 4, width: "100%", background: "#2a2e33", color: "#F5F3EE", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Add an exercise not listed here</button>
+            <button onClick={() => { setShowLibrary(false); setShowAddExercise(true); }} style={{ marginTop: 4, width: "100%", background: "#2b2e36", color: "#F5F3EE", border: "none", borderRadius: 12, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Add an exercise not listed here</button>
           </div>
         </div>
       )}
 
       {showPrPicker && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowPrPicker(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 420, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowPrPicker(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 420, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Choose PR exercises</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowPrPicker(false)} />
@@ -3702,14 +3711,14 @@ function TrainingLog() {
                 );
               })}
             </div>
-            <button onClick={() => setShowPrPicker(false)} style={{ marginTop: 14, width: "100%", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Done</button>
+            <button onClick={() => setShowPrPicker(false)} style={{ marginTop: 14, width: "100%", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Done</button>
           </div>
         </div>
       )}
 
       {showAddExercise && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowAddExercise(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowAddExercise(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Add an exercise</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowAddExercise(false)} />
@@ -3720,34 +3729,34 @@ function TrainingLog() {
             <div style={{ display: "grid", gap: 10 }}>
               <div>
                 <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Name</div>
-                <input type="text" placeholder="e.g. Archer Pull-Ups" value={addExDraft.name} onChange={(e) => setAddExDraft({ ...addExDraft, name: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                <input type="text" placeholder="e.g. Archer Pull-Ups" value={addExDraft.name} onChange={(e) => setAddExDraft({ ...addExDraft, name: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Muscle group</div>
-                  <select value={addExDraft.group} onChange={(e) => setAddExDraft({ ...addExDraft, group: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }}>
+                  <select value={addExDraft.group} onChange={(e) => setAddExDraft({ ...addExDraft, group: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }}>
                     {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
                 <div style={{ width: 110 }}>
                   <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>BW ratio</div>
-                  <input type="number" step="0.05" min="0" max="1.5" value={addExDraft.ratio} onChange={(e) => setAddExDraft({ ...addExDraft, ratio: e.target.value })} className="mono" style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                  <input type="number" step="0.05" min="0" max="1.5" value={addExDraft.ratio} onChange={(e) => setAddExDraft({ ...addExDraft, ratio: e.target.value })} className="mono" style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Target muscle(s) — optional</div>
-                <input type="text" placeholder="e.g. Lats, Biceps" value={addExDraft.target} onChange={(e) => setAddExDraft({ ...addExDraft, target: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                <input type="text" placeholder="e.g. Lats, Biceps" value={addExDraft.target} onChange={(e) => setAddExDraft({ ...addExDraft, target: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
               </div>
               <div style={{ fontSize: 10.5, color: "#4a4f56" }}>Ratio = fraction of bodyweight lifted per rep. Use 0 for a pure-load exercise (barbell/machine).</div>
-              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Add exercise</button>
+              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Add exercise</button>
             </div>
           </div>
         </div>
       )}
 
       {showCompare && compareSessions && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowCompare(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowCompare(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Session comparison</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowCompare(false)} />
