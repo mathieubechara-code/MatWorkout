@@ -690,6 +690,24 @@ const fmtMinSec = (totalSec) => {
 };
 const fmtPace100 = (secPer100) => (secPer100 == null ? "—" : `${fmtMinSec(secPer100)}/100m`);
 
+// ---- Normalization helpers for overlaying two differently-scaled metrics (e.g. pace in
+// seconds, HR in bpm) on a single shared axis without one series drowning the other out.
+// Converts each to "standard deviations from its own mean" (z-score) so both land on a
+// comparable, unitless scale — the standard technique for eyeballing correlation between
+// series that don't share units, rather than giving each its own independently-scaled axis
+// (which just stretches both to fill the chart regardless of real magnitude).
+function computeMeanStd(values) {
+  const vals = values.filter((v) => v != null && isFinite(v));
+  if (vals.length < 2) return null;
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+  return { mean, std: Math.sqrt(variance) };
+}
+function zScoreOf(v, stats) {
+  if (v == null || stats == null) return null;
+  return stats.std > 0 ? (v - stats.mean) / stats.std : 0;
+}
+
 function SwimmingTab({ isMobile }) {
   const [sessions, setSessions] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
@@ -990,22 +1008,50 @@ function SwimmingTab({ isMobile }) {
     );
 
     if (key === "pace") {
+      // Pace and HR overlay: both series are converted to z-scores (standard deviations
+      // from their own session-average) and plotted on ONE shared axis. This is what
+      // actually lets you read pace-vs-HR correlation — two independently auto-scaled axes
+      // just stretch each series to fill the full chart height regardless of its real
+      // magnitude, which makes any two lines *look* related whether or not they are.
+      // Pace's z-score is sign-flipped so "up" consistently means "faster" here, matching
+      // "up" meaning "higher effort" for HR — so two lines rising together is the real signal.
+      const paceStats = computeMeanStd(trendDataView.map((d) => d.pace100));
+      const hrStats = computeMeanStd(trendDataView.map((d) => d.avgHR));
+      const normalizedData = trendDataView.map((d) => ({
+        ...d,
+        paceZ: paceStats ? (() => { const z = zScoreOf(d.pace100, paceStats); return z == null ? null : -z; })() : null,
+        hrZ: hrStats ? zScoreOf(d.avgHR, hrStats) : null,
+      }));
+      const zTooltipFormatter = (v, name, props) => {
+        if (name === "Pace") return [fmtPace100(props.payload.pace100), name];
+        if (name === "Avg HR") return [props.payload.avgHR != null ? `${Math.round(props.payload.avgHR)} bpm` : "—", name];
+        return [v, name];
+      };
       return (
         <div>
           {overlaySelector}
           {showHR ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
-                <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v, name) => (name === "Pace" ? [fmtPace100(v), name] : [v != null ? `${Math.round(v)} bpm` : "—", name])} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-              </LineChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                  <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                  <YAxis
+                    tick={{ fill: "#6b7078", fontSize: 10.5 }}
+                    tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
+                    domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
+                  />
+                  <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
+                  <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={zTooltipFormatter} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Line type="monotone" dataKey="paceZ" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+              <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
+                Both lines shown as standard deviations (σ) from their own session average, so pace (seconds) and HR (bpm) are directly comparable. Pace is flipped so "up" = faster, matching "up" = higher HR — lines rising together means faster swimming tracked with higher effort. Hover for actual pace/HR values.
+              </div>
+            </>
           ) : (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
