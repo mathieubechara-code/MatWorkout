@@ -574,15 +574,14 @@ const COMPARE_MODE_DESCRIPTIONS = {
   swolfhr: "Efficiency vs effort — see whether your stroke efficiency is improving without more cardiovascular strain.",
 };
 const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078", kick_free: "#FF8FA3", kick_frog: "#F4B183" };
-// Background presets for the floating swim-type filter bar — solid (no blur/translucency) so it
-// reads as one clear block instead of a see-through layer while scrolling. "Nav match" is the
-// default and is deliberately the same opaque tone as the floating tab nav above it, so the two
-// bars look like one continuous piece rather than separate floating panels.
-const FILTER_BAR_THEMES = [
-  { name: "Nav match", bg: "#0c0d10", border: "#22262b" },
-  { name: "Navy", bg: "#12161f", border: "#232c3d" },
-  { name: "Slate", bg: "#1e2128", border: "#33373f" },
-];
+// Shared background for every floating/sticky bar in the app (top tab nav + the Swim tab's
+// swim-type filter bar) — a warm, dark cream tone (not a cold near-black) so the two bars read
+// as one continuous, deliberately-toned piece rather than separate floating panels. Solid (no
+// blur/translucency) so it reads as one clear block instead of a see-through layer while
+// scrolling.
+const FLOATING_BAR_BG = "#1b1712";
+const FLOATING_BAR_BG_SOFT = "rgba(27,23,18,0.92)"; // translucent variant for the backdrop-blur wrapper
+const FLOATING_BAR_BORDER = "#332b20";
 // Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
 // only to flag likely sensor glitches, never to silently drop data outside this filter.
 const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130, kick_free: 130, kick_frog: 90 };
@@ -1474,7 +1473,6 @@ function SwimmingTab({ isMobile }) {
   const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
   const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
   const [metricValueMode, setMetricValueMode] = useState("latest"); // "latest" | "avg6" — headline number on each Trends card
-  const [filterBarTheme, setFilterBarTheme] = useState(0); // index into FILTER_BAR_THEMES — background of the floating swim-type filter
   const SWIM_KEY = "swim-sessions-v1";
 
   useEffect(() => {
@@ -1849,6 +1847,23 @@ function SwimmingTab({ isMobile }) {
   };
   const headlineOf = (series) => (metricValueMode === "avg6" ? avg6Of(series) : latestOf(series));
 
+  // Card accent color: Pace is the only one of these four that has a genuine "All strokes"
+  // value (pace100 is a real whole-session figure — total time ÷ total distance across every
+  // stroke swum, not any one stroke's number). SWOLF, stroke rate, and distance/stroke are all
+  // technique-dependent — a butterfly stroke rate and a backstroke stroke rate aren't on the
+  // same scale, so there's no meaningful way to blend them into one number, same reasoning for
+  // all three, SWOLF included. When "All strokes" is selected, none of the four should be
+  // painted with one arbitrary stroke's color (which used to make it look like that color WAS
+  // "all"); use the neutral "all" white instead. The headline number itself still falls back to
+  // the most-common stroke for SWOLF/cadence/dps (see activeStroke above) since a single card
+  // can only show one number — the title suffix below makes that fallback explicit — while the
+  // expanded chart for each already draws every stroke as its own line.
+  const strokeCardColor = strokeFilter === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[strokeFilter] || "#F5F3EE");
+  const strokeTitleSuffix = (stroke) => {
+    if (!stroke) return "";
+    return strokeFilter === "all" ? ` (${SWIM_STROKE_LABELS[stroke]} · most common)` : ` (${SWIM_STROKE_LABELS[stroke]})`;
+  };
+
   const metricCards = [
     {
       key: "pace",
@@ -1858,35 +1873,35 @@ function SwimmingTab({ isMobile }) {
       value: fmtPace100(headlineOf(paceSeries)),
       perStroke: true,
       lowerBetter: true,
-      color: activeStroke ? SWIM_STROKE_COLORS[activeStroke] : "#F5F3EE",
+      color: strokeCardColor,
     },
     {
       key: "swolf",
-      title: "SWOLF" + (activeStroke ? ` (${SWIM_STROKE_LABELS[activeStroke]})` : ""),
+      title: "SWOLF" + strokeTitleSuffix(activeStroke),
       series: swolfSeries,
       verdict: computeVerdict(swolfSeries, "lower-better"),
       value: headlineOf(swolfSeries) != null ? Math.round(headlineOf(swolfSeries)) : "—",
       perStroke: true,
       lowerBetter: true,
-      color: activeStroke ? SWIM_STROKE_COLORS[activeStroke] : "#F5F3EE",
+      color: strokeCardColor,
     },
     {
       key: "cadence",
-      title: "Stroke rate" + (activeStroke ? ` (${SWIM_STROKE_LABELS[activeStroke]})` : ""),
+      title: "Stroke rate" + strokeTitleSuffix(activeStroke),
       series: cadenceSeries,
       verdict: computeVerdict(cadenceSeries, "higher-better"),
       value: headlineOf(cadenceSeries) != null ? `${Math.round(headlineOf(cadenceSeries))} spm` : "—",
       perStroke: true,
-      color: activeStroke ? SWIM_STROKE_COLORS[activeStroke] : "#F5F3EE",
+      color: strokeCardColor,
     },
     {
       key: "dps",
-      title: "Distance/stroke" + (activeStroke ? ` (${SWIM_STROKE_LABELS[activeStroke]})` : ""),
+      title: "Distance/stroke" + strokeTitleSuffix(activeStroke),
       series: dpsSeries,
       verdict: computeVerdict(dpsSeries, "higher-better"),
       value: headlineOf(dpsSeries) != null ? `${headlineOf(dpsSeries).toFixed(2)}m` : "—",
       perStroke: true,
-      color: activeStroke ? SWIM_STROKE_COLORS[activeStroke] : "#F5F3EE",
+      color: strokeCardColor,
     },
   ];
 
@@ -1936,7 +1951,7 @@ function SwimmingTab({ isMobile }) {
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
               <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
-              <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={activeStroke ? SWIM_STROKE_COLORS[activeStroke] : "#F5F3EE"} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeCardColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -2240,44 +2255,25 @@ function SwimmingTab({ isMobile }) {
               and 6-wk avg stay put in the Trends header, since those only apply there). Solid
               (non-blurred) background, matched to the floating tab nav above by default, so the
               two read as one continuous block instead of two separate see-through layers. */}
-          {allStrokesSeen.length > 0 && (() => {
-            const theme = FILTER_BAR_THEMES[filterBarTheme];
-            return (
-              <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: "6px 8px", marginBottom: 10, boxShadow: "0 6px 16px -8px rgba(0,0,0,0.65)" }}>
-                {["all", ...allStrokesSeen].map((s) => {
-                  // Part 2: every swim-type slicer button uses that stroke's own color from
-                  // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
-                  // selected state (solid fill) vs. a tinted, low-contrast unselected state —
-                  // reused verbatim (same colors) everywhere else in the Swim tab.
-                  const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
-                  const selected = strokeFilter === s;
-                  return (
-                    <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
-                      cursor: "pointer", background: selected ? color : `${color}1a`,
-                      border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
-                      borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
-                    }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
-                  );
-                })}
-                {/* Background swatches — 3 presets for this bar's own background, in case the
-                    default doesn't sit well against a particular phone's screen/lighting. */}
-                <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto", paddingLeft: 4 }}>
-                  {FILTER_BAR_THEMES.map((t, i) => (
-                    <button
-                      key={t.name}
-                      onClick={() => setFilterBarTheme(i)}
-                      title={`Bar background: ${t.name}`}
-                      style={{
-                        cursor: "pointer", width: 16, height: 16, borderRadius: "50%", padding: 0,
-                        background: t.bg, border: `2px solid ${filterBarTheme === i ? "#F5F3EE" : t.border}`,
-                        flexShrink: 0,
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
+          {allStrokesSeen.length > 0 && (
+            <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 14, padding: "6px 8px", marginBottom: 10, boxShadow: "0 6px 16px -8px rgba(0,0,0,0.65)" }}>
+              {["all", ...allStrokesSeen].map((s) => {
+                // Part 2: every swim-type slicer button uses that stroke's own color from
+                // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
+                // selected state (solid fill) vs. a tinted, low-contrast unselected state —
+                // reused verbatim (same colors) everywhere else in the Swim tab.
+                const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
+                const selected = strokeFilter === s;
+                return (
+                  <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
+                    cursor: "pointer", background: selected ? color : `${color}1a`,
+                    border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
+                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
+                  }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Trends — compact sparkline cards, tap to expand */}
           <div style={cardStyle}>
@@ -4223,9 +4219,9 @@ function TrainingLog() {
           requires scrolling back to the top. Unobtrusive: same pill styling as before, just
           pinned, with a soft backdrop so content passing underneath doesn't look like it's
           poking through. */}
-      <div style={{ position: "sticky", top: 0, zIndex: 40, background: "rgba(12,13,16,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid #22262b" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 40, background: FLOATING_BAR_BG_SOFT, backdropFilter: "blur(10px)", borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
-          <div style={{ display: "flex", gap: 4, overflowX: "auto", background: "#0c0d10", border: "1px solid #22262b", borderRadius: 18, padding: 4 }}>
+          <div style={{ display: "flex", gap: 4, overflowX: "auto", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 18, padding: 4 }}>
             {TABS.map(({ id, label, Icon }) => (
               <button key={id} onClick={() => setTab(id)} style={{
                 display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", whiteSpace: "nowrap",
