@@ -531,11 +531,11 @@ function parseFitBinary(arrayBuffer) {
 }
 
 const SWIM_STROKE_NAMES = { 0: "freestyle", 1: "backstroke", 2: "breaststroke", 3: "butterfly", 4: "drill", 5: "mixed", 6: "im" };
-const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", unknown: "Unknown" };
-const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078" };
+const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", kick: "Kick (board)", unknown: "Unknown" };
+const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", kick: "#26C281", unknown: "#6b7078" };
 // Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
 // only to flag likely sensor glitches, never to silently drop data outside this filter.
-const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130 };
+const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, kick: 130, unknown: 130 };
 // Per-chart overlay options for the expanded swim trend charts — each chart offers only the
 // secondary metrics that are actually meaningful for it, rather than one fixed global overlay.
 const SWIM_CHART_OVERLAY_OPTIONS = {
@@ -571,16 +571,28 @@ function processSwimFit(parsed, fileName) {
 
   const lengths = rawLengths.map((len, index) => {
     let glitch = null;
+    let stroke = len.stroke;
     if (len.lengthType === "active") {
       if (len.totalStrokes === 0 && len.avgCadence === 0) {
-        glitch = "phantom length (0 strokes, 0 cadence)";
+        // No arm-stroke motion detected at all — either a genuine board-kick length (kickboard,
+        // so there's no arm motion for the stroke sensor to see) or a phantom sensor glitch (an
+        // instant, physically-impossible "length"). Distinguish by duration: nobody swims or
+        // kicks a pool length faster than ~2.5 m/s, so anything quicker than that is corrupted
+        // data, not a real kick — Garmin's sensor can't tell frog kick from flutter kick either
+        // way (no arm motion to read), so this can only be flagged generically as "Kick".
+        const minPlausibleSec = poolLength != null ? poolLength / 2.5 : 5;
+        if (len.elapsedSec >= minPlausibleSec) {
+          stroke = "kick"; // reclassify so it's not silently dropped, and doesn't skew freestyle's own stats
+        } else {
+          glitch = "phantom length (0 strokes, 0 cadence, duration too short to be real)";
+        }
       } else {
         const maxC = SWIM_MAX_PLAUSIBLE_CADENCE[len.stroke] || 130;
         if (len.avgCadence > maxC) glitch = `implausible cadence (${len.avgCadence} spm > ${maxC} plausible max for ${SWIM_STROKE_LABELS[len.stroke]})`;
       }
     }
     const swolf = len.lengthType === "active" && !glitch ? Math.round(len.elapsedSec + len.totalStrokes) : null;
-    return { ...len, index, glitch, swolf };
+    return { ...len, stroke, index, glitch, swolf };
   });
 
   const validActive = lengths.filter((l) => l.lengthType === "active" && !l.glitch);
@@ -603,7 +615,10 @@ function processSwimFit(parsed, fileName) {
     const phantomCount = excludedActive.filter((l) => l.glitch.startsWith("phantom")).length;
     const cadenceCount = excludedActive.length - phantomCount;
     const parts = [];
-    if (phantomCount) parts.push(`${phantomCount} phantom (0 strokes/cadence)`);
+    if (phantomCount) {
+      const lostDistance = poolLength != null ? Math.round(phantomCount * poolLength) : null;
+      parts.push(`${phantomCount} phantom (0 strokes/cadence, duration too short to be real${lostDistance ? ` — ${lostDistance}m of credited distance with unrecoverable timing` : ""})`);
+    }
     if (cadenceCount) parts.push(`${cadenceCount} implausible-cadence`);
     qualityNote = `${excludedActive.length} of ${validActive.length + excludedActive.length} active lengths excluded: ${parts.join(", ")}.`;
   }
@@ -711,6 +726,17 @@ function zScoreOf(v, stats) {
 function SwimmingTab({ isMobile }) {
   const [sessions, setSessions] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  // Session-detail subsections default to collapsed (both Reps/sets and Length by length can be
+  // long lists); tracked as "sessionId:section" keys so each session's toggle is independent.
+  const [openSubsections, setOpenSubsections] = useState(() => new Set());
+  const toggleSubsection = (sessionId, section) => {
+    setOpenSubsections((prev) => {
+      const key = `${sessionId}:${section}`;
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
   const [strokeFilter, setStrokeFilter] = useState("all");
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
   const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
@@ -1286,14 +1312,10 @@ function SwimmingTab({ isMobile }) {
 
           {/* Streak — small, secondary to PR */}
           <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 16px", marginBottom: 18 }}>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 10 }}>
               <div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#56CCF2" }}>{streak.weekStreak}</div>
                 <div style={{ fontSize: 10, color: "#9a9fa6" }}>Week streak</div>
-              </div>
-              <div>
-                <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{streak.dayStreak}</div>
-                <div style={{ fontSize: 10, color: "#9a9fa6" }}>Day streak</div>
               </div>
               <div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{streak.totalSessions}</div>
@@ -1452,19 +1474,28 @@ function SwimmingTab({ isMobile }) {
 
                         {s.reps && s.reps.length > 0 && (
                           <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>Reps / sets</div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                              {s.reps.map((r, i) => (
-                                <span key={i} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}33` }}>
-                                  {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
-                                </span>
-                              ))}
+                            <div onClick={() => toggleSubsection(s.id, "reps")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 6 }}>
+                              <ChevronDown size={12} style={{ color: "#6b7078", transform: openSubsections.has(`${s.id}:reps`) ? "rotate(180deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+                              <div style={{ fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.04em" }}>Reps / sets ({s.reps.length})</div>
                             </div>
+                            {openSubsections.has(`${s.id}:reps`) && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                {s.reps.map((r, i) => (
+                                  <span key={i} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}33` }}>
+                                    {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
 
                         <div style={{ marginBottom: 12 }}>
-                          <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>Length by length</div>
+                          <div onClick={() => toggleSubsection(s.id, "lengths")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 6 }}>
+                            <ChevronDown size={12} style={{ color: "#6b7078", transform: openSubsections.has(`${s.id}:lengths`) ? "rotate(180deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+                            <div style={{ fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.04em" }}>Length by length ({s.lengths.length})</div>
+                          </div>
+                          {openSubsections.has(`${s.id}:lengths`) && (
                           <div style={{ overflowX: "auto" }}>
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
                               <thead>
@@ -1495,6 +1526,8 @@ function SwimmingTab({ isMobile }) {
                           </div>
                           {s.lengths.some((l) => l.glitch) && (
                             <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 6 }}>⚠ rows highlighted in red were excluded from distance/pace/SWOLF/cadence metrics as likely sensor glitches, but kept here for reference.</div>
+                          )}
+                          </div>
                           )}
                         </div>
 
@@ -1528,7 +1561,7 @@ function TrainingLog() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(null); // null | "workout" | "swim" | "all"
   const [trackedExercises, setTrackedExercises] = useState([]);
   const [customExercises, setCustomExercises] = useState([]);
   const [ownerName, setOwnerName] = useState("");
@@ -1832,9 +1865,18 @@ function TrainingLog() {
   }, [sessions, fullLibrary]);
 
   const doDeleteAllLogs = async () => {
-    await persist([]);
-    setSelectedCompare([]);
-    setConfirmDeleteAll(false);
+    const kind = confirmDeleteAll;
+    if (kind === "workout") {
+      await persist([]);
+      setSelectedCompare([]);
+    } else if (kind === "swim") {
+      await persistSwim([]);
+    } else if (kind === "all") {
+      await persist([]);
+      await persistSwim([]);
+      setSelectedCompare([]);
+    }
+    setConfirmDeleteAll(null);
   };
 
   const addCustomExercise = async () => {
@@ -1986,11 +2028,32 @@ function TrainingLog() {
     setSaving(false);
   };
 
-  const exportJSON = () => {
+  const exportJSON = async () => {
+    // Include the "header" config alongside raw sessions — tracked exercise names, target
+    // settings, custom exercise definitions, PR selection, and display name — so a restore
+    // from this file doesn't lose everything that gives the raw session data its structure.
+    let weightTargetSettings = null, swimTargetSettings = null;
+    try {
+      const wRes = await window.storage.get("weight-target-settings-v1", false);
+      weightTargetSettings = wRes && wRes.value ? JSON.parse(wRes.value) : null;
+    } catch (_) {}
+    try {
+      const sRes = await window.storage.get("swim-target-settings-v1", false);
+      swimTargetSettings = sRes && sRes.value ? JSON.parse(sRes.value) : null;
+    } catch (_) {}
+    const settings = {
+      ownerName: ownerName || null,
+      targetSettings: targetSettings || null,
+      trackedExercises: trackedExercises || [],
+      customExercises: customExercises || [],
+      prSelection: prSelection, // null means "all selected" — kept as null, not defaulted to []
+      weightTargetSettings,
+      swimTargetSettings,
+    };
     let payload, suffix;
-    if (viewMode === "workout") { payload = sessions; suffix = "workout"; }
-    else if (viewMode === "swim") { payload = { swimSessions: swimSessions || [] }; suffix = "swim"; }
-    else { payload = { sessions, swimSessions: swimSessions || [] }; suffix = "all"; }
+    if (viewMode === "workout") { payload = { sessions, settings }; suffix = "workout"; }
+    else if (viewMode === "swim") { payload = { swimSessions: swimSessions || [], settings }; suffix = "swim"; }
+    else { payload = { sessions, swimSessions: swimSessions || [], settings }; suffix = "all"; }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -2028,7 +2091,8 @@ function TrainingLog() {
         const isObj = parsed && !Array.isArray(parsed);
         const workoutArr = isObj && Array.isArray(parsed.sessions) ? parsed.sessions : Array.isArray(parsed) ? parsed : null;
         const swimArr = isObj && Array.isArray(parsed.swimSessions) ? parsed.swimSessions : null;
-        if (!workoutArr && !swimArr) throw new Error("unrecognized shape");
+        const settingsObj = isObj && parsed.settings && typeof parsed.settings === "object" ? parsed.settings : null;
+        if (!workoutArr && !swimArr && !settingsObj) throw new Error("unrecognized shape");
 
         let workoutMsg = "";
         if (workoutArr) {
@@ -2050,7 +2114,46 @@ function TrainingLog() {
           swimMsg = ` Imported ${swimToAdd.length} swim session(s)${swimSkipped ? `, skipped ${swimSkipped} duplicate(s)` : ""}.`;
         }
 
-        setImportMsg((workoutMsg || swimMsg) ? `${workoutMsg}${swimMsg}` : "Nothing new to import.");
+        let settingsMsg = "";
+        if (settingsObj) {
+          const restored = [];
+          if (settingsObj.ownerName != null) {
+            setOwnerName(settingsObj.ownerName);
+            try { await window.storage.set(OWNER_KEY, settingsObj.ownerName, false); } catch (_) {}
+            restored.push("name");
+          }
+          if (settingsObj.targetSettings) {
+            setTargetSettings(settingsObj.targetSettings);
+            try { await window.storage.set(TARGET_KEY, JSON.stringify(settingsObj.targetSettings), false); } catch (_) {}
+            restored.push("workout target");
+          }
+          if (Array.isArray(settingsObj.trackedExercises) && settingsObj.trackedExercises.length) {
+            const mergedTracked = Array.from(new Set([...trackedExercises, ...settingsObj.trackedExercises]));
+            await persistTracked(mergedTracked);
+            restored.push("tracked exercises");
+          }
+          if (Array.isArray(settingsObj.customExercises) && settingsObj.customExercises.length) {
+            const existingNames = new Set(customExercises.map((e) => e.name));
+            const mergedCustom = [...customExercises, ...settingsObj.customExercises.filter((e) => e && e.name && !existingNames.has(e.name))];
+            await persistCustom(mergedCustom);
+            restored.push("custom exercises");
+          }
+          if (settingsObj.prSelection !== undefined) {
+            await persistPrSelection(settingsObj.prSelection);
+            restored.push("PR selection");
+          }
+          if (settingsObj.weightTargetSettings) {
+            try { await window.storage.set("weight-target-settings-v1", JSON.stringify(settingsObj.weightTargetSettings), false); } catch (_) {}
+            restored.push("weight target");
+          }
+          if (settingsObj.swimTargetSettings) {
+            try { await window.storage.set("swim-target-settings-v1", JSON.stringify(settingsObj.swimTargetSettings), false); } catch (_) {}
+            restored.push("swim target");
+          }
+          if (restored.length) settingsMsg = ` Restored settings: ${restored.join(", ")}.`;
+        }
+
+        setImportMsg((workoutMsg || swimMsg || settingsMsg) ? `${workoutMsg}${swimMsg}${settingsMsg}` : "Nothing new to import.");
       } catch (err) {
         setImportMsg("Import failed — file doesn't look like a valid export.");
       }
@@ -2789,7 +2892,7 @@ function TrainingLog() {
               <div style={{ fontSize: 13.5, color: "#F5F3EE", lineHeight: 1.5 }}>{statusBlurb}</div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 12, marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Dumbbell size={13} color="#F2C94C" />
@@ -2805,14 +2908,6 @@ function TrainingLog() {
                 </div>
                 <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{swimConsistencyMini ? swimConsistencyMini.streak : 0}<span className="mono" style={{ fontSize: 11, color: "#6b7078" }}> wks</span></div>
                 <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 2 }}>{swimConsistencyMini ? (swimConsistencyMini.daysSinceLast === 0 ? "today" : `${swimConsistencyMini.daysSinceLast}d ago`) : "no swims yet"} →</div>
-              </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14, gridColumn: isMobile ? "1 / -1" : "auto" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                  <Flame size={13} color="#F2C94C" />
-                  <span style={{ fontSize: 10.5, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Day streak</span>
-                </div>
-                <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{combinedConsistency ? combinedConsistency.dayStreak : 0}</div>
-                <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 2 }}>{combinedConsistency ? `${combinedConsistency.trainedLast7}/7 days this week` : "—"}</div>
               </div>
             </div>
 
@@ -3255,7 +3350,13 @@ function TrainingLog() {
                 <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 10, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
               )}
               {viewMode === "workout" && sessions.length > 0 && (
-                <button onClick={() => setConfirmDeleteAll(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
+                <button onClick={() => setConfirmDeleteAll("workout")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
+              )}
+              {viewMode === "swim" && (swimSessions || []).length > 0 && (
+                <button onClick={() => setConfirmDeleteAll("swim")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all swims</button>
+              )}
+              {viewMode === "all" && (sessions.length > 0 || (swimSessions || []).length > 0) && (
+                <button onClick={() => setConfirmDeleteAll("all")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all activity</button>
               )}
             </div>
 
@@ -3489,10 +3590,19 @@ function TrainingLog() {
           <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 360, width: "100%" }}>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <AlertTriangle size={20} color="#E63946" style={{ flexShrink: 0 }} />
-              <div><div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>Delete ALL logs?</div><div style={{ fontSize: 12.5, color: "#9a9fa6" }}>All {sessions.length} session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.</div></div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>
+                  {confirmDeleteAll === "swim" ? "Delete ALL swim sessions?" : confirmDeleteAll === "all" ? "Delete ALL activity?" : "Delete ALL logs?"}
+                </div>
+                <div style={{ fontSize: 12.5, color: "#9a9fa6" }}>
+                  {confirmDeleteAll === "swim" && `All ${(swimSessions || []).length} swim session(s) will be permanently removed. This can't be undone.`}
+                  {confirmDeleteAll === "all" && `All ${sessions.length} workout session(s) and ${(swimSessions || []).length} swim session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.`}
+                  {confirmDeleteAll === "workout" && `All ${sessions.length} session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.`}
+                </div>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmDeleteAll(false)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => setConfirmDeleteAll(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
               <button onClick={doDeleteAllLogs} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete all</button>
             </div>
           </div>
