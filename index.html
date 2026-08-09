@@ -1017,6 +1017,7 @@ function SwimmingTab({ isMobile }) {
       // "up" meaning "higher effort" for HR — so two lines rising together is the real signal.
       const paceStats = computeMeanStd(trendDataView.map((d) => d.pace100));
       const hrStats = computeMeanStd(trendDataView.map((d) => d.avgHR));
+      const pairedCount = trendDataView.filter((d) => d.pace100 != null && d.avgHR != null).length;
       const normalizedData = trendDataView.map((d) => ({
         ...d,
         paceZ: paceStats ? (() => { const z = zScoreOf(d.pace100, paceStats); return z == null ? null : -z; })() : null,
@@ -1031,6 +1032,11 @@ function SwimmingTab({ isMobile }) {
         <div>
           {overlaySelector}
           {showHR ? (
+            pairedCount < 2 ? (
+              <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
+                Not enough data to compare pace against HR yet — this needs at least 2 swims with HR recorded (currently {pairedCount}). Switch to "Week" or log another HR-tracked swim.
+              </div>
+            ) : (
             <>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -1052,6 +1058,7 @@ function SwimmingTab({ isMobile }) {
                 Both lines shown as standard deviations (σ) from their own session average, so pace (seconds) and HR (bpm) are directly comparable. Pace is flipped so "up" = faster, matching "up" = higher HR — lines rising together means faster swimming tracked with higher effort. Hover for actual pace/HR values.
               </div>
             </>
+            )
           ) : (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -1069,25 +1076,109 @@ function SwimmingTab({ isMobile }) {
 
     const dataKeyPrefix = key === "swolf" ? "swolf_" : key === "cadence" ? "cadence_" : "dps_";
     const baseFormatter = key === "dps" ? (v) => (v != null ? v.toFixed(2) + "m" : "—") : (v) => v;
-    const tooltipFormatter = (v, name) => (name === "Avg HR" ? [v != null ? `${Math.round(v)} bpm` : "—", name] : [baseFormatter(v), name]);
     const strokesToShow = strokeFilter === "all" ? allStrokesSeen : [strokeFilter];
+    // Same "better" direction per metric matters for the sign-flip below: lower SWOLF is
+    // better (flip, like pace), higher distance-per-stroke is better (no flip), and cadence
+    // has no universal "better" direction so it's left unflipped and called out as such.
+    const metricDirection = key === "swolf" ? "lower-better" : "neutral-or-higher-better";
+    const metricLabel = key === "swolf" ? "SWOLF" : key === "cadence" ? "cadence" : "distance per stroke";
+
+    if (!showHR) {
+      // No HR overlay requested: raw values on a single axis, exactly as before — no
+      // cross-metric scaling problem to solve when only one unit is on the chart.
+      const tooltipFormatter = (v, name) => [baseFormatter(v), name];
+      return (
+        <div>
+          {overlaySelector}
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+              <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 2", "dataMax + 2"]} />
+              <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={tooltipFormatter} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {strokesToShow.map((stroke) => (
+                <Line key={stroke} type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          {strokeCaption}
+        </div>
+      );
+    }
+
+    // HR overlay requested: normalize each stroke's line AND HR to z-scores on one shared
+    // axis, same technique as the Pace chart — otherwise two independently-scaled axes just
+    // stretch both series to fill the chart regardless of real magnitude.
+    const hrStats = computeMeanStd(trendDataView.map((d) => d.avgHR));
+    const strokeStatsMap = {};
+    strokesToShow.forEach((stroke) => {
+      strokeStatsMap[stroke] = computeMeanStd(trendDataView.map((d) => d[`${dataKeyPrefix}${stroke}`]));
+    });
+    const anyStrokeHasStats = strokesToShow.some((stroke) => strokeStatsMap[stroke] != null);
+    const pairedCount = trendDataView.filter(
+      (d) => d.avgHR != null && strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null)
+    ).length;
+
+    if (!hrStats || !anyStrokeHasStats || pairedCount < 2) {
+      return (
+        <div>
+          {overlaySelector}
+          <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
+            Not enough data to compare {metricLabel} against HR yet — this needs at least 2 sessions with both recorded (currently {pairedCount}). Switch to "Week" or log another HR-tracked swim.
+          </div>
+        </div>
+      );
+    }
+
+    const normalizedData = trendDataView.map((d) => {
+      const point = { ...d, hrZ: zScoreOf(d.avgHR, hrStats) };
+      strokesToShow.forEach((stroke) => {
+        const stats = strokeStatsMap[stroke];
+        let z = stats ? zScoreOf(d[`${dataKeyPrefix}${stroke}`], stats) : null;
+        if (z != null && metricDirection === "lower-better") z = -z;
+        point[`z_${stroke}`] = z;
+      });
+      return point;
+    });
+    const labelToStroke = Object.fromEntries(strokesToShow.map((s) => [SWIM_STROKE_LABELS[s], s]));
+    const zTooltipFormatter = (v, name, props) => {
+      if (name === "Avg HR") return [props.payload.avgHR != null ? `${Math.round(props.payload.avgHR)} bpm` : "—", name];
+      const stroke = labelToStroke[name];
+      const raw = stroke ? props.payload[`${dataKeyPrefix}${stroke}`] : v;
+      return [baseFormatter(raw), name];
+    };
+    const directionNote =
+      metricDirection === "lower-better"
+        ? `${metricLabel} is flipped so "up" = better (lower ${metricLabel}), matching "up" = higher HR.`
+        : key === "cadence"
+        ? `Cadence has no universal "better" direction, so it's shown as-is — a line moving with HR just means cadence and effort moved together, not that higher or lower cadence is good.`
+        : `Higher ${metricLabel} is already "better" here, matching "up" = higher HR.`;
+
     return (
       <div>
         {overlaySelector}
         <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
             <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-            <YAxis yAxisId="main" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 2", "dataMax + 2"]} />
-            {showHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />}
-            <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={tooltipFormatter} />
+            <YAxis
+              tick={{ fill: "#6b7078", fontSize: 10.5 }}
+              tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
+              domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
+            />
+            <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
+            <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={zTooltipFormatter} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             {strokesToShow.map((stroke) => (
-              <Line key={stroke} yAxisId="main" type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              <Line key={stroke} type="monotone" dataKey={`z_${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             ))}
-            {showHR && <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3 }} connectNulls />}
+            <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3 }} connectNulls />
           </LineChart>
         </ResponsiveContainer>
+        <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
+          Both lines shown as standard deviations (σ) from their own average, so {metricLabel} and HR (bpm) are directly comparable. {directionNote} Hover for actual values.
+        </div>
         {strokeCaption}
       </div>
     );
