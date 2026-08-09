@@ -536,6 +536,14 @@ const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breast
 // Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
 // only to flag likely sensor glitches, never to silently drop data outside this filter.
 const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130 };
+// Per-chart overlay options for the expanded swim trend charts — each chart offers only the
+// secondary metrics that are actually meaningful for it, rather than one fixed global overlay.
+const SWIM_CHART_OVERLAY_OPTIONS = {
+  pace: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
+  swolf: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
+  cadence: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
+  dps: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
+};
 
 // Turns raw parsed FIT messages into a fully-computed swim session object, applying the
 // data-quality filtering rules (phantom lengths, implausible cadence) before any metric
@@ -687,6 +695,8 @@ function SwimmingTab({ isMobile }) {
   const [expandedId, setExpandedId] = useState(null);
   const [strokeFilter, setStrokeFilter] = useState("all");
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
+  const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
+  const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "hr", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
   const SWIM_KEY = "swim-sessions-v1";
 
   useEffect(() => {
@@ -772,6 +782,40 @@ function SwimmingTab({ isMobile }) {
     });
   }, [chronSessions, allStrokesSeen]);
 
+  // Weekly-aggregated equivalent of trendData, for the Day/Week trend toggle. Sessions are
+  // bucketed by the Monday of their week (same mondayOf/toISODate helpers used elsewhere);
+  // weeks with zero sessions simply don't appear (no null-padded gaps).
+  const weeklyTrendData = useMemo(() => {
+    if (chronSessions.length === 0) return [];
+    const buckets = {};
+    chronSessions.forEach((s) => {
+      const weekKey = toISODate(mondayOf(s.date));
+      if (!buckets[weekKey]) buckets[weekKey] = [];
+      buckets[weekKey].push(s);
+    });
+    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    return Object.keys(buckets).sort().map((weekKey) => {
+      const weekSessions = buckets[weekKey];
+      const pace100Vals = weekSessions.map((s) => s.pace100Overall).filter((v) => v != null);
+      const hrVals = weekSessions.map((s) => s.avgHR).filter((v) => v != null);
+      const point = { date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals), avgHR: avg(hrVals), sessionCount: weekSessions.length };
+      allStrokesSeen.forEach((stroke) => {
+        const swolfVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgSwolf : null)).filter((v) => v != null);
+        const cadenceVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgCadence : null)).filter((v) => v != null);
+        const dpsVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgDistPerStroke : null)).filter((v) => v != null);
+        point[`swolf_${stroke}`] = swolfVals.length ? avg(swolfVals) : null;
+        point[`cadence_${stroke}`] = cadenceVals.length ? avg(cadenceVals) : null;
+        point[`dps_${stroke}`] = dpsVals.length ? avg(dpsVals) : null;
+      });
+      return point;
+    });
+  }, [chronSessions, allStrokesSeen]);
+
+  // The series actually feeding the sparkline cards + expanded charts, switched by the
+  // Day/Week toggle. Collapsed cards and their expanded charts always read from this same
+  // source, so they never disagree.
+  const trendDataView = swimTimeView === "week" ? weeklyTrendData : trendData;
+
   const cssTrendData = useMemo(() => {
     const chron = sessions ? [...sessions].filter((s) => s.isCssTest && s.cssTest).sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
     return chron.map((s) => ({ date: s.date, label: fmtDate(s.date), cssPace100: s.cssTest.pace100, cssSpeed: s.cssTest.cssSpeed }));
@@ -836,7 +880,7 @@ function SwimmingTab({ isMobile }) {
   // Improving/Steady/Slower verdict comparing the last 3 sessions' average against the
   // 3 before that. Tapping expands into the full chart (with stroke filter pills, for the
   // per-stroke metrics).
-  const seriesFor = (key) => trendData.map((d) => (d[key] == null ? null : d[key]));
+  const seriesFor = (key) => trendDataView.map((d) => (d[key] == null ? null : d[key]));
 
   const computeVerdict = (series, direction) => {
     const vals = series.filter((v) => v != null);
@@ -921,48 +965,85 @@ function SwimmingTab({ isMobile }) {
   };
 
   const expandedChartFor = (key) => {
+    const overlay = chartOverlaySel[key] || "none";
+    const hasHR = trendDataView.some((d) => d.avgHR != null);
+    const showHR = overlay === "hr" && hasHR;
+    const options = SWIM_CHART_OVERLAY_OPTIONS[key] || [{ value: "none", label: "None" }];
+
+    const overlaySelector = options.length > 1 && (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10.5, color: "#6b7078" }}>Overlay:</span>
+        {options.map((opt) => (
+          <button key={opt.value} onClick={() => setChartOverlaySel((prev) => ({ ...prev, [key]: opt.value }))} className="pill" style={{
+            cursor: "pointer", background: overlay === opt.value ? "#22262b" : "transparent",
+            border: "1px solid " + (overlay === opt.value ? "#3a3f45" : "#22262b"),
+            color: overlay === opt.value ? "#F5F3EE" : "#8a8f98",
+            borderRadius: 7, padding: "3px 8px", fontSize: 10.5, fontWeight: 600,
+          }}>{opt.label}</button>
+        ))}
+        {overlay === "hr" && !hasHR && <span style={{ fontSize: 10, color: "#5a5f66" }}>No HR data in this range</span>}
+      </div>
+    );
+
+    const strokeCaption = key !== "pace" && overlay === "hr" && strokeFilter !== "all" && (
+      <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>HR is whole-session, not stroke-specific.</div>
+    );
+
     if (key === "pace") {
-      return hrSeries.some((v) => v != null) ? (
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
-            <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-            <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
-            <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-            <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v, name) => (name === "Pace" ? [fmtPace100(v), name] : [v ? `${v} bpm` : "—", name])} />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-            <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-          </LineChart>
-        </ResponsiveContainer>
-      ) : (
-        <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
-            <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-            <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
-            <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
-            <Line type="monotone" dataKey="pace100" name="Pace /100m" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-          </LineChart>
-        </ResponsiveContainer>
+      return (
+        <div>
+          {overlaySelector}
+          {showHR ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
+                <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v, name) => (name === "Pace" ? [fmtPace100(v), name] : [v != null ? `${Math.round(v)} bpm` : "—", name])} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
+                <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                <Line type="monotone" dataKey="pace100" name="Pace /100m" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
       );
     }
+
     const dataKeyPrefix = key === "swolf" ? "swolf_" : key === "cadence" ? "cadence_" : "dps_";
-    const formatter = key === "dps" ? (v) => (v != null ? v.toFixed(2) + "m" : "—") : undefined;
+    const baseFormatter = key === "dps" ? (v) => (v != null ? v.toFixed(2) + "m" : "—") : (v) => v;
+    const tooltipFormatter = (v, name) => (name === "Avg HR" ? [v != null ? `${Math.round(v)} bpm` : "—", name] : [baseFormatter(v), name]);
     const strokesToShow = strokeFilter === "all" ? allStrokesSeen : [strokeFilter];
     return (
-      <ResponsiveContainer width="100%" height={220}>
-        <LineChart data={trendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
-          <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-          <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-          <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={formatter} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          {strokesToShow.map((stroke) => (
-            <Line key={stroke} type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
+      <div>
+        {overlaySelector}
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+            <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+            <YAxis yAxisId="main" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+            {showHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} />}
+            <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={tooltipFormatter} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            {strokesToShow.map((stroke) => (
+              <Line key={stroke} yAxisId="main" type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+            ))}
+            {showHR && <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3 }} connectNulls />}
+          </LineChart>
+        </ResponsiveContainer>
+        {strokeCaption}
+      </div>
     );
   };
 
@@ -1031,6 +1112,15 @@ function SwimmingTab({ isMobile }) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               <div style={labelStyle}>Trends</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setSwimTimeView(v)} className="pill" style={{
+                      cursor: "pointer", background: swimTimeView === v ? "#22262b" : "transparent",
+                      border: "1px solid " + (swimTimeView === v ? "#3a3f45" : "#22262b"), color: swimTimeView === v ? "#F5F3EE" : "#8a8f98",
+                      borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                    }}>{l}</button>
+                  ))}
+                </div>
                 {allStrokesSeen.length > 0 && (
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {["all", ...allStrokesSeen].map((s) => (
@@ -1062,15 +1152,24 @@ function SwimmingTab({ isMobile }) {
                 const pts = sparkPoints(card.series);
                 return (
                   <div key={card.key} style={{ background: "#101214", border: `1px solid ${isOpen ? card.color + "88" : "#22262b"}`, borderRadius: 10, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                      <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 600, color: "#c9cdd3" }}>{card.title}</div>
                         <div className="disp" style={{ fontSize: 19, fontWeight: 700, color: "#F5F3EE", marginTop: 2 }}>{card.value}</div>
                         {card.sub && <div className="mono" style={{ fontSize: 10, color: "#E63946" }}>{card.sub}</div>}
                       </div>
-                      {card.verdict && (
-                        <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: card.verdict.color, border: `1px solid ${card.verdict.color}55`, borderRadius: 6, padding: "2px 6px", whiteSpace: "nowrap" }}>{card.verdict.label}</span>
-                      )}
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                        {card.verdict && (
+                          <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: card.verdict.color, border: `1px solid ${card.verdict.color}55`, borderRadius: 6, padding: "2px 6px", whiteSpace: "nowrap" }}>{card.verdict.label}</span>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleMetric(card.key); }}
+                          title={isOpen ? "Collapse chart" : "Expand chart"}
+                          style={{ cursor: "pointer", background: isOpen ? `${card.color}22` : "transparent", border: `1px solid ${isOpen ? card.color + "55" : "#2a2e33"}`, borderRadius: 6, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                        >
+                          <ChevronDown size={12} style={{ color: isOpen ? card.color : "#8a8f98", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                        </button>
+                      </div>
                     </div>
                     {pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={64}>
@@ -1081,14 +1180,6 @@ function SwimmingTab({ isMobile }) {
                     ) : (
                       <div style={{ fontSize: 10.5, color: "#4a4f56", padding: "18px 0" }}>Not enough data yet</div>
                     )}
-                    <div style={{
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 8,
-                      padding: "5px 0", borderRadius: 7, background: isOpen ? `${card.color}18` : "#1a1d21",
-                      border: `1px solid ${isOpen ? card.color + "55" : "#22262b"}`,
-                    }}>
-                      <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: isOpen ? card.color : "#8a8f98", letterSpacing: "0.02em" }}>{isOpen ? "Collapse chart" : "Expand chart"}</span>
-                      <ChevronDown size={12} style={{ color: isOpen ? card.color : "#8a8f98", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-                    </div>
                     {isOpen && (
                       <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
                         {expandedChartFor(card.key)}
