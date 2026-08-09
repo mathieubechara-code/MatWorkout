@@ -556,11 +556,17 @@ function parseFitBinary(arrayBuffer) {
 }
 
 const SWIM_STROKE_NAMES = { 0: "freestyle", 1: "backstroke", 2: "breaststroke", 3: "butterfly", 4: "drill", 5: "mixed", 6: "im" };
-const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", unknown: "Unknown" };
-const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078" };
+// kick_free / kick_frog are not FIT-reported stroke codes — they only ever get set by the
+// person manually reclassifying a length in the Session detail table (kickboard work reads
+// as a normal stroke to the watch, so it has to be corrected after the fact).
+const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", unknown: "Unknown", kick_free: "Board Kick (Freestyle)", kick_frog: "Board Kick (Frog)" };
+const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078", kick_free: "#7FDDEE", kick_frog: "#F4B183" };
 // Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
 // only to flag likely sensor glitches, never to silently drop data outside this filter.
-const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130 };
+const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130, kick_free: 130, kick_frog: 90 };
+// The set of swim types a person can manually assign to a length in Session detail — the 4
+// standard competitive strokes plus the two board-kick drills.
+const EDITABLE_SWIM_STROKES = ["freestyle", "backstroke", "breaststroke", "butterfly", "kick_free", "kick_frog"];
 // Per-chart overlay options for the expanded swim trend charts — each chart offers only the
 // secondary metrics that are actually meaningful for it, rather than one fixed global overlay.
 // Per-chart overlay options for the expanded swim trend charts. HR overlay is only offered
@@ -748,6 +754,57 @@ function processSwimFit(parsed, fileName) {
   };
 }
 
+// Recomputes strokeStats + reps (rep/set grouping) from a session's `lengths` array. Shared
+// between the initial FIT parse (processSwimFit above) and manual length-level stroke
+// corrections (SwimmingTab), so a person reclassifying e.g. a kickboard length updates the
+// per-stroke averages and rep grouping the exact same way a fresh parse would.
+function recomputeSwimDerived(lengths, poolLength) {
+  const validActive = lengths.filter((l) => l.lengthType === "active" && !l.glitch);
+  const strokeGroups = {};
+  validActive.forEach((l) => {
+    if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = { swolfs: [], cadences: [], distPerStroke: [], timeSec: 0, lengthCount: 0 };
+    if (l.swolf != null) strokeGroups[l.stroke].swolfs.push(l.swolf);
+    if (l.avgCadence > 0) strokeGroups[l.stroke].cadences.push(l.avgCadence);
+    if (l.totalStrokes > 0 && poolLength) strokeGroups[l.stroke].distPerStroke.push(poolLength / l.totalStrokes);
+    strokeGroups[l.stroke].timeSec += l.elapsedSec;
+    strokeGroups[l.stroke].lengthCount += 1;
+  });
+  const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+  const strokeStats = {};
+  Object.keys(strokeGroups).forEach((stroke) => {
+    const g = strokeGroups[stroke];
+    const strokeDistance = poolLength != null ? g.lengthCount * poolLength : null;
+    strokeStats[stroke] = {
+      count: g.swolfs.length,
+      avgSwolf: avg(g.swolfs),
+      avgCadence: avg(g.cadences),
+      avgDistPerStroke: avg(g.distPerStroke),
+      pace100: g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null,
+    };
+  });
+
+  const reps = [];
+  let currentRep = null;
+  lengths.forEach((l) => {
+    if (l.lengthType === "active" && !l.glitch) {
+      if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timeSec: 0, strokeSet: new Set() };
+      currentRep.lengthCount += 1;
+      currentRep.timeSec += l.elapsedSec;
+      currentRep.strokeSet.add(l.stroke);
+    } else if (l.lengthType === "idle") {
+      if (currentRep) { reps.push(currentRep); currentRep = null; }
+    }
+  });
+  if (currentRep) reps.push(currentRep);
+  const repSummaries = poolLength ? reps.map((r) => {
+    const distance = r.lengthCount * poolLength;
+    const pace100 = r.timeSec > 0 && distance > 0 ? (r.timeSec / distance) * 100 : null;
+    return { lengthCount: r.lengthCount, distance, timeSec: r.timeSec, pace100, stroke: r.strokeSet.size === 1 ? Array.from(r.strokeSet)[0] : "mixed" };
+  }) : [];
+
+  return { strokeStats, reps: repSummaries };
+}
+
 // Sessions parsed before per-length and per-stroke pace were added to processSwimFit are
 // missing the `pace100` field in two places: on each entry in `lengths` (used by the
 // "Pace over this session" chart) and on each stroke in `strokeStats` (used by the per-
@@ -848,6 +905,8 @@ function SwimmingTab({ isMobile }) {
   const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
   const [distanceDraft, setDistanceDraft] = useState("");
   const [activityStrokeFilter, setActivityStrokeFilter] = useState({}); // { [sessionId]: strokeName | "all" } — per-session pace chart filter
+  const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
+  const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
   const SWIM_KEY = "swim-sessions-v1";
 
   useEffect(() => {
@@ -907,6 +966,20 @@ function SwimmingTab({ isMobile }) {
       const restoredDistance = s.distanceCorrection.originalDistance;
       const restoredPace = s.swimTimeSec > 0 && restoredDistance ? (s.swimTimeSec / restoredDistance) * 100 : null;
       return { ...s, distance: restoredDistance, pace100Overall: restoredPace, distanceCorrection: null };
+    });
+    await persist(next);
+  };
+
+  // Manual per-length stroke correction (e.g. relabeling a length the watch read as
+  // freestyle/breaststroke but was actually kickboard work). Recomputes strokeStats + reps
+  // from the updated lengths so per-stroke averages, the rep/set list, and the session's
+  // stroke-filter chips all pick up the correction automatically.
+  const updateLengthStroke = async (sessionId, lengthIndex, newStroke) => {
+    const next = (sessions || []).map((s) => {
+      if (s.id !== sessionId) return s;
+      const lengths = s.lengths.map((l) => (l.index === lengthIndex ? { ...l, stroke: newStroke } : l));
+      const { strokeStats, reps } = recomputeSwimDerived(lengths, s.poolLength);
+      return { ...s, lengths, strokeStats, reps };
     });
     await persist(next);
   };
@@ -1723,49 +1796,85 @@ function SwimmingTab({ isMobile }) {
 
                         {s.reps && s.reps.length > 0 && (
                           <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>Reps / sets</div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                              {s.reps.map((r, i) => (
-                                <span key={i} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}33` }}>
-                                  {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
-                                </span>
-                              ))}
+                            <div
+                              onClick={(e) => { e.stopPropagation(); setOpenRepsFor((o) => ({ ...o, [s.id]: !o[s.id] })); }}
+                              style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}
+                            >
+                              <ChevronDown size={12} style={{ transform: openRepsFor[s.id] ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
+                              Reps / sets
                             </div>
+                            {openRepsFor[s.id] && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                {s.reps.map((r, i) => (
+                                  <span key={i} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}33` }}>
+                                    {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
 
                         <div style={{ marginBottom: 12 }}>
-                          <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>Length by length</div>
-                          <div style={{ overflowX: "auto" }}>
-                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-                              <thead>
-                                <tr style={{ borderBottom: "1px solid #22262b" }}>
-                                  <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>#</th>
-                                  <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Type</th>
-                                  <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Stroke</th>
-                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Time</th>
-                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Strokes</th>
-                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Cadence</th>
-                                  <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>SWOLF</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {s.lengths.map((l) => (
-                                  <tr key={l.index} style={{ background: l.glitch ? "#E6394615" : "transparent", borderTop: "1px solid #1d2024" }}>
-                                    <td className="mono" style={{ padding: "5px 8px", color: "#6b7078" }}>{l.index + 1}</td>
-                                    <td style={{ padding: "5px 8px", color: l.lengthType === "idle" ? "#6b7078" : "#c9cdd3" }}>{l.lengthType}{l.glitch ? " ⚠" : ""}</td>
-                                    <td style={{ padding: "5px 8px", color: SWIM_STROKE_COLORS[l.stroke] || "#c9cdd3" }}>{l.lengthType === "active" ? SWIM_STROKE_LABELS[l.stroke] : "—"}</td>
-                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.elapsedSec.toFixed(1)}s</td>
-                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.lengthType === "active" ? l.totalStrokes : "—"}</td>
-                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.lengthType === "active" ? l.avgCadence : "—"}</td>
-                                    <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.swolf != null ? l.swolf : "—"}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                          <div
+                            onClick={(e) => { e.stopPropagation(); setOpenLengthsFor((o) => ({ ...o, [s.id]: !o[s.id] })); }}
+                            style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}
+                          >
+                            <ChevronDown size={12} style={{ transform: openLengthsFor[s.id] ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
+                            Length by length
                           </div>
-                          {s.lengths.some((l) => l.glitch) && (
-                            <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 6 }}>⚠ rows highlighted in red were excluded from distance/pace/SWOLF/cadence metrics as likely sensor glitches, but kept here for reference.</div>
+                          {openLengthsFor[s.id] && (
+                            <>
+                              <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 6 }}>Click a stroke on an active length to reclassify it (e.g. as kickboard work).</div>
+                              <div style={{ overflowX: "auto" }}>
+                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: "1px solid #22262b" }}>
+                                      <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>#</th>
+                                      <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Type</th>
+                                      <th style={{ textAlign: "left", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Stroke</th>
+                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Time</th>
+                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Strokes</th>
+                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>Cadence</th>
+                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "#6b7078", fontWeight: 600 }}>SWOLF</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {s.lengths.map((l) => (
+                                      <tr key={l.index} style={{ background: l.glitch ? "#E6394615" : "transparent", borderTop: "1px solid #1d2024" }}>
+                                        <td className="mono" style={{ padding: "5px 8px", color: "#6b7078" }}>{l.index + 1}</td>
+                                        <td style={{ padding: "5px 8px", color: l.lengthType === "idle" ? "#6b7078" : "#c9cdd3" }}>{l.lengthType}{l.glitch ? " ⚠" : ""}</td>
+                                        <td style={{ padding: "5px 8px" }}>
+                                          {l.lengthType === "active" ? (
+                                            <select
+                                              value={EDITABLE_SWIM_STROKES.includes(l.stroke) ? l.stroke : "__other__"}
+                                              onChange={(e) => updateLengthStroke(s.id, l.index, e.target.value)}
+                                              onClick={(e) => e.stopPropagation()}
+                                              className="mono"
+                                              style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "3px 5px", fontSize: 11, color: SWIM_STROKE_COLORS[l.stroke] || "#c9cdd3", cursor: "pointer" }}
+                                            >
+                                              {!EDITABLE_SWIM_STROKES.includes(l.stroke) && (
+                                                <option value="__other__" disabled>{SWIM_STROKE_LABELS[l.stroke] || l.stroke}</option>
+                                              )}
+                                              {EDITABLE_SWIM_STROKES.map((opt) => (
+                                                <option key={opt} value={opt}>{SWIM_STROKE_LABELS[opt]}</option>
+                                              ))}
+                                            </select>
+                                          ) : "—"}
+                                        </td>
+                                        <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.elapsedSec.toFixed(1)}s</td>
+                                        <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.lengthType === "active" ? l.totalStrokes : "—"}</td>
+                                        <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.lengthType === "active" ? l.avgCadence : "—"}</td>
+                                        <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "#c9cdd3" }}>{l.swolf != null ? l.swolf : "—"}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              {s.lengths.some((l) => l.glitch) && (
+                                <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 6 }}>⚠ rows highlighted in red were excluded from distance/pace/SWOLF/cadence metrics as likely sensor glitches, but kept here for reference.</div>
+                              )}
+                            </>
                           )}
                         </div>
 
@@ -1799,7 +1908,7 @@ function TrainingLog() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [confirmDeleteAllScope, setConfirmDeleteAllScope] = useState(null); // null | "workout" | "swim" | "all"
   const [trackedExercises, setTrackedExercises] = useState([]);
   const [customExercises, setCustomExercises] = useState([]);
   const [ownerName, setOwnerName] = useState("");
@@ -2106,9 +2215,15 @@ function TrainingLog() {
   }, [sessions, fullLibrary]);
 
   const doDeleteAllLogs = async () => {
-    await persist([]);
-    setSelectedCompare([]);
-    setConfirmDeleteAll(false);
+    const scope = confirmDeleteAllScope;
+    if (scope === "workout" || scope === "all") {
+      await persist([]);
+      setSelectedCompare([]);
+    }
+    if (scope === "swim" || scope === "all") {
+      await persistSwim([]);
+    }
+    setConfirmDeleteAllScope(null);
   };
 
   const addCustomExercise = async () => {
@@ -2260,11 +2375,31 @@ function TrainingLog() {
     setSaving(false);
   };
 
-  const exportJSON = () => {
+  // Export reads every settings key straight from storage rather than from component state,
+  // because several of them (weight target, swim target) are only loaded lazily when the
+  // Dashboard tab has been visited — reading state here would silently omit them if the
+  // person exports from History & Log without ever opening Dashboard first.
+  const readSettingJSON = async (key) => {
+    try { const res = await window.storage.get(key, false); return res && res.value ? JSON.parse(res.value) : null; } catch (_) { return null; }
+  };
+  const readSettingRaw = async (key) => {
+    try { const res = await window.storage.get(key, false); return res && res.value ? res.value : ""; } catch (_) { return ""; }
+  };
+
+  const exportJSON = async () => {
     let payload, suffix;
-    if (viewMode === "workout") { payload = sessions; suffix = "workout"; }
-    else if (viewMode === "swim") { payload = { swimSessions: swimSessions || [] }; suffix = "swim"; }
-    else { payload = { sessions, swimSessions: swimSessions || [] }; suffix = "all"; }
+    const workoutSettings = {
+      ownerName: await readSettingRaw(OWNER_KEY),
+      targetSettings: await readSettingJSON(TARGET_KEY),
+      trackedExercises: await readSettingJSON(TRACKED_KEY),
+      customExercises: await readSettingJSON(CUSTOM_LIB_KEY),
+      prSelection: await readSettingJSON(PR_SELECTION_KEY),
+      weightTargetSettings: await readSettingJSON(WEIGHT_TARGET_KEY),
+    };
+    const swimTargetSettings = await readSettingJSON("swim-target-settings-v1");
+    if (viewMode === "workout") { payload = { sessions, settings: workoutSettings }; suffix = "workout"; }
+    else if (viewMode === "swim") { payload = { swimSessions: swimSessions || [], settings: { swimTargetSettings } }; suffix = "swim"; }
+    else { payload = { sessions, swimSessions: swimSessions || [], settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -2324,7 +2459,25 @@ function TrainingLog() {
           swimMsg = ` Imported ${swimToAdd.length} swim session(s)${swimSkipped ? `, skipped ${swimSkipped} duplicate(s)` : ""}.`;
         }
 
-        setImportMsg((workoutMsg || swimMsg) ? `${workoutMsg}${swimMsg}` : "Nothing new to import.");
+        // Restore settings (target names/header, PR-card selection, tracked/custom exercises,
+        // weight + swim targets) if the export included them — overwrites whatever's currently
+        // saved, since importing a backup is an intentional restore.
+        let settingsMsg = "";
+        if (parsed && isObj && parsed.settings && typeof parsed.settings === "object") {
+          const st = parsed.settings;
+          try {
+            if (st.ownerName) { setOwnerName(st.ownerName); await window.storage.set(OWNER_KEY, st.ownerName, false); }
+            if (st.targetSettings != null) { setTargetSettings(st.targetSettings); await window.storage.set(TARGET_KEY, JSON.stringify(st.targetSettings), false); }
+            if (st.trackedExercises != null) { setTrackedExercises(st.trackedExercises); await window.storage.set(TRACKED_KEY, JSON.stringify(st.trackedExercises), false); }
+            if (st.customExercises != null) { setCustomExercises(st.customExercises); await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(st.customExercises), false); }
+            if (st.prSelection != null) { setPrSelection(st.prSelection); await window.storage.set(PR_SELECTION_KEY, JSON.stringify(st.prSelection), false); }
+            if (st.weightTargetSettings != null) { setWeightTargetSettings(st.weightTargetSettings); await window.storage.set(WEIGHT_TARGET_KEY, JSON.stringify(st.weightTargetSettings), false); }
+            if (st.swimTargetSettings != null) { setSwimTargetSettingsView(st.swimTargetSettings); await window.storage.set("swim-target-settings-v1", JSON.stringify(st.swimTargetSettings), false); }
+            settingsMsg = " Settings restored.";
+          } catch (_) {}
+        }
+
+        setImportMsg((workoutMsg || swimMsg || settingsMsg) ? `${workoutMsg}${swimMsg}${settingsMsg}` : "Nothing new to import.");
       } catch (err) {
         setImportMsg("Import failed — file doesn't look like a valid export.");
       }
@@ -3589,7 +3742,13 @@ function TrainingLog() {
                 <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 16, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
               )}
               {viewMode === "workout" && sessions.length > 0 && (
-                <button onClick={() => setConfirmDeleteAll(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
+                <button onClick={() => setConfirmDeleteAllScope("workout")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
+              )}
+              {viewMode === "swim" && (swimSessions || []).length > 0 && (
+                <button onClick={() => setConfirmDeleteAllScope("swim")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all swim activity</button>
+              )}
+              {viewMode === "all" && (sessions.length > 0 || (swimSessions || []).length > 0) && (
+                <button onClick={() => setConfirmDeleteAllScope("all")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all activity</button>
               )}
             </div>
 
@@ -3818,15 +3977,25 @@ function TrainingLog() {
         </div>
       )}
 
-      {confirmDeleteAll && (
+      {confirmDeleteAllScope && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
           <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 360, width: "100%" }}>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <AlertTriangle size={20} color="#E63946" style={{ flexShrink: 0 }} />
-              <div><div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>Delete ALL logs?</div><div style={{ fontSize: 12.5, color: "#9a9fa6" }}>All {sessions.length} session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.</div></div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>
+                  {confirmDeleteAllScope === "workout" ? "Delete ALL workout logs?" : confirmDeleteAllScope === "swim" ? "Delete ALL swim activity?" : "Delete ALL activity?"}
+                </div>
+                <div style={{ fontSize: 12.5, color: "#9a9fa6" }}>
+                  {confirmDeleteAllScope === "workout" && `All ${sessions.length} workout session(s) will be permanently removed.`}
+                  {confirmDeleteAllScope === "swim" && `All ${(swimSessions || []).length} swim session(s) will be permanently removed.`}
+                  {confirmDeleteAllScope === "all" && `All ${sessions.length} workout and ${(swimSessions || []).length} swim session(s) will be permanently removed.`}
+                  {" "}This can't be undone. Tracked exercises and target settings are kept.
+                </div>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmDeleteAll(false)} style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => setConfirmDeleteAllScope(null)} style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
               <button onClick={doDeleteAllLogs} style={{ padding: "8px 16px", borderRadius: 12, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete all</button>
             </div>
           </div>
