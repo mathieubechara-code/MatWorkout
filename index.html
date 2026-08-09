@@ -17,6 +17,23 @@
 <style>
   html, body { margin: 0; padding: 0; background: #101214; }
   #root { min-height: 100vh; }
+  :root {
+    --bg: #101214;
+    --card: #16181b;
+    --card-2: #1a1d21;
+    --border: #22262b;
+    --border-2: #2a2e33;
+    --text: #F5F3EE;
+    --text-dim: #9a9fa6;
+    --text-dimmer: #6b7078;
+    --text-faint: #5a5f66;
+    --accent: #F2C94C;
+    --accent-blue: #56CCF2;
+    --positive: #6FCF97;
+    --negative: #E63946;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
 </style>
 
 <!-- React -->
@@ -80,6 +97,7 @@ const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><circle cx="1
 const Settings2 = (p) => <Icon {...p}><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></Icon>;
 const Waves = (p) => <Icon {...p}><path d="M2 6c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 12c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 18c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /></Icon>;
 const ChevronDown = (p) => <Icon {...p}><polyline points="6 9 12 15 18 9" /></Icon>;
+const Sparkles = (p) => <Icon {...p}><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z" /><path d="M5 17l.8 2.2L8 20l-2.2.8L5 23l-.8-2.2L2 20l2.2-.8L5 17z" /><path d="M19 15l.7 1.8L21.5 17.5l-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7L19 15z" /></Icon>;
 
 // ---- window.storage polyfill backed by localStorage (persists per-browser on GitHub Pages) ----
 window.storage = {
@@ -383,10 +401,11 @@ const migrate = (loaded) =>
   });
 
 const TABS = [
-  { id: "dashboard", label: "Dashboard", Icon: LayoutGrid },
-  { id: "workout", label: "Workout", Icon: Dumbbell },
-  { id: "swim", label: "Swimming", Icon: Waves },
-  { id: "history", label: "History & Log", Icon: History },
+  { id: "dashboard", label: "Today", Icon: LayoutGrid },
+  { id: "history", label: "Train", Icon: Dumbbell },
+  { id: "workout", label: "Progress", Icon: TrendingUp },
+  { id: "swim", label: "Swim", Icon: Waves },
+  { id: "insights", label: "Insights", Icon: Sparkles },
 ];
 
 // Fresh (<=13d), aging (14-45d), or stale (46d+) — a quick-glance color for how long ago a
@@ -2788,7 +2807,7 @@ function TrainingLog() {
               <div style={{ fontSize: 13.5, color: "#F5F3EE", lineHeight: 1.5 }}>{statusBlurb}</div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 12, marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Dumbbell size={13} color="#F2C94C" />
@@ -2804,14 +2823,6 @@ function TrainingLog() {
                 </div>
                 <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{swimConsistencyMini ? swimConsistencyMini.streak : 0}<span className="mono" style={{ fontSize: 11, color: "#6b7078" }}> wks</span></div>
                 <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 2 }}>{swimConsistencyMini ? (swimConsistencyMini.daysSinceLast === 0 ? "today" : `${swimConsistencyMini.daysSinceLast}d ago`) : "no swims yet"} →</div>
-              </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14, gridColumn: isMobile ? "1 / -1" : "auto" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                  <Flame size={13} color="#F2C94C" />
-                  <span style={{ fontSize: 10.5, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Day streak</span>
-                </div>
-                <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{combinedConsistency ? combinedConsistency.dayStreak : 0}</div>
-                <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 2 }}>{combinedConsistency ? `${combinedConsistency.trainedLast7}/7 days this week` : "—"}</div>
               </div>
             </div>
 
@@ -3000,6 +3011,63 @@ function TrainingLog() {
                 ) : <div style={{ fontSize: 12, color: "#6b7078" }}>No swims logged yet.</div>}
               </div>
             </div>
+
+            {/* Recent activity — merged workout + swim timeline, most recent first */}
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16, marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>Recent activity</div>
+              {(() => {
+                const wItems = (sessions || []).map((s) => ({ kind: "workout", date: s.date, s }));
+                const swItems = (swimSessions || []).map((s) => ({ kind: "swim", date: s.date, s }));
+                const merged = [...wItems, ...swItems].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 5);
+                if (merged.length === 0) {
+                  return <div style={{ fontSize: 12.5, color: "var(--text-dimmer)" }}>Complete your first workout to start building your training history.</div>;
+                }
+                return (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {merged.map((item, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                          {item.kind === "swim" ? <Waves size={14} color="var(--accent-blue)" style={{ flexShrink: 0 }} /> : <Dumbbell size={14} color="var(--accent)" style={{ flexShrink: 0 }} />}
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {item.kind === "swim" ? "Swim session" : (item.s.label || "Workout")}
+                            </div>
+                            <div style={{ fontSize: 10.5, color: "var(--text-faint)" }}>{fmtDate(item.date)}</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "var(--text-dim)", textAlign: "right", flexShrink: 0 }} className="mono">
+                          {item.kind === "swim"
+                            ? (item.s.distance != null ? `${item.s.distance}m · ${fmtPace100(item.s.pace100Overall)}` : "—")
+                            : `${Object.keys(item.s.ex).length} exercise${Object.keys(item.s.ex).length === 1 ? "" : "s"} · ${Math.round(sessionVolume(item.s)).toLocaleString()}kg`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Progress highlights — only surfaces meaningful recent PRs, not every metric */}
+            {(() => {
+              const freshPRs = chartExercises.filter((name) => prMap[name] && prMap[name].isNewPR);
+              if (freshPRs.length === 0) return null;
+              return (
+                <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16, marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                    <Award size={14} color="var(--accent)" />
+                    <span style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Progress highlights</span>
+                  </div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {freshPRs.map((name) => (
+                      <div key={name} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                        <span style={{ color: "var(--text-dim)" }}>{name}</span>
+                        <span className="mono" style={{ color: "var(--accent)", fontWeight: 700 }}>{Math.round(prMap[name].best1RM)}kg 🔥 new PR</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
 
@@ -3214,6 +3282,68 @@ function TrainingLog() {
         )}
 
         {tab === "swim" && <SwimmingTab isMobile={isMobile} />}
+
+        {tab === "insights" && (() => {
+          const cards = [];
+          // Training frequency — reuses the same weekly-streak calc as the Today/Progress tabs.
+          if (consistency && consistency.streak >= 2) {
+            cards.push({ tone: "positive", Icon: Flame, title: "Training frequency", text: `You've trained ${consistency.streak} weeks in a row — last session ${consistency.daysSinceLast === 0 ? "was today" : `was ${consistency.daysSinceLast} day${consistency.daysSinceLast === 1 ? "" : "s"} ago`}.` });
+          } else if (consistency) {
+            cards.push({ tone: "neutral", Icon: Flame, title: "Training frequency", text: `Current streak is under 2 weeks — last session ${consistency.daysSinceLast === 0 ? "was today" : `was ${consistency.daysSinceLast} day${consistency.daysSinceLast === 1 ? "" : "s"} ago`}.` });
+          }
+          // Volume trend vs. the very first logged session — explicitly scoped so it doesn't
+          // overclaim a short-term "trend" from a single fixed comparison point.
+          if (volumeKpi && volumeKpi.delta !== 0) {
+            const up = volumeKpi.delta > 0;
+            cards.push({ tone: up ? "positive" : "neutral", Icon: TrendingUp, title: "Volume vs. first session", text: `Latest session volume is ${Math.round(Math.abs(volumeKpi.delta)).toLocaleString()} kg ${up ? "higher" : "lower"} than your first logged session.` });
+          }
+          // Personal records — only surfaced when an exercise's latest session is an actual new best.
+          const freshPRs = chartExercises.filter((name) => prMap[name] && prMap[name].isNewPR);
+          if (freshPRs.length > 0) {
+            cards.push({ tone: "positive", Icon: Award, title: "New personal record" + (freshPRs.length > 1 ? "s" : ""), text: `${freshPRs.join(", ")} ${freshPRs.length > 1 ? "are" : "is"} at an all-time estimated-1RM high as of your latest session.` });
+          }
+          // This-week frequency — factual count only; no comparison to a "normal" baseline
+          // since the app doesn't compute one.
+          if (combinedConsistency) {
+            cards.push({ tone: "neutral", Icon: LayoutGrid, title: "This week", text: `${combinedConsistency.trainedLast7}/7 days trained (workout + swim combined)${combinedConsistency.dayStreak >= 2 ? `, on a ${combinedConsistency.dayStreak}-day streak` : ""}.` });
+          }
+          // Muscle group emphasis — purely descriptive, drawn from the latest session's own volume split.
+          if (groupVolumeLatest.length && groupVolumeLatest.some((g) => g.kg > 0)) {
+            const top = groupVolumeLatest.reduce((a, b) => (b.kg > a.kg ? b : a));
+            if (top.kg > 0) cards.push({ tone: "neutral", Icon: Dumbbell, title: "Latest session emphasis", text: `${top.group} carried the most volume in your latest session (${top.pct}% of total).` });
+          }
+          // Swim consistency — same streak logic as the Swim/Today tabs.
+          if (swimConsistencyMini && swimConsistencyMini.streak >= 2) {
+            cards.push({ tone: "positive", Icon: Waves, title: "Swim consistency", text: `Swim streak: ${swimConsistencyMini.streak} weeks in a row.` });
+          } else if (!swimConsistencyMini) {
+            cards.push({ tone: "neutral", Icon: Waves, title: "Swim consistency", text: "No swims logged yet — import a .FIT file from the Swim tab to start tracking." });
+          }
+
+          const toneColor = { positive: "var(--positive)", neutral: "var(--text-dim)", warning: "var(--accent)" };
+
+          return (
+            <>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 12 }}>What's actually happening</div>
+              {cards.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-dimmer)", fontSize: 13 }}>
+                  Not enough data yet — log a few workout or swim sessions and insights will start showing up here.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {cards.map((c, i) => (
+                    <div key={i} style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 14, display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <c.Icon size={16} color={toneColor[c.tone]} style={{ flexShrink: 0, marginTop: 2 }} />
+                      <div>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 2 }}>{c.title}</div>
+                        <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 }}>{c.text}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {tab === "history" && (
           <>
