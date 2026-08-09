@@ -1455,7 +1455,7 @@ function SwimmingTab({ isMobile }) {
   const [strokeFilter, setStrokeFilter] = useState("all");
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
   const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
-  const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "hr", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
+  const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "none", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
   const [compareMode, setCompareMode] = useState("cadence"); // "cadence" | "dps" — Pace+StrokeRate vs Pace+StrokeDistance overlay
   const [selectedComparePoint, setSelectedComparePoint] = useState(null); // date string of a tapped Compare chart dot, or null for "overall trend" view
   const [showCompareInfo, setShowCompareInfo] = useState(false); // toggles the Compare chart's "what is this" info popover
@@ -1798,6 +1798,7 @@ function SwimmingTab({ isMobile }) {
       verdict: computeVerdict(paceSeries, "lower-better"),
       value: fmtPace100(headlineOf(paceSeries)),
       perStroke: true,
+      lowerBetter: true,
       color: strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#56CCF2",
     },
     {
@@ -1807,6 +1808,7 @@ function SwimmingTab({ isMobile }) {
       verdict: computeVerdict(swolfSeries, "lower-better"),
       value: headlineOf(swolfSeries) != null ? Math.round(headlineOf(swolfSeries)) : "—",
       perStroke: true,
+      lowerBetter: true,
       color: activeStroke ? SWIM_STROKE_COLORS[activeStroke] : "#F5F3EE",
     },
     {
@@ -1867,93 +1869,17 @@ function SwimmingTab({ isMobile }) {
     );
 
     if (key === "pace") {
-      // Pace and HR overlay: both series are converted to z-scores (standard deviations
-      // from their own session-average) and plotted on ONE shared axis. This is what
-      // actually lets you read pace-vs-HR correlation — two independently auto-scaled axes
-      // just stretch each series to fill the full chart height regardless of its real
-      // magnitude, which makes any two lines *look* related whether or not they are.
-      // Pace's z-score is sign-flipped so "up" consistently means "faster" here, matching
-      // "up" meaning "higher effort" for HR — so two lines rising together is the real signal.
-      const paceStats = computeMeanStd(trendDataView.map((d) => d[paceDataKey]));
-      const hrStats = computeMeanStd(trendDataView.map((d) => d.avgHR));
-      const pairedCount = trendDataView.filter((d) => d[paceDataKey] != null && d.avgHR != null).length;
-      const normalizedData = trendDataView.map((d) => ({
-        ...d,
-        paceZ: paceStats ? (() => { const z = zScoreOf(d[paceDataKey], paceStats); return z == null ? null : -z; })() : null,
-        hrZ: hrStats ? zScoreOf(d.avgHR, hrStats) : null,
-      }));
-      const zTooltipFormatter = (v, name, props) => {
-        if (name === "Pace") return [fmtPace100(props.payload[paceDataKey]), name];
-        if (name === "Avg HR") return [props.payload.avgHR != null ? `${Math.round(props.payload.avgHR)} bpm` : "—", name];
-        return [v, name];
-      };
       return (
         <div>
-          {overlaySelector}
-          {showHR ? (
-            pairedCount < 2 ? (
-              pairedCount === 0 ? (
-                <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
-                  No sessions yet with both pace and HR recorded — log an HR-tracked swim to see this comparison.
-                </div>
-              ) : (
-                <>
-                  {/* Only 1 data point: a chart isn't meaningful here — with a single value,
-                      each axis centers it at 50% height independent of the other, so two dots
-                      always land on the same pixel row regardless of the real numbers. That's
-                      a coincidence of a lone-point domain, not a real relationship. Just show
-                      the two values directly instead of implying a comparison that isn't there. */}
-                  {(() => {
-                    const only = trendDataView.find((d) => d[paceDataKey] != null && d.avgHR != null) || trendDataView[0];
-                    return (
-                      <div style={{ display: "flex", gap: 28, padding: "18px 4px 8px" }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pace</div>
-                          <div style={{ fontSize: 21, fontWeight: 700, color: "#56CCF2" }}>{fmtPace100(only[paceDataKey])}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Avg HR</div>
-                          <div style={{ fontSize: 21, fontWeight: 700, color: "#E63946" }}>{only.avgHR != null ? `${Math.round(only.avgHR)} bpm` : "—"}</div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>
-                    Log one more HR-tracked swim to see pace and HR actually plotted against each other.
-                  </div>
-                </>
-              )
-            ) : (
-            <>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
-                  <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                  <YAxis
-                    tick={{ fill: "#6b7078", fontSize: 10.5 }}
-                    tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
-                    domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
-                  />
-                  <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
-                  <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="paceZ" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                  <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                </LineChart>
-              </ResponsiveContainer>
-            </>
-            )
-          ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
-                <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
-                <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#56CCF2"} strokeWidth={2} dot={{ r: 3 }} connectNulls />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
+              <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+              <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+              <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#56CCF2"} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       );
     }
@@ -2220,15 +2146,18 @@ function SwimmingTab({ isMobile }) {
                     }}>{l}</button>
                   ))}
                 </div>
-                <div style={{ display: "flex", gap: 4 }} title="What each card's big number shows">
-                  {[["latest", "Latest"], ["avg6", "6-wk avg"]].map(([v, l]) => (
-                    <button key={v} onClick={() => setMetricValueMode(v)} className="pill" style={{
-                      cursor: "pointer", background: metricValueMode === v ? "#23262d" : "transparent",
-                      border: "1px solid " + (metricValueMode === v ? "#3a3f45" : "#23262d"), color: metricValueMode === v ? "#F5F3EE" : "#8a8f98",
-                      borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
-                    }}>{l}</button>
-                  ))}
-                </div>
+                <button
+                  onClick={() => setMetricValueMode((m) => (m === "avg6" ? "latest" : "avg6"))}
+                  title="Toggle each card's big number between the latest session and a 6-week average"
+                  className="pill"
+                  style={{
+                    cursor: "pointer",
+                    background: metricValueMode === "avg6" ? "#56CCF2" : "transparent",
+                    border: "1px solid " + (metricValueMode === "avg6" ? "#56CCF2" : "#23262d"),
+                    color: metricValueMode === "avg6" ? "#0c0d10" : "#8a8f98",
+                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
+                  }}
+                >6-wk avg</button>
                 {allStrokesSeen.length > 0 && (
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {["all", ...allStrokesSeen].map((s) => {
@@ -2290,6 +2219,7 @@ function SwimmingTab({ isMobile }) {
                     {!isOpen && (pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={64}>
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                          <YAxis hide domain={["dataMin", "dataMax"]} reversed={!!card.lowerBetter} />
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
@@ -2367,7 +2297,7 @@ function SwimmingTab({ isMobile }) {
                   const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
                   const selected = strokeFilter === s;
                   return (
-                    <button key={s} onClick={() => { setStrokeFilter(s); setSelectedComparePoint(null); }} className="pill" style={{
+                    <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
                       cursor: "pointer", background: selected ? color : `${color}1a`,
                       border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
                       borderRadius: 12, padding: "3px 8px", fontSize: 10.5, fontWeight: 700,
@@ -2759,8 +2689,10 @@ function SwimmingTab({ isMobile }) {
                                       // never land on the actions column, or the "Include" button label itself
                                       // reads as struck through.
                                       const dataCellStyle = { textDecoration: excluded ? "line-through" : "none" };
+                                      const showActivePicker = idleToActiveFor && idleToActiveFor.sessionId === s.id && idleToActiveFor.lengthIndex === l.index;
                                       return (
-                                        <tr key={l.index} style={rowStyle}>
+                                        <React.Fragment key={l.index}>
+                                        <tr style={rowStyle}>
                                           <td className="mono" style={{ padding: "5px 8px", color: "var(--text-dimmer, #6b7078)", ...dataCellStyle }}>{l.index + 1}</td>
                                           <td style={{ padding: "5px 8px", color: eff.lengthType === "idle" ? "var(--text-dimmer, #6b7078)" : "var(--text-dim, #c9cdd3)", ...dataCellStyle }}>
                                             {eff.lengthType}{l.glitch && !excluded ? " ⚠" : ""}{eff.isOverridden ? " ✎" : ""}
@@ -2805,6 +2737,26 @@ function SwimmingTab({ isMobile }) {
                                             </div>
                                           </td>
                                         </tr>
+                                        {showActivePicker && (
+                                          <tr>
+                                            <td colSpan={8} style={{ padding: "10px 8px", background: "var(--card-2, #191c21)", borderTop: "1px solid var(--border-2, #2b2e36)" }} onClick={(e) => e.stopPropagation()}>
+                                              <div style={{ fontSize: 11, color: "var(--text-dim, #9a9fa6)", marginBottom: 8 }}>Length {l.index + 1}: pick a swim type to mark it Active</div>
+                                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                                {EDITABLE_SWIM_STROKES.map((opt) => (
+                                                  <button
+                                                    key={opt}
+                                                    onClick={() => { markLengthActive(s.id, l.index, opt); setIdleToActiveFor(null); }}
+                                                    style={{ cursor: "pointer", background: `${SWIM_STROKE_COLORS[opt]}1f`, color: SWIM_STROKE_COLORS[opt], border: `1px solid ${SWIM_STROKE_COLORS[opt]}55`, borderRadius: 8, padding: "8px 12px", fontWeight: 700, fontSize: 12, minHeight: 36 }}
+                                                  >
+                                                    {SWIM_STROKE_LABELS[opt]}
+                                                  </button>
+                                                ))}
+                                                <button onClick={() => setIdleToActiveFor(null)} style={{ cursor: "pointer", background: "transparent", color: "var(--text-dim, #9a9fa6)", border: "1px solid var(--border-2, #2a2e33)", borderRadius: 8, padding: "8px 12px", fontWeight: 600, fontSize: 12, minHeight: 36 }}>Cancel</button>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                        </React.Fragment>
                                       );
                                     })}
                                   </tbody>
@@ -2812,23 +2764,6 @@ function SwimmingTab({ isMobile }) {
                               </div>
                               {s.lengths.some((l) => l.glitch && !l.userExcluded) && (
                                 <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #6b7078)", marginTop: 6 }}>⚠ rows may be sensor glitches (phantom lengths / implausible cadence) — they're still counted in your totals above. Review and Exclude any that are wrong.</div>
-                              )}
-                              {idleToActiveFor && idleToActiveFor.sessionId === s.id && (
-                                <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 10, background: "var(--card-2, #191c21)", border: "1px solid var(--border-2, #2b2e36)", borderRadius: 10, padding: 10 }}>
-                                  <div style={{ fontSize: 11, color: "var(--text-dim, #9a9fa6)", marginBottom: 8 }}>Length {idleToActiveFor.lengthIndex + 1}: pick a swim type to mark it Active</div>
-                                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                    {EDITABLE_SWIM_STROKES.map((opt) => (
-                                      <button
-                                        key={opt}
-                                        onClick={() => { markLengthActive(s.id, idleToActiveFor.lengthIndex, opt); setIdleToActiveFor(null); }}
-                                        style={{ cursor: "pointer", background: `${SWIM_STROKE_COLORS[opt]}1f`, color: SWIM_STROKE_COLORS[opt], border: `1px solid ${SWIM_STROKE_COLORS[opt]}55`, borderRadius: 8, padding: "8px 12px", fontWeight: 700, fontSize: 12, minHeight: 36 }}
-                                      >
-                                        {SWIM_STROKE_LABELS[opt]}
-                                      </button>
-                                    ))}
-                                    <button onClick={() => setIdleToActiveFor(null)} style={{ cursor: "pointer", background: "transparent", color: "var(--text-dim, #9a9fa6)", border: "1px solid var(--border-2, #2a2e33)", borderRadius: 8, padding: "8px 12px", fontWeight: 600, fontSize: 12, minHeight: 36 }}>Cancel</button>
-                                  </div>
-                                </div>
                               )}
                             </>
                           )}
