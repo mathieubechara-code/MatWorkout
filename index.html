@@ -12,11 +12,35 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Workout Log" />
-<meta name="theme-color" content="#101214" />
+<meta name="theme-color" content="#0c0d10" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <style>
-  html, body { margin: 0; padding: 0; background: #101214; }
+  html, body { margin: 0; padding: 0; background: #0c0d10; }
   #root { min-height: 100vh; }
+  body {
+    background:
+      radial-gradient(ellipse 900px 500px at 20% -10%, rgba(242,201,76,0.07), transparent 60%),
+      radial-gradient(ellipse 800px 500px at 100% 0%, rgba(86,204,242,0.06), transparent 55%),
+      #0c0d10;
+    background-attachment: fixed;
+  }
+  :root {
+    --bg: #0c0d10;
+    --card: #15171b;
+    --card-2: #191c21;
+    --border: #23262d;
+    --border-2: #2b2e36;
+    --text: #F5F3EE;
+    --text-dim: #9a9fa6;
+    --text-dimmer: #6b7078;
+    --text-faint: #5a5f66;
+    --accent: #F2C94C;
+    --accent-blue: #56CCF2;
+    --positive: #6FCF97;
+    --negative: #E63946;
+    --radius: 20px;
+    --radius-sm: 14px;
+  }
 </style>
 
 <!-- React -->
@@ -37,7 +61,7 @@
      evaluates the result. -->
 <script type="text/plain" id="app-source">
 const { useState, useEffect, useMemo, useRef } = React;
-const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } = Recharts;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine, ReferenceArea } = Recharts;
 
 // ---- Lightweight inline icon set (stand-ins for lucide-react, no external icon dependency) ----
 function Icon({ children, size = 16, color = "currentColor", strokeWidth = 2, style, onClick, title }) {
@@ -80,6 +104,7 @@ const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><circle cx="1
 const Settings2 = (p) => <Icon {...p}><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="9" cy="18" r="2" /></Icon>;
 const Waves = (p) => <Icon {...p}><path d="M2 6c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 12c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /><path d="M2 18c1.5-1.3 3-1.3 4.5 0s3 1.3 4.5 0 3-1.3 4.5 0 3 1.3 4.5 0" /></Icon>;
 const ChevronDown = (p) => <Icon {...p}><polyline points="6 9 12 15 18 9" /></Icon>;
+const Sparkles = (p) => <Icon {...p}><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z" /><path d="M5 17l.8 2.2L8 20l-2.2.8L5 23l-.8-2.2L2 20l2.2-.8L5 17z" /><path d="M19 15l.7 1.8L21.5 17.5l-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7L19 15z" /></Icon>;
 
 // ---- window.storage polyfill backed by localStorage (persists per-browser on GitHub Pages) ----
 window.storage = {
@@ -383,10 +408,10 @@ const migrate = (loaded) =>
   });
 
 const TABS = [
-  { id: "dashboard", label: "Dashboard", Icon: LayoutGrid },
-  { id: "workout", label: "Workout", Icon: Dumbbell },
-  { id: "swim", label: "Swimming", Icon: Waves },
-  { id: "history", label: "History & Log", Icon: History },
+  { id: "dashboard", label: "Today", Icon: LayoutGrid },
+  { id: "workout", label: "Workout", Icon: TrendingUp },
+  { id: "swim", label: "Swim", Icon: Waves },
+  { id: "history", label: "Training Log", Icon: Dumbbell },
 ];
 
 // Fresh (<=13d), aging (14-45d), or stale (46d+) — a quick-glance color for how long ago a
@@ -531,18 +556,22 @@ function parseFitBinary(arrayBuffer) {
 }
 
 const SWIM_STROKE_NAMES = { 0: "freestyle", 1: "backstroke", 2: "breaststroke", 3: "butterfly", 4: "drill", 5: "mixed", 6: "im" };
-const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", kick: "Kick (board)", unknown: "Unknown" };
-const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", kick: "#26C281", unknown: "#6b7078" };
+const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", unknown: "Unknown" };
+const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078" };
 // Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
 // only to flag likely sensor glitches, never to silently drop data outside this filter.
-const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, kick: 130, unknown: 130 };
+const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130 };
 // Per-chart overlay options for the expanded swim trend charts — each chart offers only the
 // secondary metrics that are actually meaningful for it, rather than one fixed global overlay.
+// Per-chart overlay options for the expanded swim trend charts. HR overlay is only offered
+// where a whole-session HR average is actually a meaningful pairing (effort-linked metrics:
+// pace, SWOLF). Stroke rate and distance/stroke are technique-driven, not effort-driven, so a
+// single session-average HR line is a weak/misleading overlay there — omitted on purpose.
 const SWIM_CHART_OVERLAY_OPTIONS = {
   pace: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
   swolf: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
-  cadence: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
-  dps: [{ value: "none", label: "None" }, { value: "hr", label: "Avg HR" }],
+  cadence: [{ value: "none", label: "None" }],
+  dps: [{ value: "none", label: "None" }],
 };
 
 // Turns raw parsed FIT messages into a fully-computed swim session object, applying the
@@ -564,35 +593,54 @@ function processSwimFit(parsed, fileName) {
     const totalStrokes = l.f5 != null ? l.f5 : 0;
     const avgCadence = l.f9 != null ? l.f9 : 0;
     const elapsedSec = l.f3 != null ? l.f3 / 1000 : (l.f4 != null ? l.f4 / 1000 : 0);
-    const startTime = fitTimestampToDate(l.f2 != null ? l.f2 : l.f253);
+    const startTimeRaw = l.f2 != null ? l.f2 : l.f253; // raw FIT timestamp, for matching against record messages below
+    const startTime = fitTimestampToDate(startTimeRaw);
     const calories = l.f11 != null ? l.f11 : null;
-    return { stroke, lengthType, totalStrokes, avgCadence, elapsedSec, startTime, calories };
+    return { stroke, lengthType, totalStrokes, avgCadence, elapsedSec, startTime, startTimeRaw, calories };
   });
 
+  // Per-length HR: average of record-message heart-rate readings whose timestamp falls
+  // within that length's own [start, start+elapsed) window. This is a real, derived signal
+  // from the FIT record stream (not invented) — it's what makes HR meaningful *within* a
+  // single activity (pace vs. effort over the course of the swim), as opposed to the
+  // aggregate trend charts where only one flattened whole-session average exists.
+  const hrRecordsSorted = (recordMsgs || [])
+    .filter((r) => r.f253 != null && r.f3 != null && r.f3 > 0)
+    .map((r) => ({ ts: r.f253, hr: r.f3 }))
+    .sort((a, b) => a.ts - b.ts);
+  const hrForWindow = (startRaw, elapsedSec) => {
+    if (startRaw == null || hrRecordsSorted.length === 0) return null;
+    const windowEnd = startRaw + Math.max(elapsedSec, 1);
+    const inWindow = hrRecordsSorted.filter((r) => r.ts >= startRaw && r.ts < windowEnd);
+    return inWindow.length ? Math.round(inWindow.reduce((a, r) => a + r.hr, 0) / inWindow.length) : null;
+  };
+
+  // A 0-stroke/0-cadence "active" length is only a sensor/device glitch if it's also too
+  // short to physically be a real length (implausibly fast). If the elapsed time is a normal
+  // or long duration, it's far more likely a real length where the stroke/cadence sensor just
+  // failed to report a read — that should still count toward distance, swim time, and pace,
+  // not get silently dropped.
+  const PHANTOM_MAX_PLAUSIBLE_SEC = 5;
   const lengths = rawLengths.map((len, index) => {
     let glitch = null;
-    let stroke = len.stroke;
     if (len.lengthType === "active") {
       if (len.totalStrokes === 0 && len.avgCadence === 0) {
-        // No arm-stroke motion detected at all — either a genuine board-kick length (kickboard,
-        // so there's no arm motion for the stroke sensor to see) or a phantom sensor glitch (an
-        // instant, physically-impossible "length"). Distinguish by duration: nobody swims or
-        // kicks a pool length faster than ~2.5 m/s, so anything quicker than that is corrupted
-        // data, not a real kick — Garmin's sensor can't tell frog kick from flutter kick either
-        // way (no arm motion to read), so this can only be flagged generically as "Kick".
-        const minPlausibleSec = poolLength != null ? poolLength / 2.5 : 5;
-        if (len.elapsedSec >= minPlausibleSec) {
-          stroke = "kick"; // reclassify so it's not silently dropped, and doesn't skew freestyle's own stats
-        } else {
-          glitch = "phantom length (0 strokes, 0 cadence, duration too short to be real)";
+        if (len.elapsedSec < PHANTOM_MAX_PLAUSIBLE_SEC) {
+          glitch = `phantom length (0 strokes, 0 cadence, ${len.elapsedSec.toFixed(1)}s — too short to be a real length)`;
         }
+        // else: 0/0 with a normal/long duration -> treated as real, not excluded.
       } else {
         const maxC = SWIM_MAX_PLAUSIBLE_CADENCE[len.stroke] || 130;
         if (len.avgCadence > maxC) glitch = `implausible cadence (${len.avgCadence} spm > ${maxC} plausible max for ${SWIM_STROKE_LABELS[len.stroke]})`;
       }
     }
     const swolf = len.lengthType === "active" && !glitch ? Math.round(len.elapsedSec + len.totalStrokes) : null;
-    return { ...len, stroke, index, glitch, swolf };
+    const avgHR = hrForWindow(len.startTimeRaw, len.elapsedSec);
+    const pace100 = len.lengthType === "active" && !glitch && poolLength ? (len.elapsedSec / poolLength) * 100 : null;
+    if (glitch) {
+      console.warn(`[swim-fit] excluding length #${index}: elapsedSec=${len.elapsedSec.toFixed(2)}, totalStrokes=${len.totalStrokes}, avgCadence=${len.avgCadence}, reason="${glitch}"`);
+    }
+    return { ...len, index, glitch, swolf, avgHR, pace100 };
   });
 
   const validActive = lengths.filter((l) => l.lengthType === "active" && !l.glitch);
@@ -615,10 +663,7 @@ function processSwimFit(parsed, fileName) {
     const phantomCount = excludedActive.filter((l) => l.glitch.startsWith("phantom")).length;
     const cadenceCount = excludedActive.length - phantomCount;
     const parts = [];
-    if (phantomCount) {
-      const lostDistance = poolLength != null ? Math.round(phantomCount * poolLength) : null;
-      parts.push(`${phantomCount} phantom (0 strokes/cadence, duration too short to be real${lostDistance ? ` — ${lostDistance}m of credited distance with unrecoverable timing` : ""})`);
-    }
+    if (phantomCount) parts.push(`${phantomCount} phantom (0 strokes/cadence)`);
     if (cadenceCount) parts.push(`${cadenceCount} implausible-cadence`);
     qualityNote = `${excludedActive.length} of ${validActive.length + excludedActive.length} active lengths excluded: ${parts.join(", ")}.`;
   }
@@ -627,20 +672,26 @@ function processSwimFit(parsed, fileName) {
   // Per-stroke session averages
   const strokeGroups = {};
   validActive.forEach((l) => {
-    if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = { swolfs: [], cadences: [], distPerStroke: [] };
+    if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = { swolfs: [], cadences: [], distPerStroke: [], timeSec: 0, lengthCount: 0 };
     if (l.swolf != null) strokeGroups[l.stroke].swolfs.push(l.swolf);
     if (l.avgCadence > 0) strokeGroups[l.stroke].cadences.push(l.avgCadence);
     if (l.totalStrokes > 0 && poolLength) strokeGroups[l.stroke].distPerStroke.push(poolLength / l.totalStrokes);
+    strokeGroups[l.stroke].timeSec += l.elapsedSec;
+    strokeGroups[l.stroke].lengthCount += 1;
   });
   const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
   const strokeStats = {};
   Object.keys(strokeGroups).forEach((stroke) => {
     const g = strokeGroups[stroke];
+    const strokeDistance = poolLength != null ? g.lengthCount * poolLength : null;
     strokeStats[stroke] = {
       count: g.swolfs.length,
       avgSwolf: avg(g.swolfs),
       avgCadence: avg(g.cadences),
       avgDistPerStroke: avg(g.distPerStroke),
+      // Genuine per-stroke pace: sum of elapsed time over that stroke's own valid lengths,
+      // divided by that stroke's own distance — not the whole-session pace repeated per stroke.
+      pace100: g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null,
     };
   });
 
@@ -680,6 +731,7 @@ function processSwimFit(parsed, fileName) {
     poolLength,
     calories: sessionCalories,
     distance: distanceValidated,
+    distanceCorrection: null, // { originalDistance, correctedAt } — set only if the person manually corrects distance later
     swimTimeSec,
     restTimeSec,
     pace100Overall,
@@ -696,6 +748,69 @@ function processSwimFit(parsed, fileName) {
   };
 }
 
+// Sessions parsed before per-length and per-stroke pace were added to processSwimFit are
+// missing the `pace100` field in two places: on each entry in `lengths` (used by the
+// "Pace over this session" chart) and on each stroke in `strokeStats` (used by the per-
+// stroke trend cards). Rather than requiring a re-upload of the original .FIT file, both
+// are recomputed from data already stored on the session — elapsedSec/poolLength for
+// per-length pace, the same grouping processSwimFit uses at parse time for per-stroke
+// pace. Returns the session unchanged if nothing needs backfilling.
+function backfillSwimSessionStrokeStats(session) {
+  if (!session || !session.lengths) return session;
+
+  const lengthsNeedBackfill = session.lengths.some((l) => l.lengthType === "active" && !l.glitch && l.pace100 == null);
+  const fixedLengths = lengthsNeedBackfill
+    ? session.lengths.map((l) => {
+        if (l.lengthType !== "active" || l.glitch || l.pace100 != null || !session.poolLength) return l;
+        return { ...l, pace100: (l.elapsedSec / session.poolLength) * 100 };
+      })
+    : session.lengths;
+
+  const strokes = session.strokeStats ? Object.keys(session.strokeStats) : [];
+  const strokeStatsNeedBackfill = strokes.some((k) => session.strokeStats[k] && session.strokeStats[k].pace100 == null);
+  let fixedStrokeStats = session.strokeStats;
+  if (strokeStatsNeedBackfill) {
+    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && !l.glitch);
+    const groups = {};
+    validActive.forEach((l) => {
+      if (!groups[l.stroke]) groups[l.stroke] = { timeSec: 0, lengthCount: 0 };
+      groups[l.stroke].timeSec += l.elapsedSec;
+      groups[l.stroke].lengthCount += 1;
+    });
+    fixedStrokeStats = {};
+    strokes.forEach((stroke) => {
+      const existing = session.strokeStats[stroke];
+      const g = groups[stroke];
+      const strokeDistance = g && session.poolLength != null ? g.lengthCount * session.poolLength : null;
+      const recomputedPace100 = g && g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null;
+      fixedStrokeStats[stroke] = { ...existing, pace100: existing.pace100 != null ? existing.pace100 : recomputedPace100 };
+    });
+  }
+
+  if (!lengthsNeedBackfill && !strokeStatsNeedBackfill) return session;
+  return { ...session, lengths: fixedLengths, strokeStats: fixedStrokeStats };
+}
+
+// Runs the backfill across a whole session list. Returns { sessions, changed } so callers
+// can decide whether to write the backfilled data back to storage.
+function backfillSwimSessions(list) {
+  let changed = false;
+  const next = (list || []).map((s) => {
+    const fixed = backfillSwimSessionStrokeStats(s);
+    if (fixed !== s) changed = true;
+    return fixed;
+  });
+  return { sessions: next, changed };
+}
+
+// Clean numeric formatter for chart axes/tooltips: caps decimals at maxDecimals, strips
+// trailing zeros, and never shows raw floating-point noise like 82.34999999999.
+const fmtNum = (v, maxDecimals = 2) => {
+  if (v == null || !isFinite(v)) return "—";
+  const factor = Math.pow(10, maxDecimals);
+  const rounded = Math.round(v * factor) / factor;
+  return rounded % 1 === 0 ? String(rounded) : String(parseFloat(rounded.toFixed(maxDecimals)));
+};
 const fmtMinSec = (totalSec) => {
   if (totalSec == null || !isFinite(totalSec)) return "—";
   const s = Math.round(totalSec);
@@ -726,28 +841,23 @@ function zScoreOf(v, stats) {
 function SwimmingTab({ isMobile }) {
   const [sessions, setSessions] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
-  // Session-detail subsections default to collapsed (both Reps/sets and Length by length can be
-  // long lists); tracked as "sessionId:section" keys so each session's toggle is independent.
-  const [openSubsections, setOpenSubsections] = useState(() => new Set());
-  const toggleSubsection = (sessionId, section) => {
-    setOpenSubsections((prev) => {
-      const key = `${sessionId}:${section}`;
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
   const [strokeFilter, setStrokeFilter] = useState("all");
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
   const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "hr", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
+  const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
+  const [distanceDraft, setDistanceDraft] = useState("");
+  const [activityStrokeFilter, setActivityStrokeFilter] = useState({}); // { [sessionId]: strokeName | "all" } — per-session pace chart filter
   const SWIM_KEY = "swim-sessions-v1";
 
   useEffect(() => {
     (async () => {
       try {
         const res = await window.storage.get(SWIM_KEY, false);
-        setSessions(res && res.value ? JSON.parse(res.value) : []);
+        const raw = res && res.value ? JSON.parse(res.value) : [];
+        const { sessions: fixed, changed } = backfillSwimSessions(raw);
+        setSessions(fixed);
+        if (changed) { try { await window.storage.set(SWIM_KEY, JSON.stringify(fixed), false); } catch (_) {} }
       } catch (e) {
         setSessions([]);
       }
@@ -761,6 +871,43 @@ function SwimmingTab({ isMobile }) {
 
   const deleteSession = async (id) => {
     const next = (sessions || []).filter((s) => s.id !== id);
+    await persist(next);
+  };
+
+  // Manual distance correction (Option A: correct in-app rather than rebuild the .FIT file).
+  // The app already treats distance as a computed value (valid active lengths × pool length),
+  // never a literal stored FIT field, so a manual override is consistent with how it already
+  // works — not a workaround. Recomputes and PERSISTS distance + pace so every card, chart,
+  // and PR that reads s.distance/s.pace100Overall picks up the correction automatically,
+  // without needing every read-site in the app to know about an override. The original
+  // FIT-derived figure is kept in distanceCorrection for transparency and is only captured
+  // once, so re-correcting a second time doesn't lose the true original.
+  const correctDistance = async (id) => {
+    const newDistance = parseFloat(distanceDraft);
+    if (!Number.isFinite(newDistance) || newDistance <= 0) { setEditingDistanceFor(null); return; }
+    const next = (sessions || []).map((s) => {
+      if (s.id !== id) return s;
+      const originalDistance = s.distanceCorrection ? s.distanceCorrection.originalDistance : s.distance;
+      const newPace100 = s.swimTimeSec > 0 && newDistance > 0 ? (s.swimTimeSec / newDistance) * 100 : null;
+      return {
+        ...s,
+        distance: Math.round(newDistance * 100) / 100,
+        pace100Overall: newPace100,
+        distanceCorrection: { originalDistance, correctedAt: new Date().toISOString() },
+      };
+    });
+    await persist(next);
+    setEditingDistanceFor(null);
+    setDistanceDraft("");
+  };
+
+  const resetDistanceCorrection = async (id) => {
+    const next = (sessions || []).map((s) => {
+      if (s.id !== id || !s.distanceCorrection) return s;
+      const restoredDistance = s.distanceCorrection.originalDistance;
+      const restoredPace = s.swimTimeSec > 0 && restoredDistance ? (s.swimTimeSec / restoredDistance) * 100 : null;
+      return { ...s, distance: restoredDistance, pace100Overall: restoredPace, distanceCorrection: null };
+    });
     await persist(next);
   };
 
@@ -818,6 +965,7 @@ function SwimmingTab({ isMobile }) {
       const point = { date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall, avgHR: s.avgHR };
       allStrokesSeen.forEach((stroke) => {
         const st = s.strokeStats && s.strokeStats[stroke];
+        point[`pace100_${stroke}`] = st ? st.pace100 : null;
         point[`swolf_${stroke}`] = st ? st.avgSwolf : null;
         point[`cadence_${stroke}`] = st ? st.avgCadence : null;
         point[`dps_${stroke}`] = st ? st.avgDistPerStroke : null;
@@ -844,9 +992,11 @@ function SwimmingTab({ isMobile }) {
       const hrVals = weekSessions.map((s) => s.avgHR).filter((v) => v != null);
       const point = { date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals), avgHR: avg(hrVals), sessionCount: weekSessions.length };
       allStrokesSeen.forEach((stroke) => {
+        const pace100StrokeVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].pace100 : null)).filter((v) => v != null);
         const swolfVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgSwolf : null)).filter((v) => v != null);
         const cadenceVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgCadence : null)).filter((v) => v != null);
         const dpsVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgDistPerStroke : null)).filter((v) => v != null);
+        point[`pace100_${stroke}`] = pace100StrokeVals.length ? avg(pace100StrokeVals) : null;
         point[`swolf_${stroke}`] = swolfVals.length ? avg(swolfVals) : null;
         point[`cadence_${stroke}`] = cadenceVals.length ? avg(cadenceVals) : null;
         point[`dps_${stroke}`] = dpsVals.length ? avg(dpsVals) : null;
@@ -916,7 +1066,7 @@ function SwimmingTab({ isMobile }) {
     return <div style={{ color: "#6b7078", fontSize: 13, padding: "24px 0" }}>Loading swim data…</div>;
   }
 
-  const cardStyle = { background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: isMobile ? 14 : 18, marginBottom: 18 };
+  const cardStyle = { background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: isMobile ? 14 : 18, marginBottom: 18 };
   const labelStyle = { fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 };
 
   // ---- Compact "bevel" sparkline trend cards ------------------------------------------
@@ -926,11 +1076,15 @@ function SwimmingTab({ isMobile }) {
   // per-stroke metrics).
   const seriesFor = (key) => trendDataView.map((d) => (d[key] == null ? null : d[key]));
 
+  // Degrades gracefully: with lots of history it compares the last 3 sessions against the
+  // 3 before that; with as few as 2 sessions total it falls back to latest-vs-previous, so a
+  // one-word status is available as soon as there's anything to compare.
   const computeVerdict = (series, direction) => {
     const vals = series.filter((v) => v != null);
     if (vals.length < 2) return null;
-    const recent = vals.slice(-3);
-    const prior = vals.slice(-6, -3);
+    const windowSize = Math.max(1, Math.min(3, Math.floor(vals.length / 2)));
+    const recent = vals.slice(-windowSize);
+    const prior = vals.slice(-windowSize * 2, -windowSize);
     if (prior.length === 0) return null;
     const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
     const recentAvg = avg(recent), priorAvg = avg(prior);
@@ -946,8 +1100,11 @@ function SwimmingTab({ isMobile }) {
   // The stroke driving the per-stroke cards: whichever the always-visible filter pills
   // have selected, falling back to the most-common stroke when "All strokes" is chosen.
   const activeStroke = strokeFilter === "all" ? primaryStroke : strokeFilter;
-
-  const paceSeries = seriesFor("pace100");
+  // Pace: "All strokes" shows genuine whole-session pace; a specific stroke shows that
+  // stroke's own pace (time-in-that-stroke ÷ that stroke's own distance) — a real, distinct
+  // series from the whole-session figure, not a repeat of it.
+  const paceDataKey = strokeFilter === "all" ? "pace100" : `pace100_${strokeFilter}`;
+  const paceSeries = seriesFor(paceDataKey);
   const hrSeries = seriesFor("avgHR");
   const swolfSeries = activeStroke ? seriesFor(`swolf_${activeStroke}`) : [];
   const cadenceSeries = activeStroke ? seriesFor(`cadence_${activeStroke}`) : [];
@@ -959,13 +1116,13 @@ function SwimmingTab({ isMobile }) {
   const metricCards = [
     {
       key: "pace",
-      title: "Pace",
+      title: "Pace" + (strokeFilter !== "all" ? ` (${SWIM_STROKE_LABELS[strokeFilter]})` : ""),
       series: paceSeries,
       verdict: computeVerdict(paceSeries, "lower-better"),
       value: fmtPace100(latestOf(paceSeries)),
       sub: latestHR != null ? `avg HR ${Math.round(latestHR)} bpm` : null,
-      perStroke: false,
-      color: "#56CCF2",
+      perStroke: true,
+      color: strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#56CCF2",
     },
     {
       key: "swolf",
@@ -1019,8 +1176,8 @@ function SwimmingTab({ isMobile }) {
         <span style={{ fontSize: 10.5, color: "#6b7078" }}>Overlay:</span>
         {options.map((opt) => (
           <button key={opt.value} onClick={() => setChartOverlaySel((prev) => ({ ...prev, [key]: opt.value }))} className="pill" style={{
-            cursor: "pointer", background: overlay === opt.value ? "#22262b" : "transparent",
-            border: "1px solid " + (overlay === opt.value ? "#3a3f45" : "#22262b"),
+            cursor: "pointer", background: overlay === opt.value ? "#23262d" : "transparent",
+            border: "1px solid " + (overlay === opt.value ? "#3a3f45" : "#23262d"),
             color: overlay === opt.value ? "#F5F3EE" : "#8a8f98",
             borderRadius: 7, padding: "3px 8px", fontSize: 10.5, fontWeight: 600,
           }}>{opt.label}</button>
@@ -1041,16 +1198,16 @@ function SwimmingTab({ isMobile }) {
       // magnitude, which makes any two lines *look* related whether or not they are.
       // Pace's z-score is sign-flipped so "up" consistently means "faster" here, matching
       // "up" meaning "higher effort" for HR — so two lines rising together is the real signal.
-      const paceStats = computeMeanStd(trendDataView.map((d) => d.pace100));
+      const paceStats = computeMeanStd(trendDataView.map((d) => d[paceDataKey]));
       const hrStats = computeMeanStd(trendDataView.map((d) => d.avgHR));
-      const pairedCount = trendDataView.filter((d) => d.pace100 != null && d.avgHR != null).length;
+      const pairedCount = trendDataView.filter((d) => d[paceDataKey] != null && d.avgHR != null).length;
       const normalizedData = trendDataView.map((d) => ({
         ...d,
-        paceZ: paceStats ? (() => { const z = zScoreOf(d.pace100, paceStats); return z == null ? null : -z; })() : null,
+        paceZ: paceStats ? (() => { const z = zScoreOf(d[paceDataKey], paceStats); return z == null ? null : -z; })() : null,
         hrZ: hrStats ? zScoreOf(d.avgHR, hrStats) : null,
       }));
       const zTooltipFormatter = (v, name, props) => {
-        if (name === "Pace") return [fmtPace100(props.payload.pace100), name];
+        if (name === "Pace") return [fmtPace100(props.payload[paceDataKey]), name];
         if (name === "Avg HR") return [props.payload.avgHR != null ? `${Math.round(props.payload.avgHR)} bpm` : "—", name];
         return [v, name];
       };
@@ -1071,12 +1228,12 @@ function SwimmingTab({ isMobile }) {
                       a coincidence of a lone-point domain, not a real relationship. Just show
                       the two values directly instead of implying a comparison that isn't there. */}
                   {(() => {
-                    const only = trendDataView.find((d) => d.pace100 != null && d.avgHR != null) || trendDataView[0];
+                    const only = trendDataView.find((d) => d[paceDataKey] != null && d.avgHR != null) || trendDataView[0];
                     return (
                       <div style={{ display: "flex", gap: 28, padding: "18px 4px 8px" }}>
                         <div>
                           <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pace</div>
-                          <div style={{ fontSize: 21, fontWeight: 700, color: "#56CCF2" }}>{fmtPace100(only.pace100)}</div>
+                          <div style={{ fontSize: 21, fontWeight: 700, color: "#56CCF2" }}>{fmtPace100(only[paceDataKey])}</div>
                         </div>
                         <div>
                           <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Avg HR</div>
@@ -1094,7 +1251,7 @@ function SwimmingTab({ isMobile }) {
             <>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                   <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                   <YAxis
                     tick={{ fill: "#6b7078", fontSize: 10.5 }}
@@ -1102,25 +1259,22 @@ function SwimmingTab({ isMobile }) {
                     domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
                   />
                   <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
-                  <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={zTooltipFormatter} />
+                  <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="paceZ" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                   <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
-              <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
-                Both lines shown as standard deviations (σ) from their own session average, so pace (seconds) and HR (bpm) are directly comparable. Pace is flipped so "up" = faster, matching "up" = higher HR — lines rising together means faster swimming tracked with higher effort. Hover for actual pace/HR values.
-              </div>
             </>
             )
           ) : (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                 <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                 <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
-                <Line type="monotone" dataKey="pace100" name="Pace /100m" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -1129,7 +1283,7 @@ function SwimmingTab({ isMobile }) {
     }
 
     const dataKeyPrefix = key === "swolf" ? "swolf_" : key === "cadence" ? "cadence_" : "dps_";
-    const baseFormatter = key === "dps" ? (v) => (v != null ? v.toFixed(2) + "m" : "—") : (v) => v;
+    const baseFormatter = key === "dps" ? (v) => (v != null ? fmtNum(v, 2) + "m" : "—") : (v) => fmtNum(v, key === "swolf" ? 0 : 1);
     const strokesToShow = strokeFilter === "all" ? allStrokesSeen : [strokeFilter];
     // Same "better" direction per metric matters for the sign-flip below: lower SWOLF is
     // better (flip, like pace), higher distance-per-stroke is better (no flip), and cadence
@@ -1146,10 +1300,10 @@ function SwimmingTab({ isMobile }) {
           {overlaySelector}
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 2", "dataMax + 2"]} />
-              <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={tooltipFormatter} />
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtNum(v, 2)} domain={["dataMin - 2", "dataMax + 2"]} />
+              <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
                 <Line key={stroke} type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -1169,13 +1323,12 @@ function SwimmingTab({ isMobile }) {
     strokesToShow.forEach((stroke) => {
       strokeStatsMap[stroke] = computeMeanStd(trendDataView.map((d) => d[`${dataKeyPrefix}${stroke}`]));
     });
-    const anyStrokeHasStats = strokesToShow.some((stroke) => strokeStatsMap[stroke] != null);
     const pairedCount = trendDataView.filter(
       (d) => d.avgHR != null && strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null)
     ).length;
 
-    if (!hrStats || !anyStrokeHasStats || pairedCount < 2) {
-      if (pairedCount === 0 || !hrStats || !anyStrokeHasStats) {
+    if (pairedCount < 2) {
+      if (pairedCount === 0) {
         return (
           <div>
             {overlaySelector}
@@ -1248,7 +1401,7 @@ function SwimmingTab({ isMobile }) {
         {overlaySelector}
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
             <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
             <YAxis
               tick={{ fill: "#6b7078", fontSize: 10.5 }}
@@ -1256,7 +1409,7 @@ function SwimmingTab({ isMobile }) {
               domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
             />
             <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
-            <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={zTooltipFormatter} />
+            <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             {strokesToShow.map((stroke) => (
               <Line key={stroke} type="monotone" dataKey={`z_${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -1264,9 +1417,6 @@ function SwimmingTab({ isMobile }) {
             <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3 }} connectNulls />
           </LineChart>
         </ResponsiveContainer>
-        <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
-          Both lines shown as standard deviations (σ) from their own average, so {metricLabel} and HR (bpm) are directly comparable. {directionNote} Hover for actual values.
-        </div>
         {strokeCaption}
       </div>
     );
@@ -1281,7 +1431,7 @@ function SwimmingTab({ isMobile }) {
       ) : (
         <>
           {/* PR card — top, matching the Workout tab's emphasis on PRs first */}
-          <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+          <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
               <Award size={14} color="#56CCF2" />
               <span style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Swim PRs</span>
@@ -1311,11 +1461,15 @@ function SwimmingTab({ isMobile }) {
           </div>
 
           {/* Streak — small, secondary to PR */}
-          <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 16px", marginBottom: 18 }}>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 10 }}>
+          <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 16px", marginBottom: 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
               <div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#56CCF2" }}>{streak.weekStreak}</div>
                 <div style={{ fontSize: 10, color: "#9a9fa6" }}>Week streak</div>
+              </div>
+              <div>
+                <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{streak.dayStreak}</div>
+                <div style={{ fontSize: 10, color: "#9a9fa6" }}>Day streak</div>
               </div>
               <div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{streak.totalSessions}</div>
@@ -1336,9 +1490,9 @@ function SwimmingTab({ isMobile }) {
                 <div style={{ display: "flex", gap: 4 }}>
                   {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
                     <button key={v} onClick={() => setSwimTimeView(v)} className="pill" style={{
-                      cursor: "pointer", background: swimTimeView === v ? "#22262b" : "transparent",
-                      border: "1px solid " + (swimTimeView === v ? "#3a3f45" : "#22262b"), color: swimTimeView === v ? "#F5F3EE" : "#8a8f98",
-                      borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                      cursor: "pointer", background: swimTimeView === v ? "#23262d" : "transparent",
+                      border: "1px solid " + (swimTimeView === v ? "#3a3f45" : "#23262d"), color: swimTimeView === v ? "#F5F3EE" : "#8a8f98",
+                      borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
                     }}>{l}</button>
                   ))}
                 </div>
@@ -1346,9 +1500,9 @@ function SwimmingTab({ isMobile }) {
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {["all", ...allStrokesSeen].map((s) => (
                       <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
-                        cursor: "pointer", background: strokeFilter === s ? "#22262b" : "transparent",
-                        border: "1px solid " + (strokeFilter === s ? "#3a3f45" : "#22262b"), color: strokeFilter === s ? "#F5F3EE" : "#8a8f98",
-                        borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                        cursor: "pointer", background: strokeFilter === s ? "#23262d" : "transparent",
+                        border: "1px solid " + (strokeFilter === s ? "#3a3f45" : "#23262d"), color: strokeFilter === s ? "#F5F3EE" : "#8a8f98",
+                        borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
                       }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
                     ))}
                   </div>
@@ -1356,10 +1510,10 @@ function SwimmingTab({ isMobile }) {
                 {metricCards.length > 0 && (
                   <button onClick={toggleExpandAllMetrics} className="pill" style={{
                     display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-                    background: allMetricsExpanded ? "#22262b" : "transparent",
-                    border: "1px solid " + (allMetricsExpanded ? "#3a3f45" : "#22262b"),
+                    background: allMetricsExpanded ? "#23262d" : "transparent",
+                    border: "1px solid " + (allMetricsExpanded ? "#3a3f45" : "#23262d"),
                     color: allMetricsExpanded ? "#F5F3EE" : "#8a8f98",
-                    borderRadius: 8, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
                   }}>
                     <ChevronDown size={12} style={{ transform: allMetricsExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
                     {allMetricsExpanded ? "Collapse all" : "Expand all"}
@@ -1372,7 +1526,7 @@ function SwimmingTab({ isMobile }) {
                 const isOpen = expandedMetrics.has(card.key);
                 const pts = sparkPoints(card.series);
                 return (
-                  <div key={card.key} style={{ background: "#101214", border: `1px solid ${isOpen ? card.color + "88" : "#22262b"}`, borderRadius: 10, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
+                  <div key={card.key} style={{ background: "#0c0d10", border: `1px solid ${isOpen ? card.color + "88" : "#23262d"}`, borderRadius: 16, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 600, color: "#c9cdd3" }}>{card.title}</div>
@@ -1386,13 +1540,13 @@ function SwimmingTab({ isMobile }) {
                         <button
                           onClick={(e) => { e.stopPropagation(); toggleMetric(card.key); }}
                           title={isOpen ? "Collapse chart" : "Expand chart"}
-                          style={{ cursor: "pointer", background: isOpen ? `${card.color}22` : "transparent", border: `1px solid ${isOpen ? card.color + "55" : "#2a2e33"}`, borderRadius: 6, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                          style={{ cursor: "pointer", background: isOpen ? `${card.color}22` : "transparent", border: `1px solid ${isOpen ? card.color + "55" : "#2b2e36"}`, borderRadius: 6, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
                         >
                           <ChevronDown size={12} style={{ color: isOpen ? card.color : "#8a8f98", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
                         </button>
                       </div>
                     </div>
-                    {pts.length >= 2 ? (
+                    {!isOpen && (pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={64}>
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
@@ -1400,7 +1554,7 @@ function SwimmingTab({ isMobile }) {
                       </ResponsiveContainer>
                     ) : (
                       <div style={{ fontSize: 10.5, color: "#4a4f56", padding: "18px 0" }}>Not enough data yet</div>
-                    )}
+                    ))}
                     {isOpen && (
                       <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
                         {expandedChartFor(card.key)}
@@ -1415,16 +1569,16 @@ function SwimmingTab({ isMobile }) {
             <div style={{ marginTop: 18 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: "#c9cdd3", marginBottom: 8 }}>Critical Swim Speed (CSS) over time</div>
               {cssTrendData.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#6b7078", background: "#101214", border: "1px dashed #22262b", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 12, color: "#6b7078", background: "#0c0d10", border: "1px dashed #22262b", borderRadius: 16, padding: "12px 14px" }}>
                   No CSS test logged yet. CSS isn't estimated from casual sessions — mark a session as a CSS test at upload time (in History &amp; Log) to start this chart.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                     <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                     <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                    <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                    <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                     <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#2EC4B6" strokeWidth={2} dot={{ r: 4 }} connectNulls />
                   </LineChart>
                 </ResponsiveContainer>
@@ -1441,8 +1595,8 @@ function SwimmingTab({ isMobile }) {
               {sortedSessions.map((s) => {
                 const isOpen = expandedId === s.id;
                 return (
-                  <div key={s.id} style={{ border: "1px solid #22262b", borderRadius: 10, overflow: "hidden" }}>
-                    <div onClick={() => setExpandedId(isOpen ? null : s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", cursor: "pointer", background: "#101214", flexWrap: "wrap", gap: 8 }}>
+                  <div key={s.id} style={{ border: "1px solid #22262b", borderRadius: 16, overflow: "hidden" }}>
+                    <div onClick={() => setExpandedId(isOpen ? null : s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", cursor: "pointer", background: "#0c0d10", flexWrap: "wrap", gap: 8 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                         <ChevronDown size={14} style={{ color: "#6b7078", flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
                         <div>
@@ -1463,39 +1617,125 @@ function SwimmingTab({ isMobile }) {
                     {isOpen && (
                       <div style={{ padding: "12px 14px", borderTop: "1px solid #1d2024" }}>
                         {s.qualityNote && (
-                          <div style={{ fontSize: 11.5, color: "#F2994A", background: "#F2994A14", border: "1px solid #F2994A33", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>{s.qualityNote}</div>
+                          <div style={{ fontSize: 11.5, color: "#F2994A", background: "#F2994A14", border: "1px solid #F2994A33", borderRadius: 12, padding: "8px 10px", marginBottom: 10 }}>{s.qualityNote}</div>
                         )}
-                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 12, fontSize: 12 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 8, fontSize: 12 }}>
+                          <div>
+                            <div style={{ color: "#6b7078", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}>
+                              Distance
+                              <Pencil size={10} style={{ cursor: "pointer", color: "#5a5f66" }} onClick={(e) => { e.stopPropagation(); setEditingDistanceFor(s.id); setDistanceDraft(String(s.distance != null ? s.distance : "")); }} />
+                            </div>
+                            <div className="mono" style={{ color: "#c9cdd3" }}>{s.distance != null ? `${s.distance}m` : "—"}</div>
+                            {s.distanceCorrection && <div style={{ fontSize: 9.5, color: "#5a5f66" }}>was {s.distanceCorrection.originalDistance}m (FIT-derived)</div>}
+                          </div>
                           <div><div style={{ color: "#6b7078", fontSize: 10 }}>Pool length</div><div className="mono" style={{ color: "#c9cdd3" }}>{s.poolLength != null ? `${s.poolLength}m` : "—"}</div></div>
                           <div><div style={{ color: "#6b7078", fontSize: 10 }}>Avg pace</div><div className="mono" style={{ color: "#c9cdd3" }}>{fmtPace100(s.pace100Overall)}</div></div>
                           <div><div style={{ color: "#6b7078", fontSize: 10 }}>Avg HR</div><div className="mono" style={{ color: "#c9cdd3" }}>{s.avgHR != null ? `${s.avgHR} bpm` : "—"}</div></div>
                           <div><div style={{ color: "#6b7078", fontSize: 10 }}>Rest time</div><div className="mono" style={{ color: "#c9cdd3" }}>{fmtMinSec(s.restTimeSec)}</div></div>
                         </div>
+                        {editingDistanceFor === s.id && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 10, padding: "8px 10px", marginBottom: 12 }} onClick={(e) => e.stopPropagation()}>
+                            <span style={{ fontSize: 11, color: "#8a8f98" }}>Correct distance to</span>
+                            <input type="number" step="0.01" value={distanceDraft} onChange={(e) => setDistanceDraft(e.target.value)} className="mono" style={{ width: 90, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 8px", color: "#E8E6E1", fontSize: 12 }} autoFocus />
+                            <span style={{ fontSize: 11, color: "#8a8f98" }}>m</span>
+                            <button onClick={() => correctDistance(s.id)} style={{ cursor: "pointer", background: "#56CCF2", color: "#0c0d10", border: "none", borderRadius: 6, padding: "5px 10px", fontWeight: 700, fontSize: 11 }}>Save</button>
+                            <button onClick={() => setEditingDistanceFor(null)} style={{ cursor: "pointer", background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 6, padding: "5px 10px", fontWeight: 600, fontSize: 11 }}>Cancel</button>
+                            {s.distanceCorrection && <button onClick={() => { resetDistanceCorrection(s.id); setEditingDistanceFor(null); }} style={{ cursor: "pointer", background: "transparent", color: "#E63946", border: "1px solid #E6394655", borderRadius: 6, padding: "5px 10px", fontWeight: 600, fontSize: 11 }}>Reset to FIT value</button>}
+                            <div style={{ fontSize: 10, color: "#5a5f66", width: "100%" }}>Pace, PRs, and all charts recalculate from the corrected distance — swim time stays as recorded.</div>
+                          </div>
+                        )}
+
+                        {/* Activity analysis: pace over the full session, filterable by swim
+                            type, with HR overlaid where it's genuinely meaningful (in-session
+                            effort context) — real per-length data, not aggregated trends.
+                            X-axis is cumulative elapsed time (not distance), so rest breaks
+                            and other-stroke segments actually take up real width instead of
+                            being invisible gaps between adjacent points. */}
+                        {(() => {
+                          const sessionStrokes = Object.keys(s.strokeStats || {});
+                          const activeLengths = s.lengths.filter((l) => l.lengthType === "active" && !l.glitch);
+                          if (activeLengths.length < 2) return null;
+                          const currentFilter = activityStrokeFilter[s.id] || "all";
+
+                          // Walk every length in original order (active + idle) building
+                          // [start,end] time windows, so rest and off-filter segments have a
+                          // real position/width on the chart instead of just vanishing.
+                          let cumTime = 0;
+                          const segments = s.lengths.map((l) => {
+                            const start = cumTime;
+                            cumTime += l.elapsedSec;
+                            return { ...l, start, end: cumTime };
+                          });
+
+                          const restBands = segments.filter((l) => l.lengthType === "idle" && l.end > l.start);
+                          const otherStrokeBands = currentFilter === "all"
+                            ? []
+                            : segments.filter((l) => l.lengthType === "active" && !l.glitch && l.stroke !== currentFilter && l.end > l.start);
+
+                          const chartData = segments
+                            .filter((l) => l.lengthType === "active")
+                            .map((l) => ({
+                              x: l.end,
+                              pace100: !l.glitch && (currentFilter === "all" || l.stroke === currentFilter) ? l.pace100 : null,
+                              avgHR: l.avgHR,
+                            }));
+                          const hasAnyHR = chartData.some((d) => d.avgHR != null);
+
+                          return (
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+                                <div style={{ fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.04em" }}>Pace over this session</div>
+                                {sessionStrokes.length > 1 && (
+                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                    {["all", ...sessionStrokes].map((st) => (
+                                      <button key={st} onClick={(e) => { e.stopPropagation(); setActivityStrokeFilter((prev) => ({ ...prev, [s.id]: st })); }} className="pill" style={{
+                                        cursor: "pointer", background: currentFilter === st ? "#22262b" : "transparent",
+                                        border: "1px solid " + (currentFilter === st ? "#3a3f45" : "#22262b"), color: currentFilter === st ? "#F5F3EE" : "#8a8f98",
+                                        borderRadius: 7, padding: "3px 8px", fontSize: 10.5, fontWeight: 600,
+                                      }}>{st === "all" ? "All" : SWIM_STROKE_LABELS[st]}</button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              {(restBands.length > 0 || otherStrokeBands.length > 0) && (
+                                <div style={{ display: "flex", gap: 12, fontSize: 10, color: "#8a8f98", marginBottom: 6 }}>
+                                  {restBands.length > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#3a3f4599", display: "inline-block" }} /> rest</span>}
+                                  {otherStrokeBands.length > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#F2C94C33", display: "inline-block" }} /> other stroke</span>}
+                                </div>
+                              )}
+                              <ResponsiveContainer width="100%" height={160}>
+                                <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                                  <XAxis dataKey="x" type="number" domain={[0, cumTime]} tick={{ fill: "#6b7078", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} />
+                                  <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+                                  {hasAnyHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10 }} domain={["dataMin - 5", "dataMax + 5"]} />}
+                                  <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => (name === "Avg HR" ? [v != null ? `${Math.round(v)} bpm` : "—", name] : [fmtPace100(v), name])} labelFormatter={(v) => `${fmtMinSec(v)} elapsed`} />
+                                  {restBands.map((b, i) => (<ReferenceArea key={`rest-${i}`} yAxisId="pace" x1={b.start} x2={b.end} fill="#3a3f45" fillOpacity={0.4} strokeWidth={0} />))}
+                                  {otherStrokeBands.map((b, i) => (<ReferenceArea key={`other-${i}`} yAxisId="pace" x1={b.start} x2={b.end} fill={SWIM_STROKE_COLORS[b.stroke] || "#F2C94C"} fillOpacity={0.14} strokeWidth={0} />))}
+                                  <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 2.5 }} connectNulls={false} />
+                                  {hasAnyHR && <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 2 }} connectNulls />}
+                                </LineChart>
+                              </ResponsiveContainer>
+                              {!hasAnyHR && <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>No HR recorded in this activity.</div>}
+                            </div>
+                          );
+                        })()}
 
                         {s.reps && s.reps.length > 0 && (
                           <div style={{ marginBottom: 12 }}>
-                            <div onClick={() => toggleSubsection(s.id, "reps")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 6 }}>
-                              <ChevronDown size={12} style={{ color: "#6b7078", transform: openSubsections.has(`${s.id}:reps`) ? "rotate(180deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
-                              <div style={{ fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.04em" }}>Reps / sets ({s.reps.length})</div>
+                            <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>Reps / sets</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {s.reps.map((r, i) => (
+                                <span key={i} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}33` }}>
+                                  {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
+                                </span>
+                              ))}
                             </div>
-                            {openSubsections.has(`${s.id}:reps`) && (
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                                {s.reps.map((r, i) => (
-                                  <span key={i} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}33` }}>
-                                    {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         )}
 
                         <div style={{ marginBottom: 12 }}>
-                          <div onClick={() => toggleSubsection(s.id, "lengths")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 6 }}>
-                            <ChevronDown size={12} style={{ color: "#6b7078", transform: openSubsections.has(`${s.id}:lengths`) ? "rotate(180deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
-                            <div style={{ fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.04em" }}>Length by length ({s.lengths.length})</div>
-                          </div>
-                          {openSubsections.has(`${s.id}:lengths`) && (
+                          <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>Length by length</div>
                           <div style={{ overflowX: "auto" }}>
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
                               <thead>
@@ -1527,15 +1767,13 @@ function SwimmingTab({ isMobile }) {
                           {s.lengths.some((l) => l.glitch) && (
                             <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 6 }}>⚠ rows highlighted in red were excluded from distance/pace/SWOLF/cadence metrics as likely sensor glitches, but kept here for reference.</div>
                           )}
-                          </div>
-                          )}
                         </div>
 
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           {s.isCssTest && s.cssTest && (
                             <span className="mono" style={{ fontSize: 11.5, color: "#2EC4B6" }}>CSS pace: {fmtPace100(s.cssTest.pace100)} ({s.cssTest.cssSpeed.toFixed(2)} m/s)</span>
                           )}
-                          <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 8, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
+                          <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 12, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
                         </div>
                       </div>
                     )}
@@ -1561,7 +1799,7 @@ function TrainingLog() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(null); // null | "workout" | "swim" | "all"
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [trackedExercises, setTrackedExercises] = useState([]);
   const [customExercises, setCustomExercises] = useState([]);
   const [ownerName, setOwnerName] = useState("");
@@ -1616,7 +1854,10 @@ function TrainingLog() {
     (async () => {
       try {
         const res = await window.storage.get(SWIM_KEY, false);
-        setSwimSessions(res && res.value ? JSON.parse(res.value) : []);
+        const raw = res && res.value ? JSON.parse(res.value) : [];
+        const { sessions: fixed, changed } = backfillSwimSessions(raw);
+        setSwimSessions(fixed);
+        if (changed) { try { await window.storage.set(SWIM_KEY, JSON.stringify(fixed), false); } catch (_) {} }
       } catch (e) {
         setSwimSessions([]);
       }
@@ -1865,18 +2106,9 @@ function TrainingLog() {
   }, [sessions, fullLibrary]);
 
   const doDeleteAllLogs = async () => {
-    const kind = confirmDeleteAll;
-    if (kind === "workout") {
-      await persist([]);
-      setSelectedCompare([]);
-    } else if (kind === "swim") {
-      await persistSwim([]);
-    } else if (kind === "all") {
-      await persist([]);
-      await persistSwim([]);
-      setSelectedCompare([]);
-    }
-    setConfirmDeleteAll(null);
+    await persist([]);
+    setSelectedCompare([]);
+    setConfirmDeleteAll(false);
   };
 
   const addCustomExercise = async () => {
@@ -2028,32 +2260,11 @@ function TrainingLog() {
     setSaving(false);
   };
 
-  const exportJSON = async () => {
-    // Include the "header" config alongside raw sessions — tracked exercise names, target
-    // settings, custom exercise definitions, PR selection, and display name — so a restore
-    // from this file doesn't lose everything that gives the raw session data its structure.
-    let weightTargetSettings = null, swimTargetSettings = null;
-    try {
-      const wRes = await window.storage.get("weight-target-settings-v1", false);
-      weightTargetSettings = wRes && wRes.value ? JSON.parse(wRes.value) : null;
-    } catch (_) {}
-    try {
-      const sRes = await window.storage.get("swim-target-settings-v1", false);
-      swimTargetSettings = sRes && sRes.value ? JSON.parse(sRes.value) : null;
-    } catch (_) {}
-    const settings = {
-      ownerName: ownerName || null,
-      targetSettings: targetSettings || null,
-      trackedExercises: trackedExercises || [],
-      customExercises: customExercises || [],
-      prSelection: prSelection, // null means "all selected" — kept as null, not defaulted to []
-      weightTargetSettings,
-      swimTargetSettings,
-    };
+  const exportJSON = () => {
     let payload, suffix;
-    if (viewMode === "workout") { payload = { sessions, settings }; suffix = "workout"; }
-    else if (viewMode === "swim") { payload = { swimSessions: swimSessions || [], settings }; suffix = "swim"; }
-    else { payload = { sessions, swimSessions: swimSessions || [], settings }; suffix = "all"; }
+    if (viewMode === "workout") { payload = sessions; suffix = "workout"; }
+    else if (viewMode === "swim") { payload = { swimSessions: swimSessions || [] }; suffix = "swim"; }
+    else { payload = { sessions, swimSessions: swimSessions || [] }; suffix = "all"; }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -2091,8 +2302,7 @@ function TrainingLog() {
         const isObj = parsed && !Array.isArray(parsed);
         const workoutArr = isObj && Array.isArray(parsed.sessions) ? parsed.sessions : Array.isArray(parsed) ? parsed : null;
         const swimArr = isObj && Array.isArray(parsed.swimSessions) ? parsed.swimSessions : null;
-        const settingsObj = isObj && parsed.settings && typeof parsed.settings === "object" ? parsed.settings : null;
-        if (!workoutArr && !swimArr && !settingsObj) throw new Error("unrecognized shape");
+        if (!workoutArr && !swimArr) throw new Error("unrecognized shape");
 
         let workoutMsg = "";
         if (workoutArr) {
@@ -2114,46 +2324,7 @@ function TrainingLog() {
           swimMsg = ` Imported ${swimToAdd.length} swim session(s)${swimSkipped ? `, skipped ${swimSkipped} duplicate(s)` : ""}.`;
         }
 
-        let settingsMsg = "";
-        if (settingsObj) {
-          const restored = [];
-          if (settingsObj.ownerName != null) {
-            setOwnerName(settingsObj.ownerName);
-            try { await window.storage.set(OWNER_KEY, settingsObj.ownerName, false); } catch (_) {}
-            restored.push("name");
-          }
-          if (settingsObj.targetSettings) {
-            setTargetSettings(settingsObj.targetSettings);
-            try { await window.storage.set(TARGET_KEY, JSON.stringify(settingsObj.targetSettings), false); } catch (_) {}
-            restored.push("workout target");
-          }
-          if (Array.isArray(settingsObj.trackedExercises) && settingsObj.trackedExercises.length) {
-            const mergedTracked = Array.from(new Set([...trackedExercises, ...settingsObj.trackedExercises]));
-            await persistTracked(mergedTracked);
-            restored.push("tracked exercises");
-          }
-          if (Array.isArray(settingsObj.customExercises) && settingsObj.customExercises.length) {
-            const existingNames = new Set(customExercises.map((e) => e.name));
-            const mergedCustom = [...customExercises, ...settingsObj.customExercises.filter((e) => e && e.name && !existingNames.has(e.name))];
-            await persistCustom(mergedCustom);
-            restored.push("custom exercises");
-          }
-          if (settingsObj.prSelection !== undefined) {
-            await persistPrSelection(settingsObj.prSelection);
-            restored.push("PR selection");
-          }
-          if (settingsObj.weightTargetSettings) {
-            try { await window.storage.set("weight-target-settings-v1", JSON.stringify(settingsObj.weightTargetSettings), false); } catch (_) {}
-            restored.push("weight target");
-          }
-          if (settingsObj.swimTargetSettings) {
-            try { await window.storage.set("swim-target-settings-v1", JSON.stringify(settingsObj.swimTargetSettings), false); } catch (_) {}
-            restored.push("swim target");
-          }
-          if (restored.length) settingsMsg = ` Restored settings: ${restored.join(", ")}.`;
-        }
-
-        setImportMsg((workoutMsg || swimMsg || settingsMsg) ? `${workoutMsg}${swimMsg}${settingsMsg}` : "Nothing new to import.");
+        setImportMsg((workoutMsg || swimMsg) ? `${workoutMsg}${swimMsg}` : "Nothing new to import.");
       } catch (err) {
         setImportMsg("Import failed — file doesn't look like a valid export.");
       }
@@ -2795,7 +2966,7 @@ function TrainingLog() {
   };
 
   if (!sessions) {
-    return <div style={{ background: "#101214", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
+    return <div style={{ background: "#0c0d10", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#8a8f98", fontFamily: "monospace" }}>loading log…</div>;
   }
   const setColor = (i) => ["#F2C94C", "#E63946", "#56CCF2", "#6FCF97"][i % 4];
   const yLabel = metric === "reps" ? "reps" : metric === "1rm" ? "1RM" : "kg";
@@ -2813,15 +2984,15 @@ function TrainingLog() {
   const compareSessions = selectedCompare.length === 2 ? selectedCompare.map((id) => sessions.find((s) => s.id === id)).sort((a, b) => a.date.localeCompare(b.date)) : null;
 
   return (
-    <div style={{ background: "#101214", minHeight: "100vh", color: "#E8E6E1", fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
+    <div style={{ background: "#0c0d10", minHeight: "100vh", color: "#E8E6E1", fontFamily: "'Inter', 'Helvetica Neue', sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
-        .disp { font-family: 'Oswald', sans-serif; letter-spacing: 0.02em; }
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        .disp { font-family: 'Manrope', sans-serif; letter-spacing: -0.02em; font-weight: 800; }
         .mono { font-family: 'JetBrains Mono', monospace; }
-        .pill { transition: all 0.15s ease; }
+        .pill { transition: all 0.18s ease; }
         .pill:hover { transform: translateY(-1px); }
         ::-webkit-scrollbar { height: 6px; width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #2a2e33; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #2b2e36; border-radius: 6px; }
         input[type="text"], input[type="date"], input[type="number"], textarea { color-scheme: dark; }
         textarea { font-family: 'Inter', sans-serif; resize: vertical; }
         .file-btn { position: relative; overflow: hidden; }
@@ -2849,10 +3020,10 @@ function TrainingLog() {
                 onKeyDown={(e) => { if (e.key === "Enter") saveOwnerName(); if (e.key === "Escape") setEditingName(false); }}
                 placeholder="Your name"
                 className="disp"
-                style={{ fontSize: "clamp(20px, 5vw, 28px)", fontWeight: 700, color: "#F5F3EE", background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "4px 10px", minWidth: 160 }}
+                style={{ fontSize: "clamp(20px, 5vw, 28px)", fontWeight: 700, color: "#F5F3EE", background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "4px 10px", minWidth: 160 }}
               />
-              <button onClick={saveOwnerName} style={{ background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Save</button>
-              <button onClick={() => setEditingName(false)} style={{ background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 12px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+              <button onClick={saveOwnerName} style={{ background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "6px 12px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Save</button>
+              <button onClick={() => setEditingName(false)} style={{ background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 12px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
             </div>
           ) : (
             <h1
@@ -2869,12 +3040,23 @@ function TrainingLog() {
             <span style={{ fontSize: 13, color: "#9a9fa6", fontWeight: 600 }}>{sessions.length} Sessions Logged</span>
             <span className="mono" style={{ fontSize: 12, color: "#6b7078" }}>{first ? fmtDateFull(first.date) : ""} → {latest ? fmtDateFull(latest.date) : ""}</span>
           </div>
-          <div style={{ display: "flex", gap: 2, overflowX: "auto" }}>
+        </div>
+      </div>
+
+      {/* Floating nav — sticky so section switching (Today/Workout/Swim/Training Log) never
+          requires scrolling back to the top. Unobtrusive: same pill styling as before, just
+          pinned, with a soft backdrop so content passing underneath doesn't look like it's
+          poking through. */}
+      <div style={{ position: "sticky", top: 0, zIndex: 40, background: "rgba(12,13,16,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid #22262b" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
+          <div style={{ display: "flex", gap: 4, overflowX: "auto", background: "#0c0d10", border: "1px solid #22262b", borderRadius: 18, padding: 4 }}>
             {TABS.map(({ id, label, Icon }) => (
               <button key={id} onClick={() => setTab(id)} style={{
-                display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "none", border: "none", whiteSpace: "nowrap",
-                padding: "9px 12px", fontSize: 12.5, fontWeight: 600, color: tab === id ? "#F2C94C" : "#6b7078",
-                borderBottom: tab === id ? "2px solid #F2C94C" : "2px solid transparent", fontFamily: "'Inter', sans-serif",
+                display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", whiteSpace: "nowrap",
+                padding: "9px 14px", fontSize: 12.5, fontWeight: 700, color: tab === id ? "#0c0d10" : "#9a9fa6",
+                background: tab === id ? "linear-gradient(135deg, #FFDD7A, #F2C94C)" : "transparent",
+                borderRadius: 22, fontFamily: "'Inter', sans-serif", transition: "background 0.2s ease, color 0.2s ease",
+                boxShadow: tab === id ? "0 4px 14px -4px #F2C94C66" : "none",
               }}>
                 <Icon size={14} /> {label}
               </button>
@@ -2887,13 +3069,13 @@ function TrainingLog() {
 
         {tab === "dashboard" && (
           <>
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Status</div>
               <div style={{ fontSize: 13.5, color: "#F5F3EE", lineHeight: 1.5 }}>{statusBlurb}</div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14 }}>
+              <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Dumbbell size={13} color="#F2C94C" />
                   <span style={{ fontSize: 10.5, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Workout streak</span>
@@ -2901,7 +3083,7 @@ function TrainingLog() {
                 <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{consistency ? consistency.streak : 0}<span className="mono" style={{ fontSize: 11, color: "#6b7078" }}> wks</span></div>
                 <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 2 }}>{consistency ? (consistency.daysSinceLast === 0 ? "today" : `${consistency.daysSinceLast}d ago`) : "no sessions yet"} →</div>
               </div>
-              <div onClick={() => setTab("swim")} style={{ cursor: "pointer", background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14 }}>
+              <div onClick={() => setTab("swim")} style={{ cursor: "pointer", background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Waves size={13} color="#56CCF2" />
                   <span style={{ fontSize: 10.5, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Swim streak</span>
@@ -2912,7 +3094,7 @@ function TrainingLog() {
             </div>
 
             {/* Bodyweight — tap to expand into the trend chart, with an optional target weight */}
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 14, marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", cursor: "pointer" }} onClick={() => setWeightExpanded((v) => !v)}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -2927,7 +3109,7 @@ function TrainingLog() {
                 </div>
                 <div style={{
                   display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 7,
-                  background: weightExpanded ? "#F2C94C18" : "#1a1d21", border: `1px solid ${weightExpanded ? "#F2C94C55" : "#22262b"}`, flexShrink: 0,
+                  background: weightExpanded ? "#F2C94C18" : "#191c21", border: `1px solid ${weightExpanded ? "#F2C94C55" : "#23262d"}`, flexShrink: 0,
                 }}>
                   <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: weightExpanded ? "#F2C94C" : "#8a8f98" }}>{weightExpanded ? "Collapse" : "Expand"}</span>
                   <ChevronDown size={12} style={{ color: weightExpanded ? "#F2C94C" : "#8a8f98", transform: weightExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
@@ -2943,13 +3125,13 @@ function TrainingLog() {
               {weightExpanded && (
                 <div style={{ marginTop: 14 }} onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                    <div style={{ display: "flex", gap: 4, background: "#101214", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                      {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setWeightTimeView(v)} style={{ cursor: "pointer", padding: "5px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: "none", background: weightTimeView === v ? "#F2C94C" : "transparent", color: weightTimeView === v ? "#101214" : "#9a9fa6" }}>{l}</button>))}
+                    <div style={{ display: "flex", gap: 4, background: "#0c0d10", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                      {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setWeightTimeView(v)} style={{ cursor: "pointer", padding: "5px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: "none", background: weightTimeView === v ? "#F2C94C" : "transparent", color: weightTimeView === v ? "#0c0d10" : "#9a9fa6" }}>{l}</button>))}
                     </div>
                     {editingWeightTarget ? (
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <input type="number" step="0.1" placeholder="target kg" value={weightTargetDraft} onChange={(e) => setWeightTargetDraft(e.target.value)} className="mono" style={{ width: 90, background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
-                        <button onClick={saveWeightTarget} style={{ cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 6, padding: "6px 10px", fontWeight: 700, fontSize: 11.5 }}>Save</button>
+                        <input type="number" step="0.1" placeholder="target kg" value={weightTargetDraft} onChange={(e) => setWeightTargetDraft(e.target.value)} className="mono" style={{ width: 90, background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                        <button onClick={saveWeightTarget} style={{ cursor: "pointer", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 6, padding: "6px 10px", fontWeight: 700, fontSize: 11.5 }}>Save</button>
                         <button onClick={() => setEditingWeightTarget(false)} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 6, padding: "6px 10px", fontWeight: 600, fontSize: 11.5 }}>Cancel</button>
                       </div>
                     ) : (
@@ -2961,10 +3143,10 @@ function TrainingLog() {
                   {dashBodyweightSeries.length >= 2 ? (
                     <ResponsiveContainer width="100%" height={140}>
                       <LineChart data={dashBodyweightSeries} margin={{ top: 5, right: 16, left: -10, bottom: 0 }}>
-                        <CartesianGrid stroke="#22262b" vertical={false} />
+                        <CartesianGrid stroke="#23262d" vertical={false} />
                         <XAxis dataKey="date" stroke="#6b7078" fontSize={11} />
-                        <YAxis stroke="#6b7078" fontSize={11} domain={targetWeight != null ? [(dataMin) => Math.min(dataMin - 1, targetWeight - 1), (dataMax) => Math.max(dataMax + 1, targetWeight + 1)] : ["dataMin - 1", "dataMax + 1"]} />
-                        <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                        <YAxis stroke="#6b7078" fontSize={11} tickFormatter={(v) => fmtNum(v, 1)} domain={targetWeight != null ? [(dataMin) => Math.min(dataMin - 1, targetWeight - 1), (dataMax) => Math.max(dataMax + 1, targetWeight + 1)] : ["dataMin - 1", "dataMax + 1"]} />
+                        <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => [`${fmtNum(v, 1)}kg`, "Weight"]} />
                         {targetWeight != null && <ReferenceLine y={targetWeight} stroke="#F2C94C" strokeDasharray="4 4" />}
                         <Line type="monotone" dataKey="kg" stroke="#56CCF2" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
                       </LineChart>
@@ -2976,7 +3158,7 @@ function TrainingLog() {
               )}
             </div>
 
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>
                   {combinedRenderedWeekCount > 0
@@ -2991,7 +3173,7 @@ function TrainingLog() {
                     <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#56CCF2", display: "inline-block" }} /> swim</span>
                     <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#6FCF97", display: "inline-block" }} /> both</span>
                   </div>
-                  <select value={dashHeatmapWeekCount} onChange={(e) => setDashHeatmapWeekCount(Number(e.target.value))} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 8px", color: "#c9cdd3", fontSize: 11, cursor: "pointer" }}>
+                  <select value={dashHeatmapWeekCount} onChange={(e) => setDashHeatmapWeekCount(Number(e.target.value))} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 8px", color: "#c9cdd3", fontSize: 11, cursor: "pointer" }}>
                     {[8, 12, 24, 52].map((n) => (<option key={n} value={n}>{n} wks</option>))}
                   </select>
                 </div>
@@ -3019,7 +3201,7 @@ function TrainingLog() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <Dumbbell size={13} color="#F2C94C" />
@@ -3034,14 +3216,14 @@ function TrainingLog() {
                   <div style={{ display: "grid", gap: 8 }}>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Start date</div>
-                      <input type="date" value={targetDraft.startDate} onChange={(e) => setTargetDraft({ ...targetDraft, startDate: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="date" value={targetDraft.startDate} onChange={(e) => setTargetDraft({ ...targetDraft, startDate: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Weeks</div>
-                      <input type="number" min="1" value={targetDraft.weeks} onChange={(e) => setTargetDraft({ ...targetDraft, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="number" min="1" value={targetDraft.weeks} onChange={(e) => setTargetDraft({ ...targetDraft, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={saveTargetSettings} style={{ flex: 1, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
+                      <button onClick={saveTargetSettings} style={{ flex: 1, background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
                       <button onClick={() => setEditingTarget(false)} style={{ flex: 1, background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 0", fontWeight: 600, fontSize: 11.5, cursor: "pointer" }}>Cancel</button>
                     </div>
                   </div>
@@ -3051,13 +3233,13 @@ function TrainingLog() {
                   ) : (
                     <>
                       <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{twelveWeekTarget.daysRemaining} <span className="mono" style={{ fontSize: 11, color: "#6b7078" }}>days left</span></div>
-                      <div className="mono" style={{ fontSize: 11, color: "#6b7078", marginTop: 2, marginBottom: 6 }}>{twelveWeekTarget.trainedWeeks}/{twelveWeekTarget.goalWeeks} weeks trained</div>
-                      <div style={{ background: "#1d2024", borderRadius: 4, height: 7, overflow: "hidden" }}><div style={{ width: Math.min(100, (twelveWeekTarget.trainedWeeks / twelveWeekTarget.goalWeeks) * 100) + "%", height: "100%", background: "#F2C94C" }} /></div>
+                      <div className="mono" style={{ fontSize: 11, color: "#6b7078", marginTop: 2 }}>{twelveWeekTarget.trainedWeeks}/{twelveWeekTarget.goalWeeks} weeks trained <span style={{ color: "#4a4f56" }}>· by {fmtDate(twelveWeekTarget.targetDate)}</span></div>
+                      <div style={{ background: "#1d2024", borderRadius: 4, height: 7, overflow: "hidden", marginTop: 6 }}><div style={{ width: Math.min(100, (twelveWeekTarget.trainedWeeks / twelveWeekTarget.goalWeeks) * 100) + "%", height: "100%", background: "#F2C94C" }} /></div>
                     </>
                   )
                 ) : <div style={{ fontSize: 12, color: "#6b7078" }}>No workouts logged yet.</div>}
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16 }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <Waves size={13} color="#56CCF2" />
@@ -3072,14 +3254,14 @@ function TrainingLog() {
                   <div style={{ display: "grid", gap: 8 }}>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Start date</div>
-                      <input type="date" value={swimTargetDraftDash.startDate} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, startDate: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="date" value={swimTargetDraftDash.startDate} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, startDate: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div>
                       <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>Weeks</div>
-                      <input type="number" min="1" value={swimTargetDraftDash.weeks} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
+                      <input type="number" min="1" value={swimTargetDraftDash.weeks} onChange={(e) => setSwimTargetDraftDash({ ...swimTargetDraftDash, weeks: e.target.value })} className="mono" style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 8px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box" }} />
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={saveSwimTargetDash} style={{ flex: 1, background: "#56CCF2", color: "#101214", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
+                      <button onClick={saveSwimTargetDash} style={{ flex: 1, background: "#56CCF2", color: "#0c0d10", border: "none", borderRadius: 6, padding: "6px 0", fontWeight: 700, fontSize: 11.5, cursor: "pointer" }}>Save</button>
                       <button onClick={() => setEditingSwimTargetDash(false)} style={{ flex: 1, background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 6, padding: "6px 0", fontWeight: 600, fontSize: 11.5, cursor: "pointer" }}>Cancel</button>
                     </div>
                   </div>
@@ -3089,20 +3271,77 @@ function TrainingLog() {
                   ) : (
                     <>
                       <div className="disp" style={{ fontSize: 22, fontWeight: 700, color: "#F5F3EE" }}>{swimTargetForDash.daysRemaining} <span className="mono" style={{ fontSize: 11, color: "#6b7078" }}>days left</span></div>
-                      <div className="mono" style={{ fontSize: 11, color: "#6b7078", marginTop: 2, marginBottom: 6 }}>{swimTargetForDash.trainedWeeks}/{swimTargetForDash.goalWeeks} weeks trained</div>
-                      <div style={{ background: "#1d2024", borderRadius: 4, height: 7, overflow: "hidden" }}><div style={{ width: Math.min(100, (swimTargetForDash.trainedWeeks / swimTargetForDash.goalWeeks) * 100) + "%", height: "100%", background: "#56CCF2" }} /></div>
+                      <div className="mono" style={{ fontSize: 11, color: "#6b7078", marginTop: 2 }}>{swimTargetForDash.trainedWeeks}/{swimTargetForDash.goalWeeks} weeks trained <span style={{ color: "#4a4f56" }}>· by {fmtDate(swimTargetForDash.targetDate)}</span></div>
+                      <div style={{ background: "#1d2024", borderRadius: 4, height: 7, overflow: "hidden", marginTop: 6 }}><div style={{ width: Math.min(100, (swimTargetForDash.trainedWeeks / swimTargetForDash.goalWeeks) * 100) + "%", height: "100%", background: "#56CCF2" }} /></div>
                     </>
                   )
                 ) : <div style={{ fontSize: 12, color: "#6b7078" }}>No swims logged yet.</div>}
               </div>
             </div>
+
+            {/* Recent activity — merged workout + swim timeline, most recent first */}
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16, marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>Recent activity</div>
+              {(() => {
+                const wItems = (sessions || []).map((s) => ({ kind: "workout", date: s.date, s }));
+                const swItems = (swimSessions || []).map((s) => ({ kind: "swim", date: s.date, s }));
+                const merged = [...wItems, ...swItems].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 5);
+                if (merged.length === 0) {
+                  return <div style={{ fontSize: 12.5, color: "var(--text-dimmer)" }}>Complete your first workout to start building your training history.</div>;
+                }
+                return (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {merged.map((item, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                          {item.kind === "swim" ? <Waves size={14} color="var(--accent-blue)" style={{ flexShrink: 0 }} /> : <Dumbbell size={14} color="var(--accent)" style={{ flexShrink: 0 }} />}
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {item.kind === "swim" ? "Swim session" : (item.s.label || "Workout")}
+                            </div>
+                            <div style={{ fontSize: 10.5, color: "var(--text-faint)" }}>{fmtDate(item.date)}</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "var(--text-dim)", textAlign: "right", flexShrink: 0 }} className="mono">
+                          {item.kind === "swim"
+                            ? (item.s.distance != null ? `${item.s.distance}m · ${fmtPace100(item.s.pace100Overall)}` : "—")
+                            : `${Object.keys(item.s.ex).length} exercise${Object.keys(item.s.ex).length === 1 ? "" : "s"} · ${Math.round(sessionVolume(item.s)).toLocaleString()}kg`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Progress highlights — only surfaces meaningful recent PRs, not every metric */}
+            {(() => {
+              const freshPRs = chartExercises.filter((name) => prMap[name] && prMap[name].isNewPR);
+              if (freshPRs.length === 0) return null;
+              return (
+                <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16, marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                    <Award size={14} color="var(--accent)" />
+                    <span style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Progress highlights</span>
+                  </div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {freshPRs.map((name) => (
+                      <div key={name} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                        <span style={{ color: "var(--text-dim)" }}>{name}</span>
+                        <span className="mono" style={{ color: "var(--accent)", fontWeight: 700 }}>{Math.round(prMap[name].best1RM)}kg 🔥 new PR</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
 
         {tab === "workout" && (
           <>
             {/* PR card — top, matching the Swim tab's emphasis on PRs first */}
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <Award size={14} color="#F2C94C" />
@@ -3137,25 +3376,25 @@ function TrainingLog() {
 
             {/* Streak + Volume — small, secondary to PR */}
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Streak</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{consistency ? consistency.streak : 0}<span className="mono" style={{ fontSize: 10, color: "#6b7078" }}> wks</span></div>
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Last session</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{consistency ? (consistency.daysSinceLast === 0 ? "today" : `${consistency.daysSinceLast}d`) : "—"}</div>
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Volume — latest</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{volumeKpi ? Math.round(volumeKpi.latestVol).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#6b7078" }}> kg</span></div>
               </div>
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: "10px 14px" }}>
+              <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8a8f98", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Lifetime volume</div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{volumeKpi ? Math.round(volumeKpi.cumulative).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#6b7078" }}> kg</span></div>
               </div>
             </div>
 
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 12, padding: 16, marginBottom: 18 }}>
+            <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 4 }}>Volume by muscle group — latest session ({latest ? fmtDate(latest.date) : ""})</div>
               <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 12 }}>
                 {GROUPS.map((g) => `${g}: ${chartExercises.filter((n) => muscleGroupMap[n] === g).join(" + ") || "—"}`).join(" · ")}
@@ -3164,7 +3403,7 @@ function TrainingLog() {
                 {groupVolumeLatest.map((g) => {
                   const isActive = activeGroup === g.group;
                   return (
-                    <div key={g.group} onClick={() => changeFilter("group:" + g.group)} style={{ cursor: "pointer", borderRadius: 8, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
+                    <div key={g.group} onClick={() => changeFilter("group:" + g.group)} style={{ cursor: "pointer", borderRadius: 12, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
                         <span style={{ color: GROUP_COLORS[g.group], fontWeight: 600 }}>{g.group}</span>
                         <span className="mono" style={{ color: "#c9cdd3" }}>{g.kg.toLocaleString()} kg ({g.pct}%)</span>
@@ -3177,16 +3416,16 @@ function TrainingLog() {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-              <button className="pill" onClick={() => changeFilter("All")} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700, border: filter === "All" ? "1px solid #F5F3EE" : "1px solid #22262b", background: filter === "All" ? "#F5F3EE1a" : "#16181b", color: filter === "All" ? "#F5F3EE" : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>All</button>
+              <button className="pill" onClick={() => changeFilter("All")} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700, border: filter === "All" ? "1px solid #F5F3EE" : "1px solid #22262b", background: filter === "All" ? "#F5F3EE1a" : "#15171b", color: filter === "All" ? "#F5F3EE" : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>All</button>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                  {["reps", "volume", "1rm"].map((m) => (<button key={m} onClick={() => setMetric(m)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: metric === m ? "#F2C94C" : "transparent", color: metric === m ? "#101214" : "#9a9fa6" }}>{m === "reps" ? "Reps" : m === "volume" ? "Volume (kg)" : "1RM (kg)"}</button>))}
+                <div style={{ display: "flex", gap: 4, background: "#15171b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {["reps", "volume", "1rm"].map((m) => (<button key={m} onClick={() => setMetric(m)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: metric === m ? "#F2C94C" : "transparent", color: metric === m ? "#0c0d10" : "#9a9fa6" }}>{m === "reps" ? "Reps" : m === "volume" ? "Volume (kg)" : "1RM (kg)"}</button>))}
                 </div>
-                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                  {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setTimeView(v)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: timeView === v ? "#F2C94C" : "transparent", color: timeView === v ? "#101214" : "#9a9fa6" }}>{l}</button>))}
+                <div style={{ display: "flex", gap: 4, background: "#15171b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setTimeView(v)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: timeView === v ? "#F2C94C" : "transparent", color: timeView === v ? "#0c0d10" : "#9a9fa6" }}>{l}</button>))}
                 </div>
-                <div style={{ display: "flex", gap: 4, background: "#16181b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
-                  {[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([v, l]) => (<button key={v} onClick={() => setRange(v)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: range === v ? "#F2C94C" : "transparent", color: range === v ? "#101214" : "#9a9fa6" }}>{l}</button>))}
+                <div style={{ display: "flex", gap: 4, background: "#15171b", border: "1px solid #22262b", borderRadius: 999, padding: 3 }}>
+                  {[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([v, l]) => (<button key={v} onClick={() => setRange(v)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: range === v ? "#F2C94C" : "transparent", color: range === v ? "#0c0d10" : "#9a9fa6" }}>{l}</button>))}
                 </div>
               </div>
             </div>
@@ -3204,7 +3443,7 @@ function TrainingLog() {
                       const active = filter === name;
                       const color = colorsMap[name];
                       return (
-                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #22262b", background: active ? `${color}1a` : "#16181b", color: active ? color : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>{name}</button>
+                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #22262b", background: active ? `${color}1a` : "#15171b", color: active ? color : "#9a9fa6", fontFamily: "'Inter', sans-serif" }}>{name}</button>
                       );
                     })}
                   </div>
@@ -3218,7 +3457,7 @@ function TrainingLog() {
                   const d = deltaFor(name);
                   const latestTotal = latest && latest.ex[name] ? total(latest.ex[name]) : null;
                   return (
-                    <div key={name} style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 10, padding: "12px 14px" }}>
+                    <div key={name} style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 16, padding: "12px 14px" }}>
                       <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4, fontWeight: 600 }}>{name}</div>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}><span className="disp" style={{ fontSize: 22, fontWeight: 700, color: colorsMap[name] }}>{latestTotal ?? "—"}</span><span className="mono" style={{ fontSize: 11, color: "#6b7078" }}>reps</span></div>
                       {d !== null && (<div style={{ fontSize: 11, color: d >= 0 ? "#6FCF97" : "#E63946", marginTop: 2, display: "flex", alignItems: "center", gap: 3 }}><TrendingUp size={11} /> {d >= 0 ? "+" : ""}{d} since {fmtDate(first.date)}</div>)}
@@ -3228,7 +3467,7 @@ function TrainingLog() {
               </div>
             )}
 
-            <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
+            <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, padding: "18px 14px 8px", marginBottom: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>
                 {(() => {
                   const agg = metric === "1rm" ? "Peak" : "Total";
@@ -3246,8 +3485,8 @@ function TrainingLog() {
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
                   <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
                     {chartExercises.map((name) => (
                       <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={chartFocus === name ? 3 : 2.2} strokeOpacity={chartFocus && chartFocus !== name ? 0.18 : 1} dot={{ r: 3, fillOpacity: chartFocus && chartFocus !== name ? 0.18 : 1 }} connectNulls />
@@ -3258,20 +3497,20 @@ function TrainingLog() {
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
                   <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => [`${v} ${yLabel}`, filter.slice(6)]} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => [`${fmtNum(v, 2)} ${yLabel}`, filter.slice(6)]} />
                     <Line type="monotone" dataKey="value" stroke={GROUP_COLORS[filter.slice(6)]} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : timeView === "week" ? (
                   <LineChart data={weeklySingleData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
                     <Line type="monotone" dataKey="Total" stroke={colorsMap[filter] || "#F5F3EE"} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : (
                   <LineChart data={perSetData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
                     {Array.from({ length: maxSets }).map((_, i) => {
                       const key = "Set " + (i + 1);
@@ -3290,20 +3529,20 @@ function TrainingLog() {
             )}
 
             {loadableSet.has(filter) && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, padding: "18px 14px 8px", marginBottom: 14 }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, padding: "18px 14px 8px", marginBottom: 14 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#c9cdd3", marginBottom: 2, paddingLeft: 8 }}>{filter} — added external load (kg), kept separate from reps</div>
                 <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 6, paddingLeft: 8 }}>Shown on its own so reps and load never blend into one misleading number — 12 reps @ +5kg isn't directly comparable to 10 reps @ +15kg.</div>
                 <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
                   <LineChart data={loadStepDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#22262b" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} />
-                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
+                    <CartesianGrid stroke="#23262d" vertical={false} /><XAxis dataKey="date" stroke="#6b7078" fontSize={11} /><YAxis stroke="#6b7078" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                    <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [`${fmtNum(v, 2)}kg`, name]} />
                     <Line type="stepAfter" dataKey="Added load (kg)" stroke="#E63946" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             )}
 
-            <div style={{ background: "#101214", border: "1px dashed #22262b", borderRadius: 10, padding: "10px 14px", fontSize: 11, color: "#6b7078", marginBottom: 8 }}>
+            <div style={{ background: "#0c0d10", border: "1px dashed #22262b", borderRadius: 16, padding: "10px 14px", fontSize: 11, color: "#6b7078", marginBottom: 8 }}>
               "First logged session" ({first ? fmtDateFull(first.date) : ""}) is just your earliest entry — used only as a fixed reference point for comparisons, not a training assumption.
             </div>
           </>
@@ -3314,13 +3553,13 @@ function TrainingLog() {
         {tab === "history" && (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", background: "#101214", border: "1px solid #22262b", borderRadius: 10, padding: 3 }}>
+              <div style={{ display: "flex", background: "#0c0d10", border: "1px solid #22262b", borderRadius: 16, padding: 3 }}>
                 {[{ id: "workout", label: "Workout", Icon: Dumbbell }, { id: "swim", label: "Swim", Icon: Waves }, { id: "all", label: "All", Icon: LayoutGrid }].map(({ id, label, Icon }) => (
                   <button key={id} onClick={() => setViewMode(id)} style={{
-                    display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", borderRadius: 8,
+                    display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", borderRadius: 12,
                     padding: "7px 14px", fontSize: 12.5, fontWeight: 700,
                     background: viewMode === id ? (id === "swim" ? "#56CCF2" : id === "all" ? "#F5F3EE" : "#F2C94C") : "transparent",
-                    color: viewMode === id ? "#101214" : "#8a8f98",
+                    color: viewMode === id ? "#0c0d10" : "#8a8f98",
                   }}><Icon size={13} /> {label}</button>
                 ))}
               </div>
@@ -3329,34 +3568,28 @@ function TrainingLog() {
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
               {viewMode === "workout" && !showForm && (
-                <button onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}><Plus size={16} /> Log new session</button>
+                <button onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 16, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}><Plus size={16} /> Log new session</button>
               )}
-              <button onClick={exportJSON} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export {viewMode === "workout" ? "workout" : viewMode === "swim" ? "swim" : "all"} JSON</button>
+              <button onClick={exportJSON} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export {viewMode === "workout" ? "workout" : viewMode === "swim" ? "swim" : "all"} JSON</button>
               {viewMode === "workout" && (
-                <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export CSV</button>
+                <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export CSV</button>
               )}
               {viewMode !== "swim" ? (
-                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
+                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
                   <Upload size={14} /> Import JSON
                   <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImport} />
                 </label>
               ) : (
-                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
+                <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #22262b", color: "#c9cdd3", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
                   <Upload size={14} /> Import .FIT
                   <input ref={swimImportInputRef} type="file" accept=".fit" multiple onChange={handleSwimFitUpload} disabled={swimUploading} />
                 </label>
               )}
               {viewMode === "workout" && selectedCompare.length === 2 && (
-                <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 10, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
+                <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 16, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
               )}
               {viewMode === "workout" && sessions.length > 0 && (
-                <button onClick={() => setConfirmDeleteAll("workout")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
-              )}
-              {viewMode === "swim" && (swimSessions || []).length > 0 && (
-                <button onClick={() => setConfirmDeleteAll("swim")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all swims</button>
-              )}
-              {viewMode === "all" && (sessions.length > 0 || (swimSessions || []).length > 0) && (
-                <button onClick={() => setConfirmDeleteAll("all")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#16181b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 10, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all activity</button>
+                <button onClick={() => setConfirmDeleteAll(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#15171b", border: "1px solid #E6394655", color: "#E63946", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
               )}
             </div>
 
@@ -3364,13 +3597,13 @@ function TrainingLog() {
             {viewMode === "workout" && selectedCompare.length > 0 && selectedCompare.length < 2 && (<div style={{ fontSize: 12, color: "#6b7078", marginBottom: 12 }}>Select one more session to compare.</div>)}
 
             {viewMode === "swim" && (
-              <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 18, marginBottom: 22 }}>
+              <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 18, marginBottom: 22 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE", marginBottom: 3 }}>Log new swim session</div>
                     <div style={{ fontSize: 12, color: "#6b7078" }}>Upload Garmin <span className="mono">.FIT</span> files (pool swims) — parsed entirely in your browser, nothing is uploaded anywhere.</div>
                   </div>
-                  <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#56CCF2", color: "#101214", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
+                  <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#56CCF2", color: "#0c0d10", border: "none", borderRadius: 16, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
                     <Upload size={14} /> {swimUploading ? "Parsing…" : "Upload .FIT"}
                     <input ref={swimFileInputRef} type="file" accept=".fit" multiple onChange={handleSwimFitUpload} disabled={swimUploading} />
                   </label>
@@ -3382,7 +3615,7 @@ function TrainingLog() {
                 {swimUploadMsg && <div style={{ fontSize: 12, color: swimUploadMsg.includes("Failed") ? "#E63946" : "#6FCF97", marginTop: 8 }}>{swimUploadMsg}</div>}
 
                 {pendingCssUpload && (
-                  <div style={{ marginTop: 14, background: "#101214", border: "1px dashed #2a2e33", borderRadius: 10, padding: 14 }}>
+                  <div style={{ marginTop: 14, background: "#0c0d10", border: "1px dashed #2a2e33", borderRadius: 16, padding: 14 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: "#F5F3EE", marginBottom: 10 }}>Confirm CSS test times</div>
                     <div style={{ display: "grid", gap: 12 }}>
                       {pendingCssUpload.drafts.map((d, idx) => (
@@ -3391,11 +3624,11 @@ function TrainingLog() {
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                             <div>
                               <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>200m time (s) {d.auto200 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
-                              <input type="number" placeholder="e.g. 165.5" value={d.t200} onChange={(e) => updatePendingCssDraft(idx, "t200", e.target.value)} className="mono" style={{ width: 130, background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <input type="number" placeholder="e.g. 165.5" value={d.t200} onChange={(e) => updatePendingCssDraft(idx, "t200", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
                             </div>
                             <div>
                               <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>400m time (s) {d.auto400 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
-                              <input type="number" placeholder="e.g. 345.0" value={d.t400} onChange={(e) => updatePendingCssDraft(idx, "t400", e.target.value)} className="mono" style={{ width: 130, background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <input type="number" placeholder="e.g. 345.0" value={d.t400} onChange={(e) => updatePendingCssDraft(idx, "t400", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
                             </div>
                           </div>
                           {!d.auto200 && !d.auto400 && (
@@ -3405,8 +3638,8 @@ function TrainingLog() {
                       ))}
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                      <button onClick={confirmPendingCssUpload} style={{ cursor: "pointer", background: "#2EC4B6", color: "#101214", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, fontSize: 12.5 }}>Save session{pendingCssUpload.drafts.length > 1 ? "s" : ""}</button>
-                      <button onClick={cancelPendingCssUpload} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 8, padding: "8px 16px", fontWeight: 600, fontSize: 12.5 }}>Discard</button>
+                      <button onClick={confirmPendingCssUpload} style={{ cursor: "pointer", background: "#2EC4B6", color: "#0c0d10", border: "none", borderRadius: 12, padding: "8px 16px", fontWeight: 700, fontSize: 12.5 }}>Save session{pendingCssUpload.drafts.length > 1 ? "s" : ""}</button>
+                      <button onClick={cancelPendingCssUpload} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 12, padding: "8px 16px", fontWeight: 600, fontSize: 12.5 }}>Discard</button>
                     </div>
                   </div>
                 )}
@@ -3414,18 +3647,18 @@ function TrainingLog() {
             )}
 
             {viewMode === "workout" && showForm && (
-              <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 18, marginBottom: 22 }}>
+              <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 18, marginBottom: 22 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                   <span style={{ fontWeight: 700, fontSize: 15 }}>{editingId ? "Edit session" : "New session"}</span>
                   <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={cancelForm} />
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Date</div><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
-                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Bodyweight (kg)</div><input type="number" step="0.1" placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
-                  <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Label (optional)</div><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} /></div>
+                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Date</div><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
+                  <div><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Bodyweight (kg)</div><input type="number" step="0.1" placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }} /></div>
+                  <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Label (optional)</div><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} /></div>
                 </div>
 
-                <div style={{ background: "#101214", border: "1px dashed #2a2e33", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                <div style={{ background: "#0c0d10", border: "1px dashed #2a2e33", borderRadius: 16, padding: 12, marginBottom: 16 }}>
                   <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 6 }}>Paste your workout summary — parses it and fills the fields below for you to review</div>
                   <textarea
                     value={pasteText}
@@ -3433,12 +3666,12 @@ function TrainingLog() {
                     placeholder={"Wide grip pull ups :\n12 rep x 1 sets body weight\n9 rep x 1 sets body weight\n\nChest dips :\n12 rep x 1 sets body weight + 15kg\n10 rep x 1 sets body weight + 5kg"}
                     rows={4}
                     className="mono"
-                    style={{ width: "100%", background: "#16181b", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box", resize: "vertical" }}
+                    style={{ width: "100%", background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 12, boxSizing: "border-box", resize: "vertical" }}
                   />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button onClick={handleParseFill} style={{ marginTop: 8, background: "#2a2e33", color: "#F5F3EE", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Parse & fill</button>
-                    <button onClick={() => setShowLibrary(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Exercise reference</button>
-                    <button onClick={() => setShowAddExercise(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>+ Add exercise</button>
+                    <button onClick={handleParseFill} style={{ marginTop: 8, background: "#2b2e36", color: "#F5F3EE", border: "none", borderRadius: 12, padding: "8px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Parse & fill</button>
+                    <button onClick={() => setShowLibrary(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Exercise reference</button>
+                    <button onClick={() => setShowAddExercise(true)} style={{ marginTop: 8, background: "transparent", color: "#8a8f98", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>+ Add exercise</button>
                   </div>
                   {parseNote && <div style={{ fontSize: 11.5, color: "#F2C94C", marginTop: 8, lineHeight: 1.5 }}>{parseNote}</div>}
                   {unmatchedNames.length > 0 && (
@@ -3460,15 +3693,15 @@ function TrainingLog() {
                           {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#5a5f66", flexShrink: 0 }} />}
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8 }}>
-                          <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
-                          <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
+                          <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
+                          <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "10px 10px", color: "#E8E6E1", fontSize: 14, boxSizing: "border-box" }} />
                         </div>
                       </div>
                     ) : (
                       <div key={name} style={{ display: "grid", gridTemplateColumns: editingId ? "160px 1fr 90px" : "160px 1fr 90px 18px", gap: 10, alignItems: "center" }}>
                         <span style={{ fontSize: 13, color: colorsMap[name] || "#c9cdd3", fontWeight: 600 }}>{name}</span>
-                        <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
-                        <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                        <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                        <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
                         {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#5a5f66" }} />}
                       </div>
                     )
@@ -3478,13 +3711,13 @@ function TrainingLog() {
                   )}
                 </div>
                 <div style={{ marginBottom: 4, fontSize: 11, color: "#8a8f98" }}>Notes (optional — soreness, sleep, how it felt)</div>
-                <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
-                <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
+                <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
               </div>
             )}
 
             {viewMode === "workout" && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Workout sessions ({sessions.length}) · select up to 2 to compare</div>
                 <div style={{ maxHeight: 520, overflowY: "auto" }}>
                   {[...sessions].reverse().map((s, idx) => (
@@ -3519,7 +3752,7 @@ function TrainingLog() {
             )}
 
             {viewMode === "swim" && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Swim sessions ({(swimSessions || []).length}) · full breakdown lives on the Swimming tab</div>
                 <div style={{ maxHeight: 520, overflowY: "auto" }}>
                   {[...(swimSessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1)).map((s, idx, arr) => (
@@ -3544,7 +3777,7 @@ function TrainingLog() {
             )}
 
             {viewMode === "all" && (
-              <div style={{ background: "#16181b", border: "1px solid #22262b", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>All sessions ({sessions.length + (swimSessions || []).length})</div>
                 <div style={{ maxHeight: 520, overflowY: "auto" }}>
                   {[
@@ -3571,55 +3804,46 @@ function TrainingLog() {
       </div>
 
       {confirmDelete && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 360, width: "100%" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 360, width: "100%" }}>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <AlertTriangle size={20} color="#E63946" style={{ flexShrink: 0 }} />
               <div><div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>Delete this session?</div><div style={{ fontSize: 12.5, color: "#9a9fa6" }}>{fmtDateFull(confirmDelete.date)}{confirmDelete.kind === "swim" ? ` — swim, ${confirmDelete.distance || "?"}m` : ` — "${confirmDelete.label}"`} will be permanently removed. This can't be undone.</div></div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmDelete(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => doDelete(confirmDelete.id, confirmDelete.kind)} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete</button>
+              <button onClick={() => setConfirmDelete(null)} style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => doDelete(confirmDelete.id, confirmDelete.kind)} style={{ padding: "8px 16px", borderRadius: 12, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete</button>
             </div>
           </div>
         </div>
       )}
 
       {confirmDeleteAll && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 360, width: "100%" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 360, width: "100%" }}>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <AlertTriangle size={20} color="#E63946" style={{ flexShrink: 0 }} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>
-                  {confirmDeleteAll === "swim" ? "Delete ALL swim sessions?" : confirmDeleteAll === "all" ? "Delete ALL activity?" : "Delete ALL logs?"}
-                </div>
-                <div style={{ fontSize: 12.5, color: "#9a9fa6" }}>
-                  {confirmDeleteAll === "swim" && `All ${(swimSessions || []).length} swim session(s) will be permanently removed. This can't be undone.`}
-                  {confirmDeleteAll === "all" && `All ${sessions.length} workout session(s) and ${(swimSessions || []).length} swim session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.`}
-                  {confirmDeleteAll === "workout" && `All ${sessions.length} session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.`}
-                </div>
-              </div>
+              <div><div style={{ fontWeight: 700, fontSize: 14, color: "#F5F3EE", marginBottom: 4 }}>Delete ALL logs?</div><div style={{ fontSize: 12.5, color: "#9a9fa6" }}>All {sessions.length} session(s) will be permanently removed. This can't be undone. Tracked exercises and target settings are kept.</div></div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmDeleteAll(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={doDeleteAllLogs} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete all</button>
+              <button onClick={() => setConfirmDeleteAll(false)} style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #2a2e33", background: "transparent", color: "#c9cdd3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={doDeleteAllLogs} style={{ padding: "8px 16px", borderRadius: 12, border: "none", background: "#E63946", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Delete all</button>
             </div>
           </div>
         </div>
       )}
 
       {selectedHeatDate && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setSelectedHeatDate(null)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: "20px 28px" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setSelectedHeatDate(null)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: "20px 28px" }} onClick={(e) => e.stopPropagation()}>
             <div className="disp" style={{ fontSize: 20, fontWeight: 700, color: "#F5F3EE" }}>{fmtDateFull(selectedHeatDate)}</div>
           </div>
         </div>
       )}
 
       {showLibrary && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowLibrary(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowLibrary(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Exercise reference</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowLibrary(false)} />
@@ -3653,14 +3877,14 @@ function TrainingLog() {
                 </div>
               </div>
             ))}
-            <button onClick={() => { setShowLibrary(false); setShowAddExercise(true); }} style={{ marginTop: 4, width: "100%", background: "#2a2e33", color: "#F5F3EE", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Add an exercise not listed here</button>
+            <button onClick={() => { setShowLibrary(false); setShowAddExercise(true); }} style={{ marginTop: 4, width: "100%", background: "#2b2e36", color: "#F5F3EE", border: "none", borderRadius: 12, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Add an exercise not listed here</button>
           </div>
         </div>
       )}
 
       {showPrPicker && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowPrPicker(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 420, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowPrPicker(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 420, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Choose PR exercises</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowPrPicker(false)} />
@@ -3683,14 +3907,14 @@ function TrainingLog() {
                 );
               })}
             </div>
-            <button onClick={() => setShowPrPicker(false)} style={{ marginTop: 14, width: "100%", background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Done</button>
+            <button onClick={() => setShowPrPicker(false)} style={{ marginTop: 14, width: "100%", background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Done</button>
           </div>
         </div>
       )}
 
       {showAddExercise && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowAddExercise(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowAddExercise(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Add an exercise</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowAddExercise(false)} />
@@ -3701,34 +3925,34 @@ function TrainingLog() {
             <div style={{ display: "grid", gap: 10 }}>
               <div>
                 <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Name</div>
-                <input type="text" placeholder="e.g. Archer Pull-Ups" value={addExDraft.name} onChange={(e) => setAddExDraft({ ...addExDraft, name: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                <input type="text" placeholder="e.g. Archer Pull-Ups" value={addExDraft.name} onChange={(e) => setAddExDraft({ ...addExDraft, name: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Muscle group</div>
-                  <select value={addExDraft.group} onChange={(e) => setAddExDraft({ ...addExDraft, group: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }}>
+                  <select value={addExDraft.group} onChange={(e) => setAddExDraft({ ...addExDraft, group: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13 }}>
                     {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
                 <div style={{ width: 110 }}>
                   <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>BW ratio</div>
-                  <input type="number" step="0.05" min="0" max="1.5" value={addExDraft.ratio} onChange={(e) => setAddExDraft({ ...addExDraft, ratio: e.target.value })} className="mono" style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                  <input type="number" step="0.05" min="0" max="1.5" value={addExDraft.ratio} onChange={(e) => setAddExDraft({ ...addExDraft, ratio: e.target.value })} className="mono" style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#8a8f98", marginBottom: 4 }}>Target muscle(s) — optional</div>
-                <input type="text" placeholder="e.g. Lats, Biceps" value={addExDraft.target} onChange={(e) => setAddExDraft({ ...addExDraft, target: e.target.value })} style={{ width: "100%", background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
+                <input type="text" placeholder="e.g. Lats, Biceps" value={addExDraft.target} onChange={(e) => setAddExDraft({ ...addExDraft, target: e.target.value })} style={{ width: "100%", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, padding: "8px 10px", color: "#E8E6E1", fontSize: 13, boxSizing: "border-box" }} />
               </div>
               <div style={{ fontSize: 10.5, color: "#4a4f56" }}>Ratio = fraction of bodyweight lifted per rep. Use 0 for a pure-load exercise (barbell/machine).</div>
-              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "#F2C94C", color: "#101214", border: "none", borderRadius: 8, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Add exercise</button>
+              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "linear-gradient(135deg, #FFDD7A, #F2C94C)", color: "#101214", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Add exercise</button>
             </div>
           </div>
         </div>
       )}
 
       {showCompare && compareSessions && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowCompare(false)}>
-          <div style={{ background: "#16181b", border: "1px solid #2a2e33", borderRadius: 14, padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowCompare(false)}>
+          <div style={{ background: "linear-gradient(180deg, #1a1c22 0%, #141519 100%)", border: "1px solid #2b2e36", borderRadius: 22, boxShadow: "0 12px 28px -14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)", padding: 20, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>Session comparison</span>
               <X size={18} style={{ cursor: "pointer", color: "#8a8f98" }} onClick={() => setShowCompare(false)} />
