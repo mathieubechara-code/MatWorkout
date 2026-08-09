@@ -573,7 +573,7 @@ const COMPARE_MODE_DESCRIPTIONS = {
   hr: "Speed vs effort — see whether you're getting faster without your heart rate climbing.",
   swolfhr: "Efficiency vs effort — see whether your stroke efficiency is improving without more cardiovascular strain.",
 };
-const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078", kick_free: "#7FDDEE", kick_frog: "#F4B183" };
+const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078", kick_free: "#FF8FA3", kick_frog: "#F4B183" };
 // Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
 // only to flag likely sensor glitches, never to silently drop data outside this filter.
 const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststroke: 60, butterfly: 60, drill: 100, mixed: 130, im: 130, unknown: 130, kick_free: 130, kick_frog: 90 };
@@ -1727,12 +1727,20 @@ function SwimmingTab({ isMobile }) {
   }, [sessions, sortedSessions, allStrokesSeen, todayStr]);
 
   // ---- Swim PR card -------------------------------------------------------------------
+  // Best pace also records that session's dominant stroke (the one with the most lengths),
+  // shown as a small tag next to the PR so "1:32/100m" isn't ambiguous about which stroke it
+  // was swum in — whole-session pace can otherwise mix strokes together silently.
   const bestPacePR = useMemo(() => {
     if (!sessions) return null;
     let best = null;
     sessions.forEach((s) => {
       if (s.pace100Overall == null) return;
-      if (!best || s.pace100Overall < best.value) best = { value: s.pace100Overall, date: s.date };
+      if (!best || s.pace100Overall < best.value) {
+        const stats = s.strokeStats || {};
+        let domStroke = null, domCount = -1;
+        Object.keys(stats).forEach((k) => { if (stats[k].count > domCount) { domStroke = k; domCount = stats[k].count; } });
+        best = { value: s.pace100Overall, date: s.date, stroke: domStroke };
+      }
     });
     return best;
   }, [sessions]);
@@ -1840,7 +1848,7 @@ function SwimmingTab({ isMobile }) {
       value: fmtPace100(headlineOf(paceSeries)),
       perStroke: true,
       lowerBetter: true,
-      color: strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#56CCF2",
+      color: strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#F5F3EE",
     },
     {
       key: "swolf",
@@ -1918,7 +1926,7 @@ function SwimmingTab({ isMobile }) {
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
               <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
-              <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#56CCF2"} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeFilter !== "all" ? SWIM_STROKE_COLORS[strokeFilter] : "#F5F3EE"} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -2094,7 +2102,10 @@ function SwimmingTab({ isMobile }) {
                       <span className="mono" style={{ color: "#c9cdd3", fontWeight: 700, whiteSpace: "nowrap" }}>{pr ? fmt(pr.value) : "—"}</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }} className="mono">
-                      <span style={{ color: "#5a5f66" }}>{pr ? fmtDate(pr.date) : label === "Best CSS pace" ? "no CSS test logged yet" : ""}</span>
+                      <span style={{ color: "#5a5f66" }}>
+                        {pr ? fmtDate(pr.date) : label === "Best CSS pace" ? "no CSS test logged yet" : ""}
+                        {pr && pr.stroke && <span style={{ color: SWIM_STROKE_COLORS[pr.stroke] || "#5a5f66" }}> · {SWIM_STROKE_LABELS[pr.stroke]}</span>}
+                      </span>
                       {age && <span style={{ color: age.color }}>{age.text}</span>}
                     </div>
                   </div>
@@ -2258,7 +2269,7 @@ function SwimmingTab({ isMobile }) {
                 to the card header, even after expanding a chart further down (Day/Week and
                 6-wk avg stay put above, since those apply card-wide rather than per-chart). */}
             {allStrokesSeen.length > 0 && (
-              <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", gap: 4, flexWrap: "wrap", background: "#14161a", padding: "4px 0", marginBottom: 10 }}>
+              <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", gap: 4, flexWrap: "wrap", background: "rgba(12,13,16,0.94)", backdropFilter: "blur(8px)", border: "1px solid #22262b", borderRadius: 14, padding: "6px 8px", marginBottom: 10, boxShadow: "0 6px 16px -8px rgba(0,0,0,0.65)" }}>
                 {["all", ...allStrokesSeen].map((s) => {
                   // Part 2: every swim-type slicer button uses that stroke's own color from
                   // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
@@ -2361,12 +2372,12 @@ function SwimmingTab({ isMobile }) {
                 </button>
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {[["cadence", "Pace + Stroke Rate"], ["dps", "Pace + Stroke Distance"], ["hr", "Pace + HR"], ["swolfhr", "SWOLF + HR"]].map(([v, l]) => (
+                {[["cadence", "Pace + Stroke Rate", "#56CCF2"], ["dps", "Pace + Stroke Distance", "#9CCC65"], ["hr", "Pace + HR", "#E63946"], ["swolfhr", "SWOLF + HR", "#BB86FC"]].map(([v, l, c]) => (
                   <button key={v} onClick={() => { setCompareMode(v); setSelectedComparePoint(null); }} className="pill" style={{
-                    cursor: "pointer", background: compareMode === v ? "#23262d" : "transparent",
-                    border: "1px solid " + (compareMode === v ? "#3a3f45" : "#23262d"),
-                    color: compareMode === v ? "#F5F3EE" : "#8a8f98",
-                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
+                    cursor: "pointer", background: compareMode === v ? c : `${c}1a`,
+                    border: `1.5px solid ${compareMode === v ? c : c + "55"}`,
+                    color: compareMode === v ? "#0c0d10" : c,
+                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
                   }}>{l}</button>
                 ))}
               </div>
@@ -2376,21 +2387,9 @@ function SwimmingTab({ isMobile }) {
                 {COMPARE_MODE_DESCRIPTIONS[compareMode]} Tap a dot below to focus on that session. Lines are normalized (σ) so two differently-scaled metrics can share one axis — real values are always in the tooltip, and the "better" direction is flipped so up always means improving.
               </div>
             )}
-            {allStrokesSeen.length > 0 && (
-              <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", gap: 4, flexWrap: "wrap", background: "#14161a", padding: "4px 0", marginBottom: 10 }}>
-                {["all", ...allStrokesSeen].map((s) => {
-                  const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
-                  const selected = strokeFilter === s;
-                  return (
-                    <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
-                      cursor: "pointer", background: selected ? color : `${color}1a`,
-                      border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
-                      borderRadius: 12, padding: "3px 8px", fontSize: 10.5, fontWeight: 700,
-                    }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
-                  );
-                })}
-              </div>
-            )}
+            {/* Swim-type filter lives only once now, as the floating filter up in Trends —
+                both cards read the same strokeFilter state, so picking a stroke up there
+                filters this chart too without a second, easy-to-miss control down here. */}
             {(() => {
               if (!activeStroke) return <div style={{ fontSize: 12, color: "#6b7078" }}>No stroke data yet.</div>;
               const modeCfg = {
