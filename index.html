@@ -998,8 +998,8 @@ function SwimmingTab({ isMobile }) {
               <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
                 <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
-                <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+                <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />
                 <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v, name) => (name === "Pace" ? [fmtPace100(v), name] : [v != null ? `${Math.round(v)} bpm` : "—", name])} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -1011,7 +1011,7 @@ function SwimmingTab({ isMobile }) {
               <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
                 <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
+                <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
                 <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                 <Line type="monotone" dataKey="pace100" name="Pace /100m" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
               </LineChart>
@@ -1032,8 +1032,8 @@ function SwimmingTab({ isMobile }) {
           <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
             <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-            <YAxis yAxisId="main" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-            {showHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} />}
+            <YAxis yAxisId="main" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 2", "dataMax + 2"]} />
+            {showHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />}
             <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={tooltipFormatter} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             {strokesToShow.map((stroke) => (
@@ -1202,7 +1202,7 @@ function SwimmingTab({ isMobile }) {
                   <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
                     <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                    <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed />
+                    <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
                     <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                     <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#2EC4B6" strokeWidth={2} dot={{ r: 4 }} connectNulls />
                   </LineChart>
@@ -2669,7 +2669,7 @@ function TrainingLog() {
                       <LineChart data={dashBodyweightSeries} margin={{ top: 5, right: 16, left: -10, bottom: 0 }}>
                         <CartesianGrid stroke="#22262b" vertical={false} />
                         <XAxis dataKey="date" stroke="#6b7078" fontSize={11} />
-                        <YAxis stroke="#6b7078" fontSize={11} domain={["dataMin - 1", "dataMax + 1"]} />
+                        <YAxis stroke="#6b7078" fontSize={11} domain={targetWeight != null ? [(dataMin) => Math.min(dataMin - 1, targetWeight - 1), (dataMax) => Math.max(dataMax + 1, targetWeight + 1)] : ["dataMin - 1", "dataMax + 1"]} />
                         <Tooltip contentStyle={{ background: "#1d2024", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} />
                         {targetWeight != null && <ReferenceLine y={targetWeight} stroke="#F2C94C" strokeDasharray="4 4" />}
                         <Line type="monotone" dataKey="kg" stroke="#56CCF2" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
