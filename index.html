@@ -409,10 +409,10 @@ const migrate = (loaded) =>
 
 const TABS = [
   { id: "dashboard", label: "Today", Icon: LayoutGrid },
-  { id: "history", label: "Train", Icon: Dumbbell },
-  { id: "workout", label: "Progress", Icon: TrendingUp },
+  { id: "workout", label: "Workout", Icon: TrendingUp },
   { id: "swim", label: "Swim", Icon: Waves },
   { id: "insights", label: "Insights", Icon: Sparkles },
+  { id: "history", label: "Train", Icon: Dumbbell },
 ];
 
 // Fresh (<=13d), aging (14-45d), or stale (46d+) — a quick-glance color for how long ago a
@@ -595,17 +595,29 @@ function processSwimFit(parsed, fileName) {
     return { stroke, lengthType, totalStrokes, avgCadence, elapsedSec, startTime, calories };
   });
 
+  // A 0-stroke/0-cadence "active" length is only a sensor/device glitch if it's also too
+  // short to physically be a real length (implausibly fast). If the elapsed time is a normal
+  // or long duration, it's far more likely a real length where the stroke/cadence sensor just
+  // failed to report a read — that should still count toward distance, swim time, and pace,
+  // not get silently dropped.
+  const PHANTOM_MAX_PLAUSIBLE_SEC = 5;
   const lengths = rawLengths.map((len, index) => {
     let glitch = null;
     if (len.lengthType === "active") {
       if (len.totalStrokes === 0 && len.avgCadence === 0) {
-        glitch = "phantom length (0 strokes, 0 cadence)";
+        if (len.elapsedSec < PHANTOM_MAX_PLAUSIBLE_SEC) {
+          glitch = `phantom length (0 strokes, 0 cadence, ${len.elapsedSec.toFixed(1)}s — too short to be a real length)`;
+        }
+        // else: 0/0 with a normal/long duration -> treated as real, not excluded.
       } else {
         const maxC = SWIM_MAX_PLAUSIBLE_CADENCE[len.stroke] || 130;
         if (len.avgCadence > maxC) glitch = `implausible cadence (${len.avgCadence} spm > ${maxC} plausible max for ${SWIM_STROKE_LABELS[len.stroke]})`;
       }
     }
     const swolf = len.lengthType === "active" && !glitch ? Math.round(len.elapsedSec + len.totalStrokes) : null;
+    if (glitch) {
+      console.warn(`[swim-fit] excluding length #${index}: elapsedSec=${len.elapsedSec.toFixed(2)}, totalStrokes=${len.totalStrokes}, avgCadence=${len.avgCadence}, reason="${glitch}"`);
+    }
     return { ...len, index, glitch, swolf };
   });
 
@@ -926,11 +938,15 @@ function SwimmingTab({ isMobile }) {
   // per-stroke metrics).
   const seriesFor = (key) => trendDataView.map((d) => (d[key] == null ? null : d[key]));
 
+  // Degrades gracefully: with lots of history it compares the last 3 sessions against the
+  // 3 before that; with as few as 2 sessions total it falls back to latest-vs-previous, so a
+  // one-word status is available as soon as there's anything to compare.
   const computeVerdict = (series, direction) => {
     const vals = series.filter((v) => v != null);
     if (vals.length < 2) return null;
-    const recent = vals.slice(-3);
-    const prior = vals.slice(-6, -3);
+    const windowSize = Math.max(1, Math.min(3, Math.floor(vals.length / 2)));
+    const recent = vals.slice(-windowSize);
+    const prior = vals.slice(-windowSize * 2, -windowSize);
     if (prior.length === 0) return null;
     const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
     const recentAvg = avg(recent), priorAvg = avg(prior);
@@ -1108,9 +1124,6 @@ function SwimmingTab({ isMobile }) {
                   <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
-              <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
-                Both lines shown as standard deviations (σ) from their own session average, so pace (seconds) and HR (bpm) are directly comparable. Pace is flipped so "up" = faster, matching "up" = higher HR — lines rising together means faster swimming tracked with higher effort. Hover for actual pace/HR values.
-              </div>
             </>
             )
           ) : (
@@ -1263,9 +1276,6 @@ function SwimmingTab({ isMobile }) {
             <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#E63946" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3 }} connectNulls />
           </LineChart>
         </ResponsiveContainer>
-        <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
-          Both lines shown as standard deviations (σ) from their own average, so {metricLabel} and HR (bpm) are directly comparable. {directionNote} Hover for actual values.
-        </div>
         {strokeCaption}
       </div>
     );
@@ -1395,7 +1405,7 @@ function SwimmingTab({ isMobile }) {
                         </button>
                       </div>
                     </div>
-                    {pts.length >= 2 ? (
+                    {!isOpen && (pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={64}>
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
@@ -1403,7 +1413,7 @@ function SwimmingTab({ isMobile }) {
                       </ResponsiveContainer>
                     ) : (
                       <div style={{ fontSize: 10.5, color: "#4a4f56", padding: "18px 0" }}>Not enough data yet</div>
-                    )}
+                    ))}
                     {isOpen && (
                       <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
                         {expandedChartFor(card.key)}
