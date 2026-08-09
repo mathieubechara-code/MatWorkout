@@ -1296,6 +1296,99 @@ function generateCompareTrendInterpretation(compareMode, primaryPoints, secPoint
   return { category: "neutral", headline: "Steady.", detail: "Efficiency and heart rate have both stayed about the same recently." };
 }
 
+// ---- 10. Compare chart — single selected-session interpretation --------------------------------
+// Mirrors generateCompareTrendInterpretation's category logic, but compares one tapped session's
+// raw values against the median of its other comparable sessions (same stroke, same chart data)
+// instead of a recent-vs-older window. Returns null when there aren't at least 2 other comparable
+// sessions to form a responsible baseline.
+function generateCompareSessionInterpretation(compareMode, strokeLabel, selectedPrimary, selectedSecondary, baselinePrimaryVals, baselineSecondaryVals, primaryFmt, otherFmt) {
+  const th = INSIGHT_THRESHOLDS;
+  if (selectedPrimary == null || selectedSecondary == null) return null;
+  if (baselinePrimaryVals.length < 2 || baselineSecondaryVals.length < 2) return null;
+
+  const baselinePrimaryMed = medianOf(baselinePrimaryVals);
+  const baselineSecondaryMed = medianOf(baselineSecondaryVals);
+  const primaryPct = pctChange(selectedPrimary, baselinePrimaryMed);
+  const primaryTh = compareMode === "swolfhr" ? th.swolfMeaningfulPct : th.paceMeaningfulPct;
+  const primaryImproved = primaryPct != null && primaryPct <= -primaryTh;
+  const primaryWorse = primaryPct != null && primaryPct >= primaryTh;
+  const primaryPctAbs = primaryPct != null ? Math.round(Math.abs(primaryPct) * 1000) / 10 : null;
+
+  const isHr = compareMode === "hr" || compareMode === "swolfhr";
+  let secUp, secDown;
+  if (isHr) {
+    const diff = selectedSecondary - baselineSecondaryMed;
+    secUp = diff > th.hrMeaningfulBpm;
+    secDown = diff < -th.hrMeaningfulBpm;
+  } else {
+    const secPct = pctChange(selectedSecondary, baselineSecondaryMed);
+    const secTh = compareMode === "cadence" ? th.cadenceMeaningfulPct : th.dpsMeaningfulPct;
+    secUp = secPct != null && secPct > secTh;
+    secDown = secPct != null && secPct < -secTh;
+  }
+  const secStable = !secUp && !secDown;
+
+  const modeWords = {
+    cadence: { noun: "stroke rate", up: "increased", down: "decreased", stable: "stayed close to normal" },
+    dps: { noun: "distance per stroke", up: "increased", down: "decreased", stable: "stayed about the same" },
+    hr: { noun: "heart rate", up: "was higher than usual", down: "was lower than usual", stable: "stayed close to your usual level" },
+    swolfhr: { noun: "heart rate", up: "was higher than usual", down: "was lower than usual", stable: "stayed close to your usual level" },
+  }[compareMode];
+  const secPhrase = secUp ? `${modeWords.noun} ${modeWords.up}` : secDown ? `${modeWords.noun} ${modeWords.down}` : `${modeWords.noun} ${modeWords.stable}`;
+
+  const primaryWord = compareMode === "swolfhr" ? "Efficiency" : "Pace";
+  const primaryDirWord = primaryImproved ? "faster" : primaryWorse ? "slower" : "close to typical";
+  const primaryDetail = primaryPctAbs != null && (primaryImproved || primaryWorse)
+    ? `${primaryWord} was ${primaryFmt(selectedPrimary)}, around ${primaryPctAbs}% ${primaryDirWord} than your recent ${strokeLabel.toLowerCase()} baseline (${primaryFmt(baselinePrimaryMed)})`
+    : `${primaryWord} was ${primaryFmt(selectedPrimary)}, close to your recent ${strokeLabel.toLowerCase()} baseline (${primaryFmt(baselinePrimaryMed)})`;
+  const detail = `${primaryDetail}, while ${secPhrase} (${otherFmt(selectedSecondary)} vs ${otherFmt(baselineSecondaryMed)}).`;
+
+  const headlines = {
+    cadence: {
+      "improved-stable": ["positive", "Faster without higher turnover."],
+      "improved-up": ["neutral", "Faster, with more turnover."],
+      "improved-down": ["positive", "Faster with a longer stroke."],
+      "steady-up": ["neutral", "More turnover, speed unchanged."],
+      "steady-down": ["neutral", "Less turnover, speed unchanged."],
+      "steady-stable": ["neutral", "Close to your usual swim."],
+      "worse-any": ["warning", "Slower than usual."],
+    },
+    dps: {
+      "improved-up": ["positive", "Efficiency gain."],
+      "improved-down": ["neutral", "Faster, but not more efficient."],
+      "improved-stable": ["positive", "Efficiency is stable."],
+      "steady-up": ["positive", "More efficient, pace steady."],
+      "steady-down": ["warning", "Less efficient, pace steady."],
+      "steady-stable": ["neutral", "Close to your usual swim."],
+      "worse-any": ["warning", "Slower than usual."],
+    },
+    hr: {
+      "improved-stable": ["positive", "Faster at similar effort."],
+      "improved-down": ["positive", "Faster with less effort."],
+      "improved-up": ["neutral", "Faster, but with more effort."],
+      "steady-up": ["warning", "More effort, speed unchanged."],
+      "steady-down": ["neutral", "Less effort, speed unchanged."],
+      "steady-stable": ["neutral", "Close to your usual swim."],
+      "worse-any": ["warning", "Slower than usual."],
+    },
+  };
+  headlines.swolfhr = {
+    "improved-stable": ["positive", "More efficient at similar effort."],
+    "improved-down": ["positive", "More efficient with less effort."],
+    "improved-up": ["neutral", "More efficient, but with more effort."],
+    "steady-up": ["warning", "More effort, efficiency unchanged."],
+    "steady-down": ["neutral", "Less effort, efficiency unchanged."],
+    "steady-stable": ["neutral", "Close to your usual swim."],
+    "worse-any": ["warning", "Efficiency slipped."],
+  };
+
+  const secKey = secUp ? "up" : secDown ? "down" : "stable";
+  const key = primaryWorse ? "worse-any" : primaryImproved ? `improved-${secKey}` : `steady-${secKey}`;
+  const [category, headline] = headlines[compareMode][key] || ["neutral", "Close to your usual swim."];
+
+  return { category, headline, detail };
+}
+
 // ---- Orchestration: gather everything applicable, rank, dedupe, return top 1-3 -----------------
 function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel, todayStr, strokeFilterActive }) {
   if (!chronSessions || chronSessions.length === 0) return [];
@@ -1364,6 +1457,7 @@ function SwimmingTab({ isMobile }) {
   const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "hr", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
   const [compareMode, setCompareMode] = useState("cadence"); // "cadence" | "dps" — Pace+StrokeRate vs Pace+StrokeDistance overlay
+  const [selectedComparePoint, setSelectedComparePoint] = useState(null); // date string of a tapped Compare chart dot, or null for "overall trend" view
   const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
   const [distanceDraft, setDistanceDraft] = useState("");
   const [activityStrokeFilter, setActivityStrokeFilter] = useState({}); // { [sessionId]: strokeName | "all" } — per-session pace chart filter
@@ -2227,7 +2321,7 @@ function SwimmingTab({ isMobile }) {
               <div style={{ ...labelStyle, marginBottom: 0 }}>Compare</div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {[["cadence", "Pace + Stroke Rate"], ["dps", "Pace + Stroke Distance"], ["hr", "Pace + HR"], ["swolfhr", "SWOLF + HR"]].map(([v, l]) => (
-                  <button key={v} onClick={() => setCompareMode(v)} className="pill" style={{
+                  <button key={v} onClick={() => { setCompareMode(v); setSelectedComparePoint(null); }} className="pill" style={{
                     cursor: "pointer", background: compareMode === v ? "#23262d" : "transparent",
                     border: "1px solid " + (compareMode === v ? "#3a3f45" : "#23262d"),
                     color: compareMode === v ? "#F5F3EE" : "#8a8f98",
@@ -2312,10 +2406,53 @@ function SwimmingTab({ isMobile }) {
                   ) : (() => {
                     const primaryPoints = trendDataView.map((d) => ({ date: d.date, v: d[primaryKey] })).filter((p) => p.v != null);
                     const secPoints = trendDataView.map((d) => ({ date: d.date, v: d[otherKey] })).filter((p) => p.v != null);
-                    const interp = generateCompareTrendInterpretation(compareMode, primaryPoints, secPoints, INSIGHT_THRESHOLDS.mediumTermWeeks);
+
+                    const selectedRow = selectedComparePoint ? trendDataView.find((d) => d.date === selectedComparePoint) : null;
+                    const selectedPrimary = selectedRow ? selectedRow[primaryKey] : null;
+                    const selectedSecondary = selectedRow ? selectedRow[otherKey] : null;
+                    // Baseline for a selected session = its other recent comparable sessions (same stroke,
+                    // same metrics), capped to the last 6 for recency — not the whole lifetime history.
+                    const baselinePrimaryVals = primaryPoints.filter((p) => p.date !== selectedComparePoint).slice(-6).map((p) => p.v);
+                    const baselineSecondaryVals = secPoints.filter((p) => p.date !== selectedComparePoint).slice(-6).map((p) => p.v);
+
+                    const trendInterp = !selectedComparePoint ? generateCompareTrendInterpretation(compareMode, primaryPoints, secPoints, INSIGHT_THRESHOLDS.mediumTermWeeks) : null;
+                    const sessionInterp = selectedRow ? generateCompareSessionInterpretation(compareMode, strokeLabel, selectedPrimary, selectedSecondary, baselinePrimaryVals, baselineSecondaryVals, primaryFmt, otherFmt) : null;
+                    const interp = selectedComparePoint ? sessionInterp : trendInterp;
                     const cat = interp ? INSIGHT_CATEGORIES[interp.category] : null;
+
+                    // Custom dot renderer: tap/click a session to make it the focus (see item 4/6).
+                    // Selected dot enlarges and lightens; every other dot dims so the selection reads
+                    // clearly, while the full trend line stays visible underneath.
+                    const makeDot = (color) => (dotProps) => {
+                      const { cx, cy, payload, index } = dotProps;
+                      if (cx == null || cy == null) return null;
+                      const isSelected = selectedComparePoint === payload.date;
+                      const isDimmed = selectedComparePoint && !isSelected;
+                      return (
+                        <circle
+                          key={`dot-${color}-${index}`}
+                          cx={cx} cy={cy}
+                          r={isSelected ? 6 : 3}
+                          fill={isSelected ? "#F5F3EE" : color}
+                          stroke={color}
+                          strokeWidth={isSelected ? 2 : 1}
+                          opacity={isDimmed ? 0.3 : 1}
+                          style={{ cursor: "pointer" }}
+                          onClick={() => setSelectedComparePoint(isSelected ? null : payload.date)}
+                        />
+                      );
+                    };
+
                     return (
                       <>
+                        {selectedRow && (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#F5F3EE" }}>Selected: {selectedRow.label}</div>
+                            <button onClick={() => setSelectedComparePoint(null)} className="pill" style={{ cursor: "pointer", background: "transparent", border: "1px solid #3a3f45", color: "#8a8f98", borderRadius: 12, padding: "3px 9px", fontSize: 11 }}>
+                              ← View overall trend
+                            </button>
+                          </div>
+                        )}
                         {interp ? (
                           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: cat.bg, border: `1px solid ${cat.color}33`, borderRadius: 14, padding: "10px 12px", marginBottom: 12 }}>
                             <cat.Icon size={14} style={{ color: cat.color, flexShrink: 0, marginTop: 1 }} />
@@ -2325,7 +2462,23 @@ function SwimmingTab({ isMobile }) {
                             </div>
                           </div>
                         ) : (
-                          <div style={{ fontSize: 11.5, color: "#6b7078", marginBottom: 12 }}>Not enough comparable sessions yet to interpret this trend — keep logging and this will fill in.</div>
+                          <div style={{ fontSize: 11.5, color: "#6b7078", marginBottom: 12 }}>
+                            {selectedComparePoint ? "Not enough other comparable sessions yet to compare this one against." : "Not enough comparable sessions yet to interpret this trend — keep logging and this will fill in."}
+                          </div>
+                        )}
+                        {selectedRow && selectedPrimary != null && selectedSecondary != null && (
+                          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 12 }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Selected session</div>
+                              <div style={{ fontSize: 13, color: "#F5F3EE" }}>{primaryLabel} {primaryFmt(selectedPrimary)} &nbsp; {otherLabel} {otherFmt(selectedSecondary)}</div>
+                            </div>
+                            {baselinePrimaryVals.length >= 2 && baselineSecondaryVals.length >= 2 && (
+                              <div>
+                                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Recent baseline</div>
+                                <div style={{ fontSize: 13, color: "#9a9fa6" }}>{primaryLabel} {primaryFmt(medianOf(baselinePrimaryVals))} &nbsp; {otherLabel} {otherFmt(medianOf(baselineSecondaryVals))}</div>
+                              </div>
+                            )}
+                          </div>
                         )}
                         <ResponsiveContainer width="100%" height={220}>
                           <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -2335,12 +2488,12 @@ function SwimmingTab({ isMobile }) {
                             <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
                             <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                             <Legend wrapperStyle={{ fontSize: 11 }} />
-                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={makeDot("#56CCF2")} connectNulls />
+                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={makeDot(otherColor)} connectNulls />
                           </LineChart>
                         </ResponsiveContainer>
                         <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 8 }}>
-                          Chart lines are normalized (σ) purely so {primaryLabel.toLowerCase()} and {otherLabel.toLowerCase()} — different units and scales — can be read on one shared axis; real values are in the tooltip, and the interpretation above is based on your actual session data, not this normalization. {primaryLabel} is flipped so "up" always means better {primaryLabel.toLowerCase()}.
+                          Tap a dot to focus on that session. Chart lines are normalized (σ) purely so {primaryLabel.toLowerCase()} and {otherLabel.toLowerCase()} — different units and scales — can be read on one shared axis; real values are in the tooltip, and the interpretation above is based on your actual session data, not this normalization. {primaryLabel} is flipped so "up" always means better {primaryLabel.toLowerCase()}.
                         </div>
                       </>
                     );
