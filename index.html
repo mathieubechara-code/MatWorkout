@@ -2401,7 +2401,7 @@ function SwimmingTab({ isMobile }) {
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {[["cadence", "Pace + Stroke Rate", "#56CCF2"], ["dps", "Pace + Stroke Distance", "#9CCC65"], ["hr", "Pace + HR", "#E63946"], ["swolfhr", "SWOLF + HR", "#BB86FC"]].map(([v, l, c]) => (
-                  <button key={v} onClick={() => { setCompareMode(v); setSelectedComparePoint(null); }} className="pill" style={{
+                  <button key={v} onClick={() => setCompareMode(v)} className="pill" style={{
                     cursor: "pointer", background: compareMode === v ? c : `${c}1a`,
                     border: `1.5px solid ${compareMode === v ? c : c + "55"}`,
                     color: compareMode === v ? "#0c0d10" : c,
