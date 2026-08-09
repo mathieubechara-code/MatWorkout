@@ -1033,9 +1033,32 @@ function SwimmingTab({ isMobile }) {
           {overlaySelector}
           {showHR ? (
             pairedCount < 2 ? (
-              <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
-                Not enough data to compare pace against HR yet — this needs at least 2 swims with HR recorded (currently {pairedCount}). Switch to "Week" or log another HR-tracked swim.
-              </div>
+              pairedCount === 0 ? (
+                <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
+                  No sessions yet with both pace and HR recorded — log an HR-tracked swim to see this comparison.
+                </div>
+              ) : (
+                <>
+                  {/* Only 1 data point: nothing to normalize against, but a single point can't
+                      falsely imply a trend either way, so just show it plainly on its real
+                      units rather than hiding it. */}
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+                      <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+                      <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+                      <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />
+                      <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v, name) => (name === "Pace" ? [fmtPace100(v), name] : [v != null ? `${Math.round(v)} bpm` : "—", name])} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                      <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
+                    Only 1 session with HR so far, shown here on raw scales. Log one more HR-tracked swim and this switches to the normalized (σ) view, which is what actually lets you compare pace and HR trends against each other.
+                  </div>
+                </>
+              )
             ) : (
             <>
               <ResponsiveContainer width="100%" height={220}>
@@ -1121,12 +1144,40 @@ function SwimmingTab({ isMobile }) {
     ).length;
 
     if (!hrStats || !anyStrokeHasStats || pairedCount < 2) {
+      if (pairedCount === 0 || !hrStats || !anyStrokeHasStats) {
+        return (
+          <div>
+            {overlaySelector}
+            <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
+              No sessions yet with both {metricLabel} and HR recorded — log an HR-tracked swim to see this comparison.
+            </div>
+          </div>
+        );
+      }
+      // Exactly 1 paired session: nothing to normalize against, but a single point can't
+      // falsely imply a trend either way, so show it plainly on raw units instead of hiding it.
+      const rawTooltipFormatter = (v, name) => (name === "Avg HR" ? [v != null ? `${Math.round(v)} bpm` : "—", name] : [baseFormatter(v), name]);
       return (
         <div>
           {overlaySelector}
-          <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
-            Not enough data to compare {metricLabel} against HR yet — this needs at least 2 sessions with both recorded (currently {pairedCount}). Switch to "Week" or log another HR-tracked swim.
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
+              <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+              <YAxis yAxisId="main" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />
+              <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={rawTooltipFormatter} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {strokesToShow.map((stroke) => (
+                <Line key={stroke} yAxisId="main" type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 4 }} connectNulls />
+              ))}
+              <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
+            Only 1 session with HR so far, shown here on raw scales. Log one more HR-tracked swim and this switches to the normalized (σ) view above, which is what actually lets you compare {metricLabel} and HR trends against each other.
           </div>
+          {strokeCaption}
         </div>
       );
     }
