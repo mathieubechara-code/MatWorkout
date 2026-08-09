@@ -2126,9 +2126,12 @@ function SwimmingTab({ isMobile }) {
               strokeDistanceStats above for exactly how these are computed. */}
           {strokeDistanceStats.length > 0 && (
             <div style={cardStyle}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
                 <TrendingUp size={13} color="#56CCF2" />
                 <div style={{ ...labelStyle, marginBottom: 0 }}>Distance by swim type</div>
+              </div>
+              <div style={{ fontSize: 10.5, color: "#5a5f66", marginBottom: 12 }}>
+                % share of your total distance across all strokes, last 6 weeks
               </div>
               <div style={{ display: "grid", gap: 14 }}>
                 {strokeDistanceStats.map(({ stroke, latest, sixWeekTotal, pct }) => (
@@ -2137,7 +2140,7 @@ function SwimmingTab({ isMobile }) {
                       <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                         <span style={{ width: 8, height: 8, borderRadius: 4, background: SWIM_STROKE_COLORS[stroke], flexShrink: 0 }} />
                         <span style={{ fontSize: 12.5, color: "#c9cdd3" }}>{SWIM_STROKE_LABELS[stroke]}</span>
-                        <span className="mono" style={{ fontSize: 10.5, color: "#6b7078" }}>{pct != null ? `${pct.toFixed(0)}%` : "—"}</span>
+                        <span className="mono" style={{ fontSize: 10.5, color: "#6b7078" }} title="Share of total distance across all strokes, last 6 weeks">{pct != null ? `${pct.toFixed(0)}%` : "—"}</span>
                       </div>
                       <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
                         <div style={{ textAlign: "right" }}>
@@ -2237,25 +2240,6 @@ function SwimmingTab({ isMobile }) {
                     borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
                   }}
                 >6-wk avg</button>
-                {allStrokesSeen.length > 0 && (
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {["all", ...allStrokesSeen].map((s) => {
-                      // Part 2: every swim-type slicer button uses that stroke's own color from
-                      // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
-                      // selected state (solid fill) vs. a tinted, low-contrast unselected state —
-                      // reused verbatim (same colors) everywhere else in the Swim tab.
-                      const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
-                      const selected = strokeFilter === s;
-                      return (
-                        <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
-                          cursor: "pointer", background: selected ? color : `${color}1a`,
-                          border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
-                          borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
-                        }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
-                      );
-                    })}
-                  </div>
-                )}
                 {metricCards.length > 0 && (
                   <button onClick={toggleExpandAllMetrics} className="pill" style={{
                     display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
@@ -2270,6 +2254,28 @@ function SwimmingTab({ isMobile }) {
                 )}
               </div>
             </div>
+            {/* Swim-type filter — floating/sticky so it's reachable without scrolling back up
+                to the card header, even after expanding a chart further down (Day/Week and
+                6-wk avg stay put above, since those apply card-wide rather than per-chart). */}
+            {allStrokesSeen.length > 0 && (
+              <div style={{ position: "sticky", top: 8, zIndex: 2, display: "flex", gap: 4, flexWrap: "wrap", background: "#14161a", padding: "4px 0", marginBottom: 10 }}>
+                {["all", ...allStrokesSeen].map((s) => {
+                  // Part 2: every swim-type slicer button uses that stroke's own color from
+                  // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
+                  // selected state (solid fill) vs. a tinted, low-contrast unselected state —
+                  // reused verbatim (same colors) everywhere else in the Swim tab.
+                  const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
+                  const selected = strokeFilter === s;
+                  return (
+                    <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
+                      cursor: "pointer", background: selected ? color : `${color}1a`,
+                      border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
+                      borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
+                    }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
+                  );
+                })}
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 10 }}>
               {metricCards.map((card) => {
                 const isOpen = expandedMetrics.has(card.key);
@@ -3356,6 +3362,20 @@ function TrainingLog() {
     try { const res = await window.storage.get(key, false); return res && res.value ? res.value : ""; } catch (_) { return ""; }
   };
 
+  // Swim sessions are read straight from storage here too, for the same reason as the
+  // settings above: the Swimming (Dashboard) tab keeps its own copy of this data in its own
+  // component state and writes length-by-length edits (stroke reclassification, exclude/include,
+  // distance corrections) straight to storage — it never updates this component's `swimSessions`
+  // state. Exporting from `swimSessions` directly would silently drop any edit made in the
+  // Swimming tab unless the page happened to be reloaded since. Reading SWIM_KEY fresh guarantees
+  // the export always reflects the latest saved edits, no matter which tab was visited last.
+  const readSwimSessionsFresh = async () => {
+    try {
+      const res = await window.storage.get(SWIM_KEY, false);
+      return res && res.value ? JSON.parse(res.value) : (swimSessions || []);
+    } catch (_) { return swimSessions || []; }
+  };
+
   const exportJSON = async () => {
     let payload, suffix;
     const workoutSettings = {
@@ -3367,9 +3387,10 @@ function TrainingLog() {
       weightTargetSettings: await readSettingJSON(WEIGHT_TARGET_KEY),
     };
     const swimTargetSettings = await readSettingJSON("swim-target-settings-v1");
+    const freshSwimSessions = viewMode === "workout" ? null : await readSwimSessionsFresh();
     if (viewMode === "workout") { payload = { sessions, settings: workoutSettings }; suffix = "workout"; }
-    else if (viewMode === "swim") { payload = { swimSessions: swimSessions || [], settings: { swimTargetSettings } }; suffix = "swim"; }
-    else { payload = { sessions, swimSessions: swimSessions || [], settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
+    else if (viewMode === "swim") { payload = { swimSessions: freshSwimSessions, settings: { swimTargetSettings } }; suffix = "swim"; }
+    else { payload = { sessions, swimSessions: freshSwimSessions, settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
