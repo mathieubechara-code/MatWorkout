@@ -2258,7 +2258,7 @@ function SwimmingTab({ isMobile }) {
                 to the card header, even after expanding a chart further down (Day/Week and
                 6-wk avg stay put above, since those apply card-wide rather than per-chart). */}
             {allStrokesSeen.length > 0 && (
-              <div style={{ position: "sticky", top: 8, zIndex: 2, display: "flex", gap: 4, flexWrap: "wrap", background: "#14161a", padding: "4px 0", marginBottom: 10 }}>
+              <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", gap: 4, flexWrap: "wrap", background: "#14161a", padding: "4px 0", marginBottom: 10 }}>
                 {["all", ...allStrokesSeen].map((s) => {
                   // Part 2: every swim-type slicer button uses that stroke's own color from
                   // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
@@ -2377,7 +2377,7 @@ function SwimmingTab({ isMobile }) {
               </div>
             )}
             {allStrokesSeen.length > 0 && (
-              <div style={{ position: "sticky", top: 8, zIndex: 2, display: "flex", gap: 4, flexWrap: "wrap", background: "#14161a", padding: "4px 0", marginBottom: 10 }}>
+              <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", gap: 4, flexWrap: "wrap", background: "#14161a", padding: "4px 0", marginBottom: 10 }}>
                 {["all", ...allStrokesSeen].map((s) => {
                   const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
                   const selected = strokeFilter === s;
