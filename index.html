@@ -563,6 +563,16 @@ const SWIM_STROKE_NAMES = { 0: "freestyle", 1: "backstroke", 2: "breaststroke", 
 // person manually reclassifying a length in the Session detail table (kickboard work reads
 // as a normal stroke to the watch, so it has to be corrected after the fact).
 const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", breaststroke: "Breaststroke", butterfly: "Butterfly", drill: "Drill", mixed: "Mixed", im: "IM", unknown: "Unknown", kick_free: "Board Kick (Freestyle)", kick_frog: "Board Kick (Frog)" };
+
+// Short "why this comparison matters" captions for the Compare chart's mode selector. Kept to
+// one line each, no statistical language — the point is orientation before the user reads the
+// chart, not an explanation of the underlying math.
+const COMPARE_MODE_DESCRIPTIONS = {
+  cadence: "Speed vs turnover — see whether you're getting faster by increasing stroke rate.",
+  dps: "Speed vs efficiency — see whether you're getting faster by covering more distance per stroke.",
+  hr: "Speed vs effort — see whether you're getting faster without your heart rate climbing.",
+  swolfhr: "Efficiency vs effort — see whether your stroke efficiency is improving without more cardiovascular strain.",
+};
 const SWIM_STROKE_COLORS = { freestyle: "#56CCF2", backstroke: "#BB86FC", breaststroke: "#F2994A", butterfly: "#E63946", drill: "#9CCC65", mixed: "#F2C94C", im: "#2EC4B6", unknown: "#6b7078", kick_free: "#7FDDEE", kick_frog: "#F4B183" };
 // Rough plausibility ceilings for avg swimming cadence (strokes/min) per stroke type — used
 // only to flag likely sensor glitches, never to silently drop data outside this filter.
@@ -2147,6 +2157,7 @@ function SwimmingTab({ isMobile }) {
                 ))}
               </div>
             </div>
+            <div style={{ fontSize: 11.5, color: "#8a8f98", marginTop: -6, marginBottom: 12 }}>{COMPARE_MODE_DESCRIPTIONS[compareMode]}</div>
             {(() => {
               if (!activeStroke) return <div style={{ fontSize: 12, color: "#6b7078" }}>No stroke data yet.</div>;
               const modeCfg = {
