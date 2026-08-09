@@ -748,6 +748,48 @@ function processSwimFit(parsed, fileName) {
   };
 }
 
+// Sessions parsed before per-stroke pace was added to processSwimFit have strokeStats
+// objects missing the `pace100` field (avgSwolf/avgCadence/avgDistPerStroke were already
+// there). Rather than requiring a re-upload of the original .FIT file, recompute it from
+// the session's own stored `lengths` — the same grouping logic processSwimFit uses at
+// parse time. Returns the session unchanged if nothing needs backfilling.
+function backfillSwimSessionStrokeStats(session) {
+  if (!session || !session.strokeStats || !session.lengths) return session;
+  const strokes = Object.keys(session.strokeStats);
+  const needsBackfill = strokes.some((k) => session.strokeStats[k] && session.strokeStats[k].pace100 == null);
+  if (!needsBackfill) return session;
+
+  const validActive = session.lengths.filter((l) => l.lengthType === "active" && !l.glitch);
+  const groups = {};
+  validActive.forEach((l) => {
+    if (!groups[l.stroke]) groups[l.stroke] = { timeSec: 0, lengthCount: 0 };
+    groups[l.stroke].timeSec += l.elapsedSec;
+    groups[l.stroke].lengthCount += 1;
+  });
+
+  const nextStrokeStats = {};
+  strokes.forEach((stroke) => {
+    const existing = session.strokeStats[stroke];
+    const g = groups[stroke];
+    const strokeDistance = g && session.poolLength != null ? g.lengthCount * session.poolLength : null;
+    const recomputedPace100 = g && g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null;
+    nextStrokeStats[stroke] = { ...existing, pace100: existing.pace100 != null ? existing.pace100 : recomputedPace100 };
+  });
+  return { ...session, strokeStats: nextStrokeStats };
+}
+
+// Runs the backfill across a whole session list. Returns { sessions, changed } so callers
+// can decide whether to write the backfilled data back to storage.
+function backfillSwimSessions(list) {
+  let changed = false;
+  const next = (list || []).map((s) => {
+    const fixed = backfillSwimSessionStrokeStats(s);
+    if (fixed !== s) changed = true;
+    return fixed;
+  });
+  return { sessions: next, changed };
+}
+
 // Clean numeric formatter for chart axes/tooltips: caps decimals at maxDecimals, strips
 // trailing zeros, and never shows raw floating-point noise like 82.34999999999.
 const fmtNum = (v, maxDecimals = 2) => {
@@ -799,7 +841,10 @@ function SwimmingTab({ isMobile }) {
     (async () => {
       try {
         const res = await window.storage.get(SWIM_KEY, false);
-        setSessions(res && res.value ? JSON.parse(res.value) : []);
+        const raw = res && res.value ? JSON.parse(res.value) : [];
+        const { sessions: fixed, changed } = backfillSwimSessions(raw);
+        setSessions(fixed);
+        if (changed) { try { await window.storage.set(SWIM_KEY, JSON.stringify(fixed), false); } catch (_) {} }
       } catch (e) {
         setSessions([]);
       }
@@ -1766,7 +1811,10 @@ function TrainingLog() {
     (async () => {
       try {
         const res = await window.storage.get(SWIM_KEY, false);
-        setSwimSessions(res && res.value ? JSON.parse(res.value) : []);
+        const raw = res && res.value ? JSON.parse(res.value) : [];
+        const { sessions: fixed, changed } = backfillSwimSessions(raw);
+        setSwimSessions(fixed);
+        if (changed) { try { await window.storage.set(SWIM_KEY, JSON.stringify(fixed), false); } catch (_) {} }
       } catch (e) {
         setSwimSessions([]);
       }
