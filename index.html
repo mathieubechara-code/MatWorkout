@@ -1240,7 +1240,19 @@ function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel
   const deduped = candidates.filter((c) => !(hasBigStory && (c.id === "latest-strong")));
 
   deduped.sort((a, b) => a.priority - b.priority);
-  return deduped.slice(0, 3);
+  const top = deduped.slice(0, 3);
+  if (top.length === 0) {
+    // There IS comparable data for this stroke (we got past the paceSeries.length < 2 check
+    // above), it just hasn't cleared any individual insight's threshold yet — an honest
+    // "still building" state, not the same as "no data at all".
+    return [{
+      id: "baseline", category: "insufficient", priority: 99, confidence: "n/a",
+      title: "Building your baseline",
+      message: `You have ${paceSeries.length} comparable ${strokeLabel.toLowerCase()} session${paceSeries.length === 1 ? "" : "s"} logged so far — not quite enough yet to call a meaningful trend. Keep logging and Insights will fill in here.`,
+      metrics: [],
+    }];
+  }
+  return top;
 }
 
 function SwimmingTab({ isMobile }) {
@@ -1923,14 +1935,10 @@ function SwimmingTab({ isMobile }) {
 
           {/* Streak — small, secondary to PR */}
           <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: "10px 16px", marginBottom: 18 }}>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
               <div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#56CCF2" }}>{streak.weekStreak}</div>
                 <div style={{ fontSize: 10, color: "#9a9fa6" }}>Week streak</div>
-              </div>
-              <div>
-                <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{streak.dayStreak}</div>
-                <div style={{ fontSize: 10, color: "#9a9fa6" }}>Day streak</div>
               </div>
               <div>
                 <div className="disp" style={{ fontSize: 18, fontWeight: 700, color: "#F5F3EE" }}>{streak.totalSessions}</div>
@@ -2107,16 +2115,17 @@ function SwimmingTab({ isMobile }) {
             </div>
           </div>
 
-          {/* Compare — new, optional Pace+StrokeRate / Pace+StrokeDistance overlay. Additive to
-              the Trends chart above, not a replacement. Reuses the same z-score normalization
-              approach as the Pace/HR overlay in Trends (see expandedChartFor) so two
-              differently-scaled metrics can be read on one axis without one visually dominating
-              the other. Respects the current stroke filter and Day/Week toggle. */}
+          {/* Compare — optional metric overlays (Pace+StrokeRate, Pace+StrokeDistance, Pace+HR,
+              SWOLF+HR). Additive to the Trends chart above, not a replacement. Reuses the same
+              z-score normalization approach as the Pace/HR overlay in Trends (see
+              expandedChartFor) so two differently-scaled metrics can be read on one axis without
+              one visually dominating the other. Respects the current stroke filter and Day/Week
+              toggle. HR-based modes are always whole-session (HR isn't recorded per-stroke). */}
           <div style={cardStyle}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               <div style={{ ...labelStyle, marginBottom: 0 }}>Compare</div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {[["cadence", "Pace + Stroke Rate"], ["dps", "Pace + Stroke Distance"]].map(([v, l]) => (
+                {[["cadence", "Pace + Stroke Rate"], ["dps", "Pace + Stroke Distance"], ["hr", "Pace + HR"], ["swolfhr", "SWOLF + HR"]].map(([v, l]) => (
                   <button key={v} onClick={() => setCompareMode(v)} className="pill" style={{
                     cursor: "pointer", background: compareMode === v ? "#23262d" : "transparent",
                     border: "1px solid " + (compareMode === v ? "#3a3f45" : "#23262d"),
@@ -2128,46 +2137,69 @@ function SwimmingTab({ isMobile }) {
             </div>
             {(() => {
               if (!activeStroke) return <div style={{ fontSize: 12, color: "#6b7078" }}>No stroke data yet.</div>;
-              const otherKey = compareMode === "cadence" ? `cadence_${activeStroke}` : `dps_${activeStroke}`;
-              const otherLabel = compareMode === "cadence" ? "Stroke rate" : "Distance/stroke";
-              const otherFmt = compareMode === "cadence" ? (v) => `${fmtNum(v, 1)} spm` : (v) => `${fmtNum(v, 2)}m`;
-              const paceStats = computeMeanStd(trendDataView.map((d) => d[paceDataKey]));
+              const modeCfg = {
+                cadence:  { primary: "pace",  secLabel: "Stroke rate",     secFmt: (v) => `${fmtNum(v, 1)} spm`, secKey: `cadence_${activeStroke}`, secColor: "#F2C94C", wholeSession: false },
+                dps:      { primary: "pace",  secLabel: "Distance/stroke", secFmt: (v) => `${fmtNum(v, 2)}m`,    secKey: `dps_${activeStroke}`,     secColor: "#F2C94C", wholeSession: false },
+                hr:       { primary: "pace",  secLabel: "Avg HR",          secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR",                  secColor: "#E63946", wholeSession: true },
+                swolfhr:  { primary: "swolf", secLabel: "Avg HR",          secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR",                  secColor: "#E63946", wholeSession: true },
+              };
+              const cfg = modeCfg[compareMode];
+              const primaryKey = cfg.primary === "pace" ? paceDataKey : `swolf_${activeStroke}`;
+              const primaryLabel = cfg.primary === "pace" ? "Pace" : "SWOLF";
+              const primaryFmt = cfg.primary === "pace" ? fmtPace100 : (v) => Math.round(v);
+              const otherKey = cfg.secKey, otherLabel = cfg.secLabel, otherFmt = cfg.secFmt, otherColor = cfg.secColor;
+              const strokeLabel = SWIM_STROKE_LABELS[activeStroke];
+
+              if (cfg.wholeSession && !trendDataView.some((d) => d.avgHR != null)) {
+                return <div style={{ padding: "20px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5 }}>No heart rate data recorded yet.</div>;
+              }
+
+              const primaryStats = computeMeanStd(trendDataView.map((d) => d[primaryKey]));
               const otherStats = computeMeanStd(trendDataView.map((d) => d[otherKey]));
-              const pairedCount = trendDataView.filter((d) => d[paceDataKey] != null && d[otherKey] != null).length;
+              const pairedCount = trendDataView.filter((d) => d[primaryKey] != null && d[otherKey] != null).length;
               const normalizedData = trendDataView.map((d) => ({
                 ...d,
-                paceZ: paceStats ? (() => { const z = zScoreOf(d[paceDataKey], paceStats); return z == null ? null : -z; })() : null,
+                // Pace and SWOLF are both "lower is better", so both get sign-flipped the same
+                // way the existing Pace/HR chart flips pace — "up" always means better here.
+                primaryZ: primaryStats ? (() => { const z = zScoreOf(d[primaryKey], primaryStats); return z == null ? null : -z; })() : null,
                 otherZ: otherStats ? zScoreOf(d[otherKey], otherStats) : null,
               }));
-              const strokeLabel = SWIM_STROKE_LABELS[activeStroke];
               const zTooltipFormatter = (v, name, props) => {
-                if (name === "Pace") return [fmtPace100(props.payload[paceDataKey]), name];
+                if (name === primaryLabel) return [props.payload[primaryKey] != null ? primaryFmt(props.payload[primaryKey]) : "—", name];
                 if (name === otherLabel) return [props.payload[otherKey] != null ? otherFmt(props.payload[otherKey]) : "—", name];
                 return [v, name];
               };
+
               return (
                 <div>
-                  <div style={{ fontSize: 10.5, color: "#6b7078", marginBottom: 10 }}>
-                    {strokeLabel}{strokeFilter === "all" && " — your primary stroke shown; this session set contains multiple swim types, use the filter above to narrow"}
+                  <div style={{ fontSize: 10.5, color: "#6b7078", marginBottom: 10, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                    <span>{strokeLabel}</span>
+                    {strokeFilter === "all" && (
+                      <span style={{ color: "#F2994A", display: "flex", alignItems: "center", gap: 4 }}>
+                        <AlertTriangle size={11} style={{ flexShrink: 0 }} />
+                        your primary stroke shown; this session set contains multiple swim types, use the filter above to narrow
+                      </span>
+                    )}
+                    {cfg.wholeSession && strokeFilter !== "all" && <span style={{ color: "#5a5f66" }}>· HR is whole-session, not stroke-specific</span>}
                   </div>
                   {pairedCount < 2 ? (
                     pairedCount === 0 ? (
                       <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>
-                        No sessions yet with both pace and {otherLabel.toLowerCase()} recorded for {strokeLabel.toLowerCase()}.
+                        No sessions yet with both {primaryLabel.toLowerCase()} and {otherLabel.toLowerCase()} recorded for {strokeLabel.toLowerCase()}.
                       </div>
                     ) : (
                       <>
                         {(() => {
-                          const only = trendDataView.find((d) => d[paceDataKey] != null && d[otherKey] != null) || trendDataView[0];
+                          const only = trendDataView.find((d) => d[primaryKey] != null && d[otherKey] != null) || trendDataView[0];
                           return (
                             <div style={{ display: "flex", gap: 28, padding: "18px 4px 8px" }}>
                               <div>
-                                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pace</div>
-                                <div style={{ fontSize: 21, fontWeight: 700, color: "#56CCF2" }}>{fmtPace100(only[paceDataKey])}</div>
+                                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>{primaryLabel}</div>
+                                <div style={{ fontSize: 21, fontWeight: 700, color: "#56CCF2" }}>{only[primaryKey] != null ? primaryFmt(only[primaryKey]) : "—"}</div>
                               </div>
                               <div>
                                 <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>{otherLabel}</div>
-                                <div style={{ fontSize: 21, fontWeight: 700, color: "#F2C94C" }}>{only[otherKey] != null ? otherFmt(only[otherKey]) : "—"}</div>
+                                <div style={{ fontSize: 21, fontWeight: 700, color: otherColor }}>{only[otherKey] != null ? otherFmt(only[otherKey]) : "—"}</div>
                               </div>
                             </div>
                           );
@@ -2184,13 +2216,13 @@ function SwimmingTab({ isMobile }) {
                         <ReferenceLine y={0} stroke="#3a3f45" strokeDasharray="2 2" />
                         <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                         <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Line type="monotone" dataKey="paceZ" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                        <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke="#F2C94C" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
                   <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 8 }}>
-                    Both lines are shown as standard deviations from their own average (σ) so pace and {otherLabel.toLowerCase()} — different units and scales — can be read on one axis; real values are in the tooltip. Pace is flipped so "up" always means faster, matching "up" for {otherLabel.toLowerCase()}.
+                    Both lines are shown as standard deviations from their own average (σ) so {primaryLabel.toLowerCase()} and {otherLabel.toLowerCase()} — different units and scales — can be read on one axis; real values are in the tooltip. {primaryLabel} is flipped so "up" always means better {primaryLabel.toLowerCase()} — watch whether {otherLabel.toLowerCase()} rises and falls with it.
                   </div>
                 </div>
               );
