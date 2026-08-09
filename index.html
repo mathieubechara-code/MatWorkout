@@ -1039,23 +1039,28 @@ function SwimmingTab({ isMobile }) {
                 </div>
               ) : (
                 <>
-                  {/* Only 1 data point: nothing to normalize against, but a single point can't
-                      falsely imply a trend either way, so just show it plainly on its real
-                      units rather than hiding it. */}
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
-                      <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-                      <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                      <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />
-                      <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={(v, name) => (name === "Pace" ? [fmtPace100(v), name] : [v != null ? `${Math.round(v)} bpm` : "—", name])} />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                      <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                    </LineChart>
-                  </ResponsiveContainer>
-                  <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
-                    Only 1 session with HR so far, shown here on raw scales. Log one more HR-tracked swim and this switches to the normalized (σ) view, which is what actually lets you compare pace and HR trends against each other.
+                  {/* Only 1 data point: a chart isn't meaningful here — with a single value,
+                      each axis centers it at 50% height independent of the other, so two dots
+                      always land on the same pixel row regardless of the real numbers. That's
+                      a coincidence of a lone-point domain, not a real relationship. Just show
+                      the two values directly instead of implying a comparison that isn't there. */}
+                  {(() => {
+                    const only = trendDataView.find((d) => d.pace100 != null && d.avgHR != null) || trendDataView[0];
+                    return (
+                      <div style={{ display: "flex", gap: 28, padding: "18px 4px 8px" }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pace</div>
+                          <div style={{ fontSize: 21, fontWeight: 700, color: "#56CCF2" }}>{fmtPace100(only.pace100)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Avg HR</div>
+                          <div style={{ fontSize: 21, fontWeight: 700, color: "#E63946" }}>{only.avgHR != null ? `${Math.round(only.avgHR)} bpm` : "—"}</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>
+                    Log one more HR-tracked swim to see pace and HR actually plotted against each other.
                   </div>
                 </>
               )
@@ -1154,28 +1159,34 @@ function SwimmingTab({ isMobile }) {
           </div>
         );
       }
-      // Exactly 1 paired session: nothing to normalize against, but a single point can't
-      // falsely imply a trend either way, so show it plainly on raw units instead of hiding it.
-      const rawTooltipFormatter = (v, name) => (name === "Avg HR" ? [v != null ? `${Math.round(v)} bpm` : "—", name] : [baseFormatter(v), name]);
+      // Exactly 1 paired session: a chart isn't meaningful here — with a single value, each
+      // axis centers it at 50% height independent of the other, so the dots always land on
+      // the same pixel row regardless of the real numbers. That's a coincidence of a lone-point
+      // domain, not a real relationship. Just show the values directly instead.
+      const only = trendDataView.find(
+        (d) => d.avgHR != null && strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null)
+      ) || trendDataView[0];
       return (
         <div>
           {overlaySelector}
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
-              <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-              <YAxis yAxisId="main" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 2", "dataMax + 2"]} />
-              <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10.5 }} domain={["dataMin - 5", "dataMax + 5"]} />
-              <Tooltip contentStyle={{ background: "#101214", border: "1px solid #2a2e33", borderRadius: 8, fontSize: 12 }} formatter={rawTooltipFormatter} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              {strokesToShow.map((stroke) => (
-                <Line key={stroke} yAxisId="main" type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 4 }} connectNulls />
-              ))}
-              <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 4 }} connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
-          <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
-            Only 1 session with HR so far, shown here on raw scales. Log one more HR-tracked swim and this switches to the normalized (σ) view above, which is what actually lets you compare {metricLabel} and HR trends against each other.
+          <div style={{ display: "flex", gap: 28, flexWrap: "wrap", padding: "18px 4px 8px" }}>
+            {strokesToShow.map((stroke) => {
+              const raw = only[`${dataKeyPrefix}${stroke}`];
+              if (raw == null) return null;
+              return (
+                <div key={stroke}>
+                  <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>{SWIM_STROKE_LABELS[stroke]}</div>
+                  <div style={{ fontSize: 21, fontWeight: 700, color: SWIM_STROKE_COLORS[stroke] }}>{baseFormatter(raw)}</div>
+                </div>
+              );
+            })}
+            <div>
+              <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Avg HR</div>
+              <div style={{ fontSize: 21, fontWeight: 700, color: "#E63946" }}>{only.avgHR != null ? `${Math.round(only.avgHR)} bpm` : "—"}</div>
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>
+            Log one more HR-tracked swim to see {metricLabel} and HR actually plotted against each other.
           </div>
           {strokeCaption}
         </div>
