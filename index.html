@@ -1143,13 +1143,12 @@ function SwimmingTab({ isMobile }) {
     strokesToShow.forEach((stroke) => {
       strokeStatsMap[stroke] = computeMeanStd(trendDataView.map((d) => d[`${dataKeyPrefix}${stroke}`]));
     });
-    const anyStrokeHasStats = strokesToShow.some((stroke) => strokeStatsMap[stroke] != null);
     const pairedCount = trendDataView.filter(
       (d) => d.avgHR != null && strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null)
     ).length;
 
-    if (!hrStats || !anyStrokeHasStats || pairedCount < 2) {
-      if (pairedCount === 0 || !hrStats || !anyStrokeHasStats) {
+    if (pairedCount < 2) {
+      if (pairedCount === 0) {
         return (
           <div>
             {overlaySelector}
