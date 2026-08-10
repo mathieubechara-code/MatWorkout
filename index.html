@@ -2462,6 +2462,60 @@ function SwimmingTab({ isMobile }) {
 
           {swimSection === "dashboard" && (
             <>
+          {/* Insights — rule-based, deterministic interpretation of your swim data. No AI, no
+              network calls: every line below is generated locally from data already computed
+              above (trendData / chronSessions). See buildSwimInsights and its generator
+              functions near the top of the file. */}
+          <div style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+              <Sparkles size={13} color="#F2C94C" />
+              <div style={{ ...labelStyle, marginBottom: 0 }}>Insights</div>
+            </div>
+            {(() => {
+              const strokeLabel = activeStroke ? SWIM_STROKE_LABELS[activeStroke] : "Swim";
+              const swimInsights = buildSwimInsights({
+                chronSessions, trendData, activeStroke, strokeLabel, todayStr,
+                strokeFilterActive: strokeFilter !== "all",
+              });
+              if (swimInsights.length === 0) {
+                return <div style={{ fontSize: 12.5, color: "#6b7078" }}>Log a swim to start seeing insights here.</div>;
+              }
+              return (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {swimInsights.map((ins) => {
+                    const cat = INSIGHT_CATEGORIES[ins.category];
+                    return (
+                      <div key={ins.id} style={{
+                        background: cat.bg, borderLeft: `3px solid ${cat.color}`, borderRadius: 10,
+                        padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start",
+                      }}>
+                        <cat.Icon size={16} color={cat.color} style={{ flexShrink: 0, marginTop: 1 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE" }}>{ins.title}</span>
+                            <span className="mono" style={{ fontSize: 9, color: cat.color, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>{cat.label}</span>
+                          </div>
+                          <div style={{ fontSize: 12.5, color: "#c9cdd3", lineHeight: 1.5 }}>{ins.message}</div>
+                          {ins.metrics.length > 0 && (
+                            <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                              {ins.metrics.map((m, i) => (
+                                <div key={i} className="mono" style={{ fontSize: 10.5, color: "#8a8f98" }}>
+                                  {m.label.toUpperCase()} <span style={{ color: "#F5F3EE", fontWeight: 700 }}>{m.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+            </>
+          )}
+
           {/* PR card — top, matching the Workout tab's emphasis on PRs first */}
           <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
@@ -2552,60 +2606,6 @@ function SwimmingTab({ isMobile }) {
                 ))}
               </div>
             </div>
-          )}
-
-          {/* Insights — rule-based, deterministic interpretation of your swim data. No AI, no
-              network calls: every line below is generated locally from data already computed
-              above (trendData / chronSessions). See buildSwimInsights and its generator
-              functions near the top of the file. */}
-          <div style={cardStyle}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-              <Sparkles size={13} color="#F2C94C" />
-              <div style={{ ...labelStyle, marginBottom: 0 }}>Insights</div>
-            </div>
-            {(() => {
-              const strokeLabel = activeStroke ? SWIM_STROKE_LABELS[activeStroke] : "Swim";
-              const swimInsights = buildSwimInsights({
-                chronSessions, trendData, activeStroke, strokeLabel, todayStr,
-                strokeFilterActive: strokeFilter !== "all",
-              });
-              if (swimInsights.length === 0) {
-                return <div style={{ fontSize: 12.5, color: "#6b7078" }}>Log a swim to start seeing insights here.</div>;
-              }
-              return (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {swimInsights.map((ins) => {
-                    const cat = INSIGHT_CATEGORIES[ins.category];
-                    return (
-                      <div key={ins.id} style={{
-                        background: cat.bg, borderLeft: `3px solid ${cat.color}`, borderRadius: 10,
-                        padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start",
-                      }}>
-                        <cat.Icon size={16} color={cat.color} style={{ flexShrink: 0, marginTop: 1 }} />
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE" }}>{ins.title}</span>
-                            <span className="mono" style={{ fontSize: 9, color: cat.color, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>{cat.label}</span>
-                          </div>
-                          <div style={{ fontSize: 12.5, color: "#c9cdd3", lineHeight: 1.5 }}>{ins.message}</div>
-                          {ins.metrics.length > 0 && (
-                            <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-                              {ins.metrics.map((m, i) => (
-                                <div key={i} className="mono" style={{ fontSize: 10.5, color: "#8a8f98" }}>
-                                  {m.label.toUpperCase()} <span style={{ color: "#F5F3EE", fontWeight: 700 }}>{m.value}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-            </>
           )}
 
           {swimSection === "trends" && (
@@ -2762,19 +2762,19 @@ function SwimmingTab({ isMobile }) {
                 stroke up there filters this chart too without a second, easy-to-miss control
                 down here. */}
             {(() => {
-              if (!activeStroke) return <div style={{ fontSize: 12, color: "#6b7078" }}>No stroke data yet.</div>;
+              const compareStroke = strokeFilter === "all" ? null : activeStroke;
               const modeCfg = {
-                cadence:  { primary: "pace",  secLabel: "Stroke rate",     secFmt: (v) => `${fmtNum(v, 1)} spm`, secKey: `cadence_${activeStroke}`, secColor: "#F2C94C", wholeSession: false },
-                dps:      { primary: "pace",  secLabel: "Distance/stroke", secFmt: (v) => `${fmtNum(v, 2)}m`,    secKey: `dps_${activeStroke}`,     secColor: "#F2C94C", wholeSession: false },
-                hr:       { primary: "pace",  secLabel: "Avg HR",          secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR",                  secColor: "#E63946", wholeSession: true },
-                swolfhr:  { primary: "swolf", secLabel: "Avg HR",          secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR",                  secColor: "#E63946", wholeSession: true },
+                cadence:  { primary: "pace", secLabel: "Stroke rate", secFmt: (v) => `${fmtNum(v, 1)} spm`, secKey: strokeFilter === "all" ? "cadence_all" : `cadence_${compareStroke}`, secColor: "#F2C94C", wholeSession: false },
+                dps:      { primary: "pace", secLabel: "Distance/stroke", secFmt: (v) => `${fmtNum(v, 2)}m`, secKey: strokeFilter === "all" ? "dps_all" : `dps_${compareStroke}`, secColor: "#F2C94C", wholeSession: false },
+                hr:       { primary: "pace", secLabel: "Avg HR", secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR", secColor: "#E63946", wholeSession: true },
+                swolfhr:  { primary: strokeFilter === "all" ? "swolf_all" : `swolf_${compareStroke}`, secLabel: "Avg HR", secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR", secColor: "#E63946", wholeSession: true },
               };
               const cfg = modeCfg[compareMode];
-              const primaryKey = cfg.primary === "pace" ? paceDataKey : `swolf_${activeStroke}`;
+              const primaryKey = cfg.primary === "pace" ? paceDataKey : cfg.primary;
               const primaryLabel = cfg.primary === "pace" ? "Pace" : "SWOLF";
               const primaryFmt = cfg.primary === "pace" ? fmtPace100 : (v) => Math.round(v);
               const otherKey = cfg.secKey, otherLabel = cfg.secLabel, otherFmt = cfg.secFmt, otherColor = cfg.secColor;
-              const strokeLabel = SWIM_STROKE_LABELS[activeStroke];
+              const strokeLabel = strokeFilter === "all" ? "All swim types" : SWIM_STROKE_LABELS[activeStroke];
 
               if (cfg.wholeSession && !trendDataView.some((d) => d.avgHR != null)) {
                 return <div style={{ padding: "20px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5 }}>No heart rate data recorded yet.</div>;
@@ -2800,12 +2800,7 @@ function SwimmingTab({ isMobile }) {
                 <div>
                   <div style={{ fontSize: 10.5, color: "#6b7078", marginBottom: 10, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                     <span>{strokeLabel}</span>
-                    {strokeFilter === "all" && (
-                      <span style={{ color: "#F2994A", display: "flex", alignItems: "center", gap: 4 }}>
-                        <AlertTriangle size={11} style={{ flexShrink: 0 }} />
-                        your primary stroke shown; this session set contains multiple swim types, use the filter above to narrow
-                      </span>
-                    )}
+                    {strokeFilter === "all" && <span style={{ color: "#6b7078" }}>· all applicable swim types are aggregated</span>}
                     {cfg.wholeSession && strokeFilter !== "all" && <span style={{ color: "#5a5f66" }}>· HR is whole-session, not stroke-specific</span>}
                   </div>
                   {pairedCount < 2 ? (
@@ -2938,7 +2933,7 @@ function SwimmingTab({ isMobile }) {
                             {/* Keep the primary series visually dominant and make the secondary
                                 series dashed/translucent so identical or near-identical values remain
                                 distinguishable without modifying the underlying data. */}
-                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} strokeOpacity={0.78} strokeDasharray="6 4" dot={makeDot(otherColor)} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
+                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2.4} strokeOpacity={0.58} dot={makeDot(otherColor)} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
                             <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2.2} strokeOpacity={0.95} dot={makeDot("#56CCF2")} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
                           </LineChart>
                         </ResponsiveContainer>
@@ -3022,383 +3017,6 @@ function SwimmingTab({ isMobile }) {
             </>
           )}
 
-          {/* Session detail — the length-by-length drill-down. Always visible, outside the tab
-              switcher above (item 2) — this is where CSS-test flagging happens, so it needs to
-              stay reachable regardless of which of the three tabs is selected. History & Log
-              has a lighter summary list of the same sessions. */}
-          <div style={cardStyle}>
-            <div style={{ ...labelStyle, marginBottom: 2 }}>Session detail</div>
-            <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 12 }}>Full length-by-length breakdown, glitch flags, and CSS annotations — for a quick summary list instead, see History &amp; Log.</div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {sortedSessions.map((s) => {
-                const isOpen = expandedId === s.id;
-                return (
-                  <div key={s.id} style={{ border: "1px solid #22262b", borderRadius: 16, overflow: "hidden" }}>
-                    <div onClick={() => setExpandedId(isOpen ? null : s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", cursor: "pointer", background: "#0c0d10", flexWrap: "wrap", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                        <ChevronDown size={14} style={{ color: "#6b7078", flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE", display: "flex", alignItems: "center", gap: 6 }}>
-                            {fmtDateFull(s.date)}
-                            <span className="mono" style={{ fontSize: 9.5, color: s.isCssTest ? "#2EC4B6" : "#56CCF2", border: `1px solid ${s.isCssTest ? "#2EC4B6" : "#56CCF2"}55`, borderRadius: 5, padding: "1px 5px" }}>{categoryLabelOf(s)}</span>
-                            {s.qualityNote && <AlertTriangle size={12} style={{ color: "#F2994A" }} title={s.qualityNote} />}
-                          </div>
-                          <div className="mono" style={{ fontSize: 11, color: "#6b7078" }}>{s.fileName}</div>
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
-                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{s.distance != null ? `${s.distance}m` : "—"}</div><div style={{ color: "#6b7078", fontSize: 10 }}>distance</div></div>
-                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{fmtMinSec(s.swimTimeSec)}</div><div style={{ color: "#6b7078", fontSize: 10 }}>swim time</div></div>
-                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{s.calories != null ? s.calories : "—"}</div><div style={{ color: "#6b7078", fontSize: 10 }}>kcal</div></div>
-                      </div>
-                    </div>
-                    {isOpen && (
-                      <div style={{ padding: "12px 14px", borderTop: "1px solid #1d2024" }}>
-                        {s.qualityNote && (
-                          <div style={{ fontSize: 11.5, color: "#F2994A", background: "#F2994A14", border: "1px solid #F2994A33", borderRadius: 12, padding: "8px 10px", marginBottom: 10 }}>{s.qualityNote}</div>
-                        )}
-                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 8, fontSize: 12 }}>
-                          <div>
-                            <div style={{ color: "#6b7078", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}>
-                              Distance
-                              <Pencil size={10} style={{ cursor: "pointer", color: "#5a5f66" }} onClick={(e) => { e.stopPropagation(); setEditingDistanceFor(s.id); setDistanceDraft(String(s.distance != null ? s.distance : "")); }} />
-                            </div>
-                            <div className="mono" style={{ color: "#c9cdd3" }}>{s.distance != null ? `${s.distance}m` : "—"}</div>
-                            {s.distanceCorrection && <div style={{ fontSize: 9.5, color: "#5a5f66" }}>was {s.distanceCorrection.originalDistance}m (FIT-derived)</div>}
-                          </div>
-                          <div><div style={{ color: "#6b7078", fontSize: 10 }}>Pool length</div><div className="mono" style={{ color: "#c9cdd3" }}>{s.poolLength != null ? `${s.poolLength}m` : "—"}</div></div>
-                          <div><div style={{ color: "#6b7078", fontSize: 10 }}>Avg pace</div><div className="mono" style={{ color: "#c9cdd3" }}>{fmtPace100(s.pace100Overall)}</div></div>
-                          <div><div style={{ color: "#6b7078", fontSize: 10 }}>Avg HR</div><div className="mono" style={{ color: "#c9cdd3" }}>{s.avgHR != null ? `${s.avgHR} bpm` : "—"}</div></div>
-                          <div><div style={{ color: "#6b7078", fontSize: 10 }}>Rest time</div><div className="mono" style={{ color: "#c9cdd3" }}>{fmtMinSec(s.restTimeSec)}</div></div>
-                        </div>
-                        {editingDistanceFor === s.id && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 10, padding: "8px 10px", marginBottom: 12 }} onClick={(e) => e.stopPropagation()}>
-                            <span style={{ fontSize: 11, color: "#8a8f98" }}>Correct distance to</span>
-                            <input type="number" step="0.01" value={distanceDraft} onChange={(e) => setDistanceDraft(e.target.value)} className="mono" style={{ width: 90, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 6, padding: "4px 8px", color: "#E8E6E1", fontSize: 12 }} autoFocus />
-                            <span style={{ fontSize: 11, color: "#8a8f98" }}>m</span>
-                            <button onClick={() => correctDistance(s.id)} style={{ cursor: "pointer", background: "#56CCF2", color: "#0c0d10", border: "none", borderRadius: 6, padding: "5px 10px", fontWeight: 700, fontSize: 11 }}>Save</button>
-                            <button onClick={() => setEditingDistanceFor(null)} style={{ cursor: "pointer", background: "transparent", color: "#9a9fa6", border: "1px solid #2a2e33", borderRadius: 6, padding: "5px 10px", fontWeight: 600, fontSize: 11 }}>Cancel</button>
-                            {s.distanceCorrection && <button onClick={() => { resetDistanceCorrection(s.id); setEditingDistanceFor(null); }} style={{ cursor: "pointer", background: "transparent", color: "#E63946", border: "1px solid #E6394655", borderRadius: 6, padding: "5px 10px", fontWeight: 600, fontSize: 11 }}>Reset to FIT value</button>}
-                            <div style={{ fontSize: 10, color: "#5a5f66", width: "100%" }}>Pace, PRs, and all charts recalculate from the corrected distance — swim time stays as recorded.</div>
-                          </div>
-                        )}
-
-                        {/* Activity analysis: pace over the full session, filterable by swim
-                            type, with HR overlaid where it's genuinely meaningful (in-session
-                            effort context) — real per-length data, not aggregated trends.
-                            X-axis is cumulative elapsed time (not distance), so rest breaks
-                            and other-stroke segments actually take up real width instead of
-                            being invisible gaps between adjacent points. */}
-                        {(() => {
-                          const sessionStrokes = Object.keys(s.strokeStats || {});
-                          // Effective view: original data with the person's corrections applied,
-                          // excluded lengths dropped entirely — matches computeSwimSessionMetrics
-                          // exactly, so this chart's timeline never disagrees with the numbers above it.
-                          const effLengths = s.lengths.filter((l) => !l.userExcluded).map(effectiveLength);
-                          const activeLengths = effLengths.filter((l) => l.lengthType === "active");
-                          if (activeLengths.length < 2) return null;
-                          const currentFilter = activityStrokeFilter[s.id] || "all";
-
-                          // Walk every (non-excluded) length in original order (active + idle)
-                          // building [start,end] time windows, so rest and off-filter segments
-                          // have a real position/width on the chart instead of just vanishing.
-                          let cumTime = 0;
-                          const segments = effLengths.map((l) => {
-                            const start = cumTime;
-                            cumTime += l.elapsedSec;
-                            return { ...l, start, end: cumTime };
-                          });
-
-                          const restBands = segments.filter((l) => l.lengthType === "idle" && l.end > l.start);
-                          const otherStrokeBands = currentFilter === "all"
-                            ? []
-                            : segments.filter((l) => l.lengthType === "active" && l.stroke !== currentFilter && l.end > l.start);
-
-                          const chartData = segments
-                            .filter((l) => l.lengthType === "active")
-                            .map((l) => ({
-                              x: l.end,
-                              pace100: (currentFilter === "all" || l.stroke === currentFilter) ? l.pace100 : null,
-                              avgHR: l.avgHR,
-                            }));
-                          const hasAnyHR = chartData.some((d) => d.avgHR != null);
-
-                          return (
-                            <div style={{ marginBottom: 12 }}>
-                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
-                                <div style={{ fontSize: 11, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.04em" }}>Pace over this session</div>
-                                {sessionStrokes.length > 1 && (
-                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                                    {["all", ...sessionStrokes].map((st) => (
-                                      <button key={st} onClick={(e) => { e.stopPropagation(); setActivityStrokeFilter((prev) => ({ ...prev, [s.id]: st })); }} className="pill" style={{
-                                        cursor: "pointer", background: currentFilter === st ? "#22262b" : "transparent",
-                                        border: "1px solid " + (currentFilter === st ? "#3a3f45" : "#22262b"), color: currentFilter === st ? "#F5F3EE" : "#8a8f98",
-                                        borderRadius: 7, padding: "3px 8px", fontSize: 10.5, fontWeight: 600,
-                                      }}>{st === "all" ? "All" : SWIM_STROKE_LABELS[st]}</button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              {(restBands.length > 0 || otherStrokeBands.length > 0) && (
-                                <div style={{ display: "flex", gap: 12, fontSize: 10, color: "#8a8f98", marginBottom: 6 }}>
-                                  {restBands.length > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#3a3f4599", display: "inline-block" }} /> rest</span>}
-                                  {otherStrokeBands.length > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#F2C94C33", display: "inline-block" }} /> other stroke</span>}
-                                </div>
-                              )}
-                              <ResponsiveContainer width="100%" height={160}>
-                                <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="#22262b" />
-                                  <XAxis dataKey="x" type="number" domain={[0, cumTime]} tick={{ fill: "#6b7078", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} />
-                                  <YAxis yAxisId="pace" tick={{ fill: "#6b7078", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                                  {hasAnyHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#6b7078", fontSize: 10 }} domain={["dataMin - 5", "dataMax + 5"]} />}
-                                  <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => (name === "Avg HR" ? [v != null ? `${Math.round(v)} bpm` : "—", name] : [fmtPace100(v), name])} labelFormatter={(v) => `${fmtMinSec(v)} elapsed`} />
-                                  {restBands.map((b, i) => (<ReferenceArea key={`rest-${i}`} yAxisId="pace" x1={b.start} x2={b.end} fill="#3a3f45" fillOpacity={0.4} strokeWidth={0} />))}
-                                  {otherStrokeBands.map((b, i) => (<ReferenceArea key={`other-${i}`} yAxisId="pace" x1={b.start} x2={b.end} fill={SWIM_STROKE_COLORS[b.stroke] || "#F2C94C"} fillOpacity={0.14} strokeWidth={0} />))}
-                                  <Line yAxisId="pace" type="monotone" dataKey="pace100" name="Pace" stroke="#56CCF2" strokeWidth={2} dot={{ r: 2.5 }} connectNulls={false} />
-                                  {hasAnyHR && <Line yAxisId="hr" type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 2 }} connectNulls />}
-                                </LineChart>
-                              </ResponsiveContainer>
-                              {!hasAnyHR && <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>No HR recorded in this activity.</div>}
-                            </div>
-                          );
-                        })()}
-
-                        {s.reps && s.reps.length > 0 && (
-                          <div style={{ marginBottom: 12 }}>
-                            <div
-                              onClick={(e) => { e.stopPropagation(); setOpenRepsFor((o) => ({ ...o, [s.id]: !o[s.id] })); }}
-                              style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}
-                            >
-                              <ChevronDown size={12} style={{ transform: openRepsFor[s.id] ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
-                              Reps / sets
-                            </div>
-                            {openRepsFor[s.id] && (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                                  {s.reps.map((r, i) => {
-                                    const pick = cssRepPick[s.id] || {};
-                                    const isShort = pick.short === i, isLong = pick.long === i;
-                                    const picked = isShort || isLong;
-                                    return (
-                                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                                        <span className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${picked ? "#2EC4B6" : (SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6") + "33"}` }}>
-                                          {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
-                                        </span>
-                                        <button onClick={(e) => { e.stopPropagation(); pickCssRep(s.id, "short", i); }} title="Use as CSS short split" style={{ cursor: "pointer", fontSize: 9.5, padding: "3px 6px", borderRadius: 5, background: isShort ? "#2EC4B6" : "transparent", color: isShort ? "#0c0d10" : "#6b7078", border: "1px solid #2EC4B655", fontWeight: 700, minHeight: 22 }}>short</button>
-                                        <button onClick={(e) => { e.stopPropagation(); pickCssRep(s.id, "long", i); }} title="Use as CSS long split" style={{ cursor: "pointer", fontSize: 9.5, padding: "3px 6px", borderRadius: 5, background: isLong ? "#2EC4B6" : "transparent", color: isLong ? "#0c0d10" : "#6b7078", border: "1px solid #2EC4B655", fontWeight: 700, minHeight: 22 }}>long</button>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                                <div style={{ fontSize: 10, color: "#5a5f66" }}>Tap <b>short</b>/<b>long</b> on two reps (e.g. your 200m and 400m efforts) to compute CSS from them directly — no manual time entry needed.</div>
-                                {cssRepPick[s.id] && (cssRepPick[s.id].short != null || cssRepPick[s.id].long != null) && (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 10.5, color: "#8a8f98" }}>
-                                    <span>
-                                      Picked: {cssRepPick[s.id].short != null ? `${s.reps[cssRepPick[s.id].short].distance}m` : "—"} + {cssRepPick[s.id].long != null ? `${s.reps[cssRepPick[s.id].long].distance}m` : "—"}
-                                    </span>
-                                    <button
-                                      disabled={cssRepPick[s.id].short == null || cssRepPick[s.id].long == null}
-                                      onClick={(e) => { e.stopPropagation(); applyCssRepPick(s.id); }}
-                                      style={{ cursor: "pointer", background: "#2EC4B6", color: "#0c0d10", border: "none", borderRadius: 6, padding: "4px 9px", fontWeight: 700, fontSize: 10.5, opacity: (cssRepPick[s.id].short == null || cssRepPick[s.id].long == null) ? 0.4 : 1 }}
-                                    >Save as CSS test</button>
-                                    <button onClick={(e) => { e.stopPropagation(); clearCssPick(s.id); }} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 6, padding: "4px 9px", fontWeight: 600, fontSize: 10.5 }}>Clear pick</button>
-                                  </div>
-                                )}
-                                {s.isCssTest && (
-                                  <button onClick={(e) => { e.stopPropagation(); unmarkCssTest(s.id); }} style={{ cursor: "pointer", alignSelf: "flex-start", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 6, padding: "4px 9px", fontWeight: 600, fontSize: 10.5 }}>Unmark as CSS test</button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        <div style={{ marginBottom: 12 }}>
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setOpenLengthsFor((o) => ({ ...o, [s.id]: !o[s.id] })); }}
-                            style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 11, color: "#8a8f98", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em", userSelect: "none" }}
-                          >
-                            <ChevronDown size={12} style={{ transform: openLengthsFor[s.id] ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
-                            Length by length
-                          </div>
-                          {openLengthsFor[s.id] && (
-                            <>
-                              <div style={{ fontSize: 10, color: "var(--text-faint, #5a5f66)", marginBottom: 8, lineHeight: 1.5 }}>
-                                You're in control here: nothing is ever removed or changed automatically. ⚠ marks a length the app thinks looks off (kept in your totals either way) — tap <b>Exclude</b> if it's wrong, <b>Include</b> to undo. Tap a stroke to relabel it, or flip a row between Active/Idle.
-                              </div>
-                              <div style={{ overflowX: "auto" }}>
-                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-                                  <thead>
-                                    <tr style={{ borderBottom: "1px solid var(--border, #22262b)" }}>
-                                      <th style={{ textAlign: "left", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600 }}>#</th>
-                                      <th style={{ textAlign: "left", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600 }}>Type</th>
-                                      <th style={{ textAlign: "left", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600 }}>Stroke</th>
-                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600 }}>Time</th>
-                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600 }}>Strokes</th>
-                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600 }}>Cadence</th>
-                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600 }}>SWOLF</th>
-                                      <th style={{ textAlign: "right", padding: "6px 8px", color: "var(--text-dimmer, #6b7078)", fontWeight: 600, position: "sticky", right: 0, background: "var(--card, #0c0d10)" }}>Status</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {s.lengths.map((l) => {
-                                      const eff = effectiveLength(l);
-                                      const excluded = !!l.userExcluded;
-                                      const rowStyle = {
-                                        background: excluded ? "transparent" : (l.glitch ? "#F2994A14" : "transparent"),
-                                        opacity: excluded ? 0.45 : 1,
-                                        borderTop: "1px solid var(--border, #1d2024)",
-                                      };
-                                      // Strike-through communicates "excluded" on the data cells only — it must
-                                      // never land on the actions column, or the "Include" button label itself
-                                      // reads as struck through.
-                                      const dataCellStyle = { textDecoration: excluded ? "line-through" : "none" };
-                                      const showActivePicker = idleToActiveFor && idleToActiveFor.sessionId === s.id && idleToActiveFor.lengthIndex === l.index;
-                                      return (
-                                        <React.Fragment key={l.index}>
-                                        <tr style={rowStyle}>
-                                          <td className="mono" style={{ padding: "5px 8px", color: "var(--text-dimmer, #6b7078)", ...dataCellStyle }}>{l.index + 1}</td>
-                                          <td style={{ padding: "5px 8px", color: eff.lengthType === "idle" ? "var(--text-dimmer, #6b7078)" : "var(--text-dim, #c9cdd3)", ...dataCellStyle }}>
-                                            {eff.lengthType}{l.glitch && !excluded ? " ⚠" : ""}{eff.isOverridden ? " ✎" : ""}
-                                          </td>
-                                          <td style={{ padding: "5px 8px", ...dataCellStyle }}>
-                                            {eff.lengthType === "active" ? (
-                                              <select
-                                                value={EDITABLE_SWIM_STROKES.includes(eff.stroke) ? eff.stroke : "__other__"}
-                                                onChange={(e) => updateLengthStroke(s.id, l.index, e.target.value)}
-                                                onClick={(e) => e.stopPropagation()}
-                                                disabled={excluded}
-                                                className="mono"
-                                                style={{ background: "var(--bg, #0c0d10)", border: "1px solid var(--border-2, #2a2e33)", borderRadius: 6, padding: "4px 6px", fontSize: 16, color: SWIM_STROKE_COLORS[eff.stroke] || "var(--text-dim, #c9cdd3)", cursor: excluded ? "default" : "pointer", minHeight: 28, maxWidth: 118 }}
-                                              >
-                                                {!EDITABLE_SWIM_STROKES.includes(eff.stroke) && (
-                                                  <option value="__other__" disabled>{SWIM_STROKE_LABELS[eff.stroke] || eff.stroke}</option>
-                                                )}
-                                                {EDITABLE_SWIM_STROKES.map((opt) => (
-                                                  <option key={opt} value={opt}>{SWIM_STROKE_LABELS[opt]}</option>
-                                                ))}
-                                              </select>
-                                            ) : "—"}
-                                          </td>
-                                          <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #c9cdd3)", ...dataCellStyle }}>{l.elapsedSec.toFixed(1)}s</td>
-                                          <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #c9cdd3)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.totalStrokes : "—"}</td>
-                                          <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #c9cdd3)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.avgCadence : "—"}</td>
-                                          <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #c9cdd3)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.swolf : "—"}</td>
-                                          <td style={{ padding: "5px 4px", textAlign: "right", position: "sticky", right: 0, background: l.glitch && !excluded ? "#1a1712" : "var(--card, #0c0d10)" }} onClick={(e) => e.stopPropagation()}>
-                                            <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                                              {eff.isOverridden && !excluded && (
-                                                <button onClick={() => resetLengthOverrides(s.id, l.index)} title="Revert to original" style={lenBtnStyle("neutral")}>Revert</button>
-                                              )}
-                                              {!excluded && eff.lengthType === "active" && (
-                                                <button onClick={() => markLengthIdle(s.id, l.index)} style={lenBtnStyle("neutral")}>Mark idle</button>
-                                              )}
-                                              {!excluded && eff.lengthType === "idle" && (
-                                                <button onClick={() => setIdleToActiveFor({ sessionId: s.id, lengthIndex: l.index })} style={lenBtnStyle("neutral")}>Mark active</button>
-                                              )}
-                                              <button onClick={() => toggleExcludeLength(s.id, l.index)} style={lenBtnStyle(excluded ? "positive" : "negative")}>
-                                                {excluded ? "Include" : "Exclude"}
-                                              </button>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                        {showActivePicker && (
-                                          <tr>
-                                            <td colSpan={8} style={{ padding: "10px 8px", background: "var(--card-2, #191c21)", borderTop: "1px solid var(--border-2, #2b2e36)" }} onClick={(e) => e.stopPropagation()}>
-                                              <div style={{ fontSize: 11, color: "var(--text-dim, #9a9fa6)", marginBottom: 8 }}>Length {l.index + 1}: pick a swim type to mark it Active</div>
-                                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                                {EDITABLE_SWIM_STROKES.map((opt) => (
-                                                  <button
-                                                    key={opt}
-                                                    onClick={() => { markLengthActive(s.id, l.index, opt); setIdleToActiveFor(null); }}
-                                                    style={{ cursor: "pointer", background: `${SWIM_STROKE_COLORS[opt]}1f`, color: SWIM_STROKE_COLORS[opt], border: `1px solid ${SWIM_STROKE_COLORS[opt]}55`, borderRadius: 8, padding: "8px 12px", fontWeight: 700, fontSize: 12, minHeight: 36 }}
-                                                  >
-                                                    {SWIM_STROKE_LABELS[opt]}
-                                                  </button>
-                                                ))}
-                                                <button onClick={() => setIdleToActiveFor(null)} style={{ cursor: "pointer", background: "transparent", color: "var(--text-dim, #9a9fa6)", border: "1px solid var(--border-2, #2a2e33)", borderRadius: 8, padding: "8px 12px", fontWeight: 600, fontSize: 12, minHeight: 36 }}>Cancel</button>
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        )}
-                                        </React.Fragment>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                              {s.lengths.some((l) => l.glitch && !l.userExcluded) && (
-                                <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #6b7078)", marginTop: 6 }}>⚠ rows may be sensor glitches (phantom lengths / implausible cadence) — they're still counted in your totals above. Review and Exclude any that are wrong.</div>
-                              )}
-                            </>
-                          )}
-                        </div>
-
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          {s.isCssTest && s.cssTest && (
-                            <span className="mono" style={{ fontSize: 11.5, color: "#2EC4B6" }}>CSS pace: {fmtPace100(s.cssTest.pace100)} ({s.cssTest.cssSpeed.toFixed(2)} m/s)</span>
-                          )}
-                          <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 12, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function TrainingLog() {
-  const [sessions, setSessions] = useState(null);
-  const [tab, setTab] = useState("dashboard");
-  const [filter, setFilter] = useState("All");
-  const [metric, setMetric] = useState("reps");
-  const [range, setRange] = useState("all");
-  const [timeView, setTimeView] = useState("day"); // "day" (per session) or "week" (aggregated)
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [confirmDeleteAllScope, setConfirmDeleteAllScope] = useState(null); // null | "workout" | "swim" | "all"
-  const [trackedExercises, setTrackedExercises] = useState([]);
-  const [customExercises, setCustomExercises] = useState([]);
-  const [ownerName, setOwnerName] = useState("");
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState("");
-  const [showAddExercise, setShowAddExercise] = useState(false);
-  const [addExDraft, setAddExDraft] = useState({ name: "", group: "Pull", ratio: "1.0", target: "" });
-  const [draft, setDraft] = useState(() => emptyDraft([]));
-  const [pasteText, setPasteText] = useState("");
-  const [parseNote, setParseNote] = useState("");
-  const [unmatchedNames, setUnmatchedNames] = useState([]);
-  const [selectedCompare, setSelectedCompare] = useState([]);
-  const [showCompare, setShowCompare] = useState(false);
-  const [importMsg, setImportMsg] = useState("");
-  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 560 : false);
-  const [targetSettings, setTargetSettings] = useState(null); // { startDate, weeks } — null until loaded, then falls back to defaults
-  const [editingTarget, setEditingTarget] = useState(false);
-  const [targetDraft, setTargetDraft] = useState({ startDate: "", weeks: "12" });
-  const [selectedHeatDate, setSelectedHeatDate] = useState(null);
-  const [chartFocus, setChartFocus] = useState(null);
-  const [showLibrary, setShowLibrary] = useState(false);
-  // Which exercises show up in the PR card. null = show all (default); array = only these.
-  const [prSelection, setPrSelection] = useState(null);
-  const [showPrPicker, setShowPrPicker] = useState(false);
-  // Fluid heatmap: the square size is computed from the container's actual measured width
-  // (see the effect near HEATMAP_WEEKS below) rather than a fixed pixel value, so 24 weeks
-  // always fit exactly without needing horizontal scroll/swipe on narrow phone screens.
-  const [heatmapCellSize, setHeatmapCellSize] = useState(14);
-  const heatmapGridRef = useRef(null);
-  const TARGET_KEY = "target-settings-v1";
-  const TRACKED_KEY = "tracked-exercises-v1";
-  const CUSTOM_LIB_KEY = "custom-exercises-v1";
-  const OWNER_KEY = "owner-name-v1";
-  const PR_SELECTION_KEY = "pr-selection-v1";
-  const fileInputRef = useRef(null);
-
   // ---- History & Log: Workout / Swim toggle -------------------------------------------
   // Controls which "log new session" flow shows (paste/manual form vs. .FIT upload) and
   // what the Import button expects (JSON vs. .FIT). Logging itself lives here now; the
@@ -3409,6 +3027,7 @@ function TrainingLog() {
   const [swimUploadMsg, setSwimUploadMsg] = useState("");
   const [swimMarkCss, setSwimMarkCss] = useState(false); // "Mark as CSS test" toggle at upload time
   const [pendingCssUpload, setPendingCssUpload] = useState(null); // { drafts: [...] } awaiting confirmation
+  const [expandedSwimDetailId, setExpandedSwimDetailId] = useState(null);
   const swimFileInputRef = useRef(null);
   const swimImportInputRef = useRef(null);
   const SWIM_KEY = "swim-sessions-v1";
@@ -5386,24 +5005,18 @@ function TrainingLog() {
 
             {viewMode === "swim" && (
               <div style={{ background: "#15171b", border: "1px solid #22262b", borderRadius: 22, overflow: "hidden" }}>
-                <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Swim sessions ({(swimSessions || []).length}) · full breakdown lives on the Swimming tab</div>
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid #22262b", fontSize: 13, fontWeight: 600, color: "#c9cdd3" }}>Swim sessions ({(swimSessions || []).length}) · tap a session for full breakdown</div>
                 <div style={{ maxHeight: 520, overflowY: "auto" }}>
-                  {[...(swimSessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1)).map((s, idx, arr) => (
-                    <div key={s.id} style={{ padding: "12px 16px", borderBottom: idx === arr.length - 1 ? "none" : "1px solid #1d2024", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span className="disp" style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>{fmtDate(s.date)}</span>
-                          {s.isCssTest && <span className="mono" style={{ fontSize: 9.5, color: "#2EC4B6", border: "1px solid #2EC4B655", borderRadius: 5, padding: "1px 5px" }}>CSS TEST</span>}
-                        </div>
-                        <div className="mono" style={{ fontSize: 11, color: "#6b7078" }}>{s.fileName}</div>
+                  {[...(swimSessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1)).map((s, idx, arr) => {
+                    const open = expandedSwimDetailId === s.id;
+                    return <div key={s.id} style={{ borderBottom: idx === arr.length - 1 ? "none" : "1px solid #1d2024" }}>
+                      <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", cursor: "pointer" }} onClick={() => setExpandedSwimDetailId(open ? null : s.id)}>
+                        <div style={{ minWidth: 0 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><ChevronDown size={13} style={{ color: "#6b7078", transform: open ? "rotate(180deg)" : "none" }} /><span className="disp" style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>{fmtDate(s.date)}</span><span className="mono" style={{ fontSize: 9.5, color: s.isCssTest ? "#2EC4B6" : "#56CCF2", border: `1px solid ${s.isCssTest ? "#2EC4B6" : "#56CCF2"}55`, borderRadius: 5, padding: "1px 5px" }}>{s.isCssTest ? "CSS TEST" : "WORKOUT"}</span></div><div className="mono" style={{ fontSize: 11, color: "#6b7078", marginLeft: 21 }}>{s.fileName}</div></div>
+                        <div style={{ display: "flex", gap: 16, fontSize: 12, alignItems: "center" }}><div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{s.distance != null ? `${s.distance}m` : "—"}</div><div style={{ color: "#6b7078", fontSize: 10 }}>distance</div></div><div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{fmtPace100(s.pace100Overall)}</div><div style={{ color: "#6b7078", fontSize: 10 }}>pace</div></div><Trash2 size={15} style={{ cursor: "pointer", color: "#5a5f66" }} onClick={(e) => { e.stopPropagation(); setConfirmDelete({ id: s.id, date: s.date, distance: s.distance, kind: "swim" }); }} /></div>
                       </div>
-                      <div style={{ display: "flex", gap: 16, fontSize: 12, alignItems: "center" }}>
-                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{s.distance != null ? `${s.distance}m` : "—"}</div><div style={{ color: "#6b7078", fontSize: 10 }}>distance</div></div>
-                        <div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{fmtPace100(s.pace100Overall)}</div><div style={{ color: "#6b7078", fontSize: 10 }}>pace</div></div>
-                        <Trash2 size={15} style={{ cursor: "pointer", color: "#5a5f66" }} onClick={() => setConfirmDelete({ id: s.id, date: s.date, distance: s.distance, kind: "swim" })} />
-                      </div>
-                    </div>
-                  ))}
+                      {open && <div style={{ padding: "0 16px 14px 37px", background: "#0c0d10" }}><div style={{ fontSize: 10.5, color: "#8a8f98", marginBottom: 8 }}>Session detail · lengths, flags and CSS annotation</div><div style={{ display: "grid", gap: 6 }}>{(s.lengths || []).map((l, li) => { const el = effectiveLength(l); return <div key={li} style={{ display: "grid", gridTemplateColumns: "52px 1fr 1fr 1fr", gap: 8, fontSize: 10.5, color: "#9a9fa6", padding: "6px 8px", border: "1px solid #1d2024", borderRadius: 8 }}><span className="mono">{el.distance != null ? `${el.distance}m` : "—"}</span><span>{SWIM_STROKE_LABELS[el.stroke] || el.stroke || "—"}</span><span>{el.pace100 != null ? fmtPace100(el.pace100) : "—"}</span><span>{el.swolf != null ? `SWOLF ${Math.round(el.swolf)}` : ""}{el.userExcluded ? " · excluded" : ""}</span></div>; })}</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>{s.isCssTest ? <button onClick={() => unmarkCssTest(s.id)} style={{ cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 8, padding: "5px 9px", fontSize: 10.5 }}>Unmark as CSS test</button> : <span style={{ fontSize: 10.5, color: "#6b7078" }}>Not flagged as CSS test → Workout</span>}{s.qualityNote && <span style={{ fontSize: 10.5, color: "#F2994A" }}>⚠ {s.qualityNote}</span>}</div></div>}
+                    </div>;
+                  })}
                   {(!swimSessions || swimSessions.length === 0) && <div style={{ padding: "20px 16px", fontSize: 12.5, color: "#6b7078" }}>No swim sessions logged yet — upload a .FIT file above.</div>}
                 </div>
               </div>
