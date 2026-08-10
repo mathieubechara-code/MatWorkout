@@ -2582,7 +2582,7 @@ function SwimmingTab({ isMobile, onExit }) {
             })}
           </div>
 
-          <React.Fragment key={`swim-section-${swimSection}`}>
+          <React.Fragment key={`swim-section-${swimSection}-${strokeFilter}-${categoryFilter}`}>
           {swimSection === "dashboard" && (
             <>
           {/* Insights — rule-based, deterministic interpretation of your swim data. No AI, no
@@ -2896,6 +2896,9 @@ function SwimmingTab({ isMobile, onExit }) {
               const primaryLabel = cfg.primary === "pace" ? "Pace" : "SWOLF";
               const primaryFmt = cfg.primary === "pace" ? fmtPace100 : (v) => Math.round(v);
               const otherKey = cfg.secKey, otherLabel = cfg.secLabel, otherFmt = cfg.secFmt, otherColor = cfg.secColor;
+              const comparePrimaryColor = strokeFilter === "all"
+                ? "#64D2FF"
+                : (SWIM_STROKE_COLORS[strokeFilter] || "#64D2FF");
               const strokeLabel = strokeFilter === "all" ? "All swim types" : SWIM_STROKE_LABELS[activeStroke];
 
               if (cfg.wholeSession && !trendDataView.some((d) => d.avgHR != null)) {
@@ -3062,7 +3065,7 @@ function SwimmingTab({ isMobile, onExit }) {
                                 series dashed/translucent so identical or near-identical values remain
                                 distinguishable without modifying the underlying data. */}
                             <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2.4} strokeOpacity={0.9} dot={{ r: 2.5, fill: otherColor, strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
-                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#64D2FF" strokeWidth={2.6} strokeOpacity={1} dot={{ r: 2.5, fill: "#64D2FF", strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
+                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke={comparePrimaryColor} strokeWidth={2.6} strokeOpacity={1} dot={{ r: 2.5, fill: comparePrimaryColor, strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
                           </LineChart>
                         </ResponsiveContainer>
                       </>
@@ -3120,10 +3123,10 @@ function SwimmingTab({ isMobile, onExit }) {
                         const visibleCount = radarVisibleProfile.length;
                         const locked = selected && visibleCount <= 3;
                         return (
-                          <button key={axis.key} onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} className="pill" style={{
+                          <button key={axis.key} onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} className="pill radar-axis-pill" style={{
                             cursor: locked ? "default" : "pointer", background: selected ? axis.color : `${axis.color}1a`,
                             border: `1.5px solid ${selected ? axis.color : axis.color + "55"}`, color: selected ? "#000000" : axis.color,
-                            borderRadius: 12, padding: "5px 10px", fontSize: 10.5, fontWeight: 700, opacity: locked ? 0.82 : 1,
+                            borderRadius: 8, padding: isMobile ? "3px 6px" : "4px 7px", fontSize: isMobile ? 9 : 9.6, fontWeight: 700, minHeight: isMobile ? 25 : 27, opacity: locked ? 0.82 : 1,
                           }}>{axis.label}</button>
                         );
                       })}
@@ -4694,6 +4697,15 @@ function TrainingLog() {
           color:#6E675F;
         }
 
+        @keyframes chartFilterApply {
+          from { opacity:.42; transform:scale(.996); }
+          to { opacity:1; transform:scale(1); }
+        }
+        .recharts-wrapper {
+          animation:chartFilterApply .26s ease-out;
+          transform-origin:center center;
+        }
+
         /* Shared control scale: navigation is primary, filters are secondary. */
         .app-nav-pill {
           min-height:36px !important;
@@ -4706,6 +4718,21 @@ function TrainingLog() {
         .app-nav-back {
           color:#8E8E93 !important;
         }
+        .radar-axis-pill {
+          min-height:27px !important;
+          padding:4px 7px !important;
+          font-size:9.6px !important;
+          border-radius:8px !important;
+          line-height:1.05 !important;
+        }
+        @media (max-width: 560px) {
+          .radar-axis-pill {
+            min-height:25px !important;
+            padding:3px 6px !important;
+            font-size:9px !important;
+          }
+        }
+
         @media (max-width: 560px) {
           .app-nav-pill {
             min-height:34px !important;
