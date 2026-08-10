@@ -2136,8 +2136,8 @@ function SwimmingTab({ isMobile, onExit }) {
     : (SWIM_STROKE_LABELS[strokeFilter] || strokeFilter);
   const radarBaselineColor = "#BF5AF2";
   const radarLatestColor = strokeFilter === "all"
-    ? "#FF9F0A"
-    : (SWIM_STROKE_COLORS[strokeFilter] || "#FF9F0A");
+    ? "#F5F5F7"
+    : (SWIM_STROKE_COLORS[strokeFilter] || "#F5F5F7");
 
   const radarInterpretation = (() => {
     const byKey = Object.fromEntries(radarVisibleProfile.map((a) => [a.key, a.score]));
