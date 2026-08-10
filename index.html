@@ -2169,6 +2169,15 @@ function SwimmingTab({ isMobile, onExit }) {
       perStroke: true,
       color: strokeCardColor,
     },
+    {
+      key: "css",
+      title: "Critical Swim Speed (CSS)",
+      series: cssTrendData.map((d) => d.cssPace100),
+      verdict: computeVerdict(cssTrendData.map((d) => d.cssPace100), "lower-better"),
+      value: cssTrendData.length ? fmtPace100(cssTrendData[cssTrendData.length - 1].cssPace100) : "—",
+      lowerBetter: true,
+      color: "#0A84FF",
+    },
   ];
 
   const allMetricsExpanded = metricCards.length > 0 && metricCards.every((c) => expandedMetrics.has(c.key));
@@ -2199,7 +2208,7 @@ function SwimmingTab({ isMobile, onExit }) {
             const color = s === "all" ? "#FFFFFF" : (SWIM_STROKE_COLORS[s] || "#8E8E93");
             const selected = strokeFilter === s;
             return (
-              <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
+              <button key={s} onClick={() => setStrokeFilter(s)} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? color : `${color}1a`,
                 border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#000000" : color,
                 borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
@@ -2220,7 +2229,7 @@ function SwimmingTab({ isMobile, onExit }) {
           {[["all", "All", "#FFFFFF", null], ["workout", "Workout", "#64D2FF", Dumbbell], ["csstest", "CSS Test", "#0A84FF", Target]].map(([v, l, c, Ic]) => {
             const selected = categoryFilter === v;
             return (
-              <button key={v} onClick={() => setCategoryFilter(v)} className="pill" style={{
+              <button key={v} onClick={() => setCategoryFilter(v)} className="pill swim-filter-pill" style={{
                 display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
                 background: selected ? c : `${c}1a`, border: `1.5px solid ${selected ? c : c + "55"}`,
                 color: selected ? "#000000" : c, borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
@@ -2242,7 +2251,7 @@ function SwimmingTab({ isMobile, onExit }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 10.5, color: "#636366" }}>Overlay:</span>
         {options.map((opt) => (
-          <button key={opt.value} onClick={() => setChartOverlaySel((prev) => ({ ...prev, [key]: opt.value }))} className="pill" style={{
+          <button key={opt.value} onClick={() => setChartOverlaySel((prev) => ({ ...prev, [key]: opt.value }))} className="pill swim-filter-pill" style={{
             cursor: "pointer", background: overlay === opt.value ? "#27272A" : "transparent",
             border: "1px solid " + (overlay === opt.value ? "#3A3A3C" : "#27272A"),
             color: overlay === opt.value ? "#FFFFFF" : "#8E8E93",
@@ -2295,6 +2304,28 @@ function SwimmingTab({ isMobile, onExit }) {
       );
     };
 
+    if (key === "css") {
+      if (cssTrendData.length === 0) {
+        return (
+          <div style={{ fontSize: 11.5, color: "#636366", padding: "12px 2px 4px", lineHeight: 1.45 }}>
+            No CSS test logged yet. CSS is only shown from sessions explicitly marked as CSS tests.
+          </div>
+        );
+      }
+      return (
+        <div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+              <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+              <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
     if (key === "pace") {
       return (
         <div>
@@ -2302,7 +2333,7 @@ function SwimmingTab({ isMobile, onExit }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d[paceDataKey]), "lower")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeCardColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2324,7 +2355,7 @@ function SwimmingTab({ isMobile, onExit }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d.avgHR), "neutral")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => (v != null ? `${Math.round(v)} bpm` : "—")} />
               <Line type="monotone" dataKey="avgHR" name="Avg HR" stroke="#FF453A" strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2346,10 +2377,7 @@ function SwimmingTab({ isMobile, onExit }) {
     if (!showHR) {
       // No HR overlay requested: raw values on a single axis, exactly as before — no
       // cross-metric scaling problem to solve when only one unit is on the chart.
-      const tooltipFormatter = (v, name) => [baseFormatter(v), name];
-      return (
-        <div>
-          {overlaySelector}
+      const tooltipFormatter = (v, name) => [baseFor      {overlaySelector}
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {(() => {
@@ -2363,7 +2391,7 @@ function SwimmingTab({ isMobile, onExit }) {
               {/* reversed reads METRIC_AXIS_DIRECTION — the same registry the collapsed
                   sparkline's YAxis reads above — instead of a per-branch key check, so this
                   can't quietly drift out of sync with the sparkline again (item 6). */}
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
@@ -2748,7 +2776,7 @@ function SwimmingTab({ isMobile, onExit }) {
                     {!isOpen && (pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={36}>
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                          <YAxis hide domain={["dataMin", "dataMax"]} reversed={METRIC_AXIS_DIRECTION[card.key] === "lower"} />
+                          <YAxis hide domain={["dataMin", "dataMax"]} reversed={card.key === "css" || METRIC_AXIS_DIRECTION[card.key] === "lower"} />
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
@@ -2765,24 +2793,6 @@ function SwimmingTab({ isMobile, onExit }) {
               })}
             </div>
 
-            {/* CSS trend — kept full-size since it's rare/high-signal */}
-            <div style={{ marginTop: 18 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#D1D1D6", marginBottom: 8 }}>Critical Swim Speed (CSS) over time</div>
-              {cssTrendData.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#636366", background: "#000000", border: "1px dashed #27272A", borderRadius: 16, padding: "12px 14px" }}>
-                  No CSS test logged yet. CSS isn't estimated from casual sessions — mark a session as a CSS test at upload time (in History &amp; Log) to start this chart.
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-                    <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                    <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
-                    <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
           </div>
             </>
           )}
@@ -4605,6 +4615,22 @@ function TrainingLog() {
         }
         .ui-day .swim-subnav button:not([style*="background: rgb(255, 159, 10)"]) {
           color:#6E675F;
+        }
+
+        /* Swim filters are secondary controls, intentionally smaller than navigation. */
+        .swim-filter-pill {
+          min-height: 28px !important;
+          padding: 3px 7px !important;
+          font-size: 10px !important;
+          border-radius: 9px !important;
+          line-height: 1.1 !important;
+        }
+        @media (max-width: 560px) {
+          .swim-filter-pill {
+            min-height: 27px !important;
+            padding: 3px 6px !important;
+            font-size: 9.6px !important;
+          }
         }
 
         /* Swim replaces the app-level nav while inside the Swim area. */
