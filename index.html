@@ -2976,6 +2976,13 @@ function SwimmingTab({ isMobile }) {
                   Personal performance profile — <strong style={{ color: "#c9cdd3" }}>100 = your baseline</strong>; &gt;100 = above baseline; &lt;100 = below baseline.
                 </div>
 
+                {radarInterpretation && (
+                  <div style={{ marginBottom: 12, padding: "11px 12px", border: "1px solid #2a2e33", borderRadius: 12, background: "#111216" }}>
+                    <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Profile readout</div>
+                    <div style={{ fontSize: 12, color: "#c9cdd3", lineHeight: 1.45 }}>{radarInterpretation}</div>
+                  </div>
+                )}
+
                 {radarLatestSession && (
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
                     <div><div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase" }}>Latest session</div><div className="mono" style={{ fontSize: 13, color: "#F5F3EE", fontWeight: 700 }}>{fmtDate(radarLatestSession.date)}</div></div>
@@ -3038,13 +3045,6 @@ function SwimmingTab({ isMobile }) {
                         </div>
                       ))}
                     </div>
-
-                    {radarInterpretation && (
-                      <div style={{ marginTop: 12, padding: "11px 12px", border: "1px solid #2a2e33", borderRadius: 12, background: "#111216" }}>
-                        <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Profile readout</div>
-                        <div style={{ fontSize: 12, color: "#c9cdd3", lineHeight: 1.45 }}>{radarInterpretation}</div>
-                      </div>
-                    )}
 
                     <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 10, lineHeight: 1.45 }}>
                       Display is limited to 70–130 only for the visual scale; raw calculated scores are unchanged and shown in the tooltip and values above.
