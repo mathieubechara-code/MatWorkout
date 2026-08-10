@@ -914,6 +914,30 @@ const fmtMinSec = (totalSec) => {
 };
 const fmtPace100 = (secPer100) => (secPer100 == null ? "—" : `${fmtMinSec(secPer100)}/100m`);
 
+// Editable-field counterparts to fmtMinSec/fmtPace100, used where a pace needs to be both
+// displayed AND typed back in (the CSS confirm dialog) — one decimal place of precision,
+// e.g. "1:58.2", rather than fmtMinSec's whole-second display rounding.
+const paceSecToStr = (paceSec) => {
+  if (paceSec == null || !isFinite(paceSec) || paceSec < 0) return "";
+  const m = Math.floor(paceSec / 60);
+  const rem = paceSec - m * 60;
+  return `${m}:${rem < 10 ? "0" : ""}${rem.toFixed(1)}`;
+};
+// Parses "M:SS" / "M:SS.s" back into seconds-per-100m. Also accepts a bare number of
+// seconds-per-100m (no colon), so pasting a plain figure still works.
+const paceStrToSec = (str) => {
+  if (str == null) return NaN;
+  const s = String(str).trim();
+  if (s === "") return NaN;
+  if (s.includes(":")) {
+    const [mPart, sPart] = s.split(":");
+    const m = parseFloat(mPart), sec = parseFloat(sPart);
+    if (!isFinite(m) || !isFinite(sec)) return NaN;
+    return m * 60 + sec;
+  }
+  return parseFloat(s);
+};
+
 // Length-by-length editor action buttons — deliberately sized for comfortable mobile tapping
 // (Part 8), not the tiny icon-buttons the rest of this dense table uses elsewhere.
 function lenBtnStyle(variant) {
@@ -1588,6 +1612,43 @@ function SwimmingTab({ isMobile }) {
     applyLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: false, userLengthType: null, userStroke: null }));
 
   const [idleToActiveFor, setIdleToActiveFor] = useState(null); // { sessionId, lengthIndex } — length currently prompting for a swim-type pick
+
+  // Session-detail CSS flagging: lets a person retroactively mark two of a session's own
+  // reconstructed reps (Reps/sets) as the short/long split for a CSS calculation, instead of
+  // only being able to set this at upload time. { [sessionId]: { short: repIdx, long: repIdx } }
+  const [cssRepPick, setCssRepPick] = useState({});
+
+  const pickCssRep = (sessionId, slot, repIdx) => {
+    setCssRepPick((prev) => {
+      const cur = prev[sessionId] || {};
+      return { ...prev, [sessionId]: { ...cur, [slot]: cur[slot] === repIdx ? null : repIdx } };
+    });
+  };
+
+  // Computes CSS from whichever two reps were picked, using their actual distances/times
+  // (not a hardcoded 200/400) — so it works whether the reps were exactly 200m/400m or just
+  // close to it. Stored under the same cssTest.{t200,t400} shape the rest of the app expects.
+  const applyCssRepPick = async (sessionId) => {
+    const pick = cssRepPick[sessionId];
+    const session = (sessions || []).find((s) => s.id === sessionId);
+    if (!pick || !session || pick.short == null || pick.long == null || pick.short === pick.long) return;
+    const repA = session.reps[pick.short], repB = session.reps[pick.long];
+    if (!repA || !repB) return;
+    const [shortRep, longRep] = repA.distance <= repB.distance ? [repA, repB] : [repB, repA];
+    if (longRep.distance === shortRep.distance || longRep.timeSec <= shortRep.timeSec) return;
+    const cssSpeed = (longRep.distance - shortRep.distance) / (longRep.timeSec - shortRep.timeSec);
+    const pace100 = cssSpeed > 0 ? 100 / cssSpeed : null;
+    const next = (sessions || []).map((s) => (s.id === sessionId ? { ...s, isCssTest: true, cssTest: { t200: shortRep.timeSec, t400: longRep.timeSec, cssSpeed, pace100 } } : s));
+    await persist(next);
+    setCssRepPick((prev) => { const cp = { ...prev }; delete cp[sessionId]; return cp; });
+  };
+
+  const clearCssPick = (sessionId) => setCssRepPick((prev) => ({ ...prev, [sessionId]: {} }));
+
+  const unmarkCssTest = async (sessionId) => {
+    const next = (sessions || []).map((s) => (s.id === sessionId ? { ...s, isCssTest: false, cssTest: null } : s));
+    await persist(next);
+  };
 
   const todayStr = toISODate(new Date());
 
@@ -2751,12 +2812,40 @@ function SwimmingTab({ isMobile }) {
                               Reps / sets
                             </div>
                             {openRepsFor[s.id] && (
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                                {s.reps.map((r, i) => (
-                                  <span key={i} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}33` }}>
-                                    {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
-                                  </span>
-                                ))}
+                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                  {s.reps.map((r, i) => {
+                                    const pick = cssRepPick[s.id] || {};
+                                    const isShort = pick.short === i, isLong = pick.long === i;
+                                    const picked = isShort || isLong;
+                                    return (
+                                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                                        <span className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6"}14`, color: SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6", border: `1px solid ${picked ? "#2EC4B6" : (SWIM_STROKE_COLORS[r.stroke] || "#9a9fa6") + "33"}` }}>
+                                          {r.distance}m {SWIM_STROKE_LABELS[r.stroke] || r.stroke} · {fmtMinSec(r.timeSec)}{r.pace100 != null ? ` (${fmtPace100(r.pace100)})` : ""}
+                                        </span>
+                                        <button onClick={(e) => { e.stopPropagation(); pickCssRep(s.id, "short", i); }} title="Use as CSS short split" style={{ cursor: "pointer", fontSize: 9.5, padding: "3px 6px", borderRadius: 5, background: isShort ? "#2EC4B6" : "transparent", color: isShort ? "#0c0d10" : "#6b7078", border: "1px solid #2EC4B655", fontWeight: 700, minHeight: 22 }}>short</button>
+                                        <button onClick={(e) => { e.stopPropagation(); pickCssRep(s.id, "long", i); }} title="Use as CSS long split" style={{ cursor: "pointer", fontSize: 9.5, padding: "3px 6px", borderRadius: 5, background: isLong ? "#2EC4B6" : "transparent", color: isLong ? "#0c0d10" : "#6b7078", border: "1px solid #2EC4B655", fontWeight: 700, minHeight: 22 }}>long</button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div style={{ fontSize: 10, color: "#5a5f66" }}>Tap <b>short</b>/<b>long</b> on two reps (e.g. your 200m and 400m efforts) to compute CSS from them directly — no manual time entry needed.</div>
+                                {cssRepPick[s.id] && (cssRepPick[s.id].short != null || cssRepPick[s.id].long != null) && (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 10.5, color: "#8a8f98" }}>
+                                    <span>
+                                      Picked: {cssRepPick[s.id].short != null ? `${s.reps[cssRepPick[s.id].short].distance}m` : "—"} + {cssRepPick[s.id].long != null ? `${s.reps[cssRepPick[s.id].long].distance}m` : "—"}
+                                    </span>
+                                    <button
+                                      disabled={cssRepPick[s.id].short == null || cssRepPick[s.id].long == null}
+                                      onClick={(e) => { e.stopPropagation(); applyCssRepPick(s.id); }}
+                                      style={{ cursor: "pointer", background: "#2EC4B6", color: "#0c0d10", border: "none", borderRadius: 6, padding: "4px 9px", fontWeight: 700, fontSize: 10.5, opacity: (cssRepPick[s.id].short == null || cssRepPick[s.id].long == null) ? 0.4 : 1 }}
+                                    >Save as CSS test</button>
+                                    <button onClick={(e) => { e.stopPropagation(); clearCssPick(s.id); }} style={{ cursor: "pointer", background: "transparent", border: "1px solid #2a2e33", color: "#9a9fa6", borderRadius: 6, padding: "4px 9px", fontWeight: 600, fontSize: 10.5 }}>Clear pick</button>
+                                  </div>
+                                )}
+                                {s.isCssTest && (
+                                  <button onClick={(e) => { e.stopPropagation(); unmarkCssTest(s.id); }} style={{ cursor: "pointer", alignSelf: "flex-start", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 6, padding: "4px 9px", fontWeight: 600, fontSize: 10.5 }}>Unmark as CSS test</button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2993,8 +3082,8 @@ function TrainingLog() {
     const rep200 = findRep(200);
     const rep400 = findRep(400);
     return {
-      t200: rep200 ? String(Math.round(rep200.timeSec * 10) / 10) : "",
-      t400: rep400 ? String(Math.round(rep400.timeSec * 10) / 10) : "",
+      t200: rep200 ? paceSecToStr((rep200.timeSec / rep200.distance) * 100) : "",
+      t400: rep400 ? paceSecToStr((rep400.timeSec / rep400.distance) * 100) : "",
       auto200: !!rep200,
       auto400: !!rep400,
     };
@@ -3050,7 +3139,11 @@ function TrainingLog() {
   const confirmPendingCssUpload = async () => {
     if (!pendingCssUpload) return;
     const finished = pendingCssUpload.drafts.map(({ session, t200, t400 }) => {
-      const n200 = parseFloat(t200), n400 = parseFloat(t400);
+      const pace200 = paceStrToSec(t200), pace400 = paceStrToSec(t400);
+      // t200/t400 are entered/displayed as min/100m pace; the CSS formula needs total
+      // elapsed time for the actual 200m/400m swims, so convert back here.
+      const n200 = isFinite(pace200) ? pace200 * 2 : NaN;
+      const n400 = isFinite(pace400) ? pace400 * 4 : NaN;
       if (n200 > 0 && n400 > 0 && n400 > n200) {
         const cssSpeed = (400 - 200) / (n400 - n200);
         const pace100 = cssSpeed > 0 ? 100 / cssSpeed : null;
@@ -4801,16 +4894,17 @@ function TrainingLog() {
                           <div style={{ fontSize: 12, fontWeight: 700, color: "#c9cdd3", marginBottom: 6 }}>{fmtDateFull(d.session.date)} <span className="mono" style={{ color: "#5a5f66", fontWeight: 400 }}>({d.session.fileName})</span></div>
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                             <div>
-                              <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>200m time (s) {d.auto200 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
-                              <input type="number" placeholder="e.g. 165.5" value={d.t200} onChange={(e) => updatePendingCssDraft(idx, "t200", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>200m pace (min/100m) {d.auto200 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
+                              <input type="text" inputMode="decimal" placeholder="e.g. 1:38.5" value={d.t200} onChange={(e) => updatePendingCssDraft(idx, "t200", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
                             </div>
                             <div>
-                              <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>400m time (s) {d.auto400 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
-                              <input type="number" placeholder="e.g. 345.0" value={d.t400} onChange={(e) => updatePendingCssDraft(idx, "t400", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
+                              <div style={{ fontSize: 10, color: "#5a5f66", marginBottom: 3 }}>400m pace (min/100m) {d.auto400 && <span style={{ color: "#2EC4B6" }}>· auto-detected</span>}</div>
+                              <input type="text" inputMode="decimal" placeholder="e.g. 1:26.2" value={d.t400} onChange={(e) => updatePendingCssDraft(idx, "t400", e.target.value)} className="mono" style={{ width: 130, background: "#15171b", border: "1px solid #2a2e33", borderRadius: 12, padding: "6px 8px", color: "#E8E6E1", fontSize: 12 }} />
                             </div>
                           </div>
+                          <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 4 }}>Enter pace as min:sec per 100m (e.g. 1:38.5) — this is the pace for the whole 200m/400m swim, not a single length.</div>
                           {!d.auto200 && !d.auto400 && (
-                            <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 4 }}>No matching 200m/400m reps found in this file — enter times manually, or leave blank to save as a normal session.</div>
+                            <div style={{ fontSize: 10.5, color: "#6b7078", marginTop: 4 }}>No matching 200m/400m reps found in this file — enter paces manually, or leave blank to save as a normal session.</div>
                           )}
                         </div>
                       ))}
