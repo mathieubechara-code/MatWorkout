@@ -2462,7 +2462,7 @@ function SwimmingTab({ isMobile }) {
               (item 5). Dashboard holds everything that isn't Trend or Compare (PRs, streak,
               distance breakdown, insights) — Radar keeps its own tab as before. */}
           <div style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 6, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 6, marginBottom: 14, boxShadow: "0 8px 20px -10px rgba(0,0,0,0.6)" }}>
-            {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Web Chart", RadarIcon]].map(([v, l, Ic]) => {
+            {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Radar", RadarIcon]].map(([v, l, Ic]) => {
               const selected = swimSection === v;
               return (
                 <button key={v} onClick={() => setSwimSection(v)} style={{
@@ -2532,8 +2532,6 @@ function SwimmingTab({ isMobile }) {
               );
             })()}
           </div>
-            </>
-          )}
 
           {/* PR card — top, matching the Workout tab's emphasis on PRs first */}
           <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
@@ -2625,6 +2623,8 @@ function SwimmingTab({ isMobile }) {
                 ))}
               </div>
             </div>
+          )}
+            </>
           )}
 
           {swimSection === "trends" && (
@@ -2985,7 +2985,7 @@ function SwimmingTab({ isMobile }) {
 
                 <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 8, fontSize: 10.5 }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#F2994A" }}><span style={{ width: 18, height: 3, background: "#F2994A", display: "inline-block", borderRadius: 2 }} /> Latest session</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#8a8f98" }}><span style={{ width: 18, height: 0, borderTop: "2px dashed #6b7078", display: "inline-block" }} /> 6-week baseline = 100</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#56CCF2" }}><span style={{ width: 18, height: 0, borderTop: "2px dashed #56CCF2", display: "inline-block" }} /> 6-week baseline = 100</span>
                 </div>
 
                 {radarProfile.length >= 3 && (
@@ -3017,7 +3017,7 @@ function SwimmingTab({ isMobile }) {
                         <PolarGrid stroke="#2a2e33" />
                         <PolarAngleAxis dataKey="label" tick={{ fill: "#9a9fa6", fontSize: 10.5 }} />
                         <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#5a5f66", fontSize: 9 }} axisLine={false} />
-                        <Radar name="6-week baseline" dataKey={() => 100} stroke="#6b7078" fill="#6b7078" fillOpacity={0.06} strokeDasharray="4 3" />
+                        <Radar name="6-week baseline" dataKey={() => 100} stroke="#56CCF2" strokeWidth={2} fill="#56CCF2" fillOpacity={0.07} strokeDasharray="5 4" />
                         <Radar name="Latest session" dataKey="displayValue" stroke="#F2994A" fill="#F2994A" fillOpacity={0.28} />
                         <Tooltip
                           contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 11.5 }}
