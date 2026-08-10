@@ -3144,14 +3144,14 @@ function SwimmingTab({ isMobile, onExit }) {
                   <div className="profile-readout-card" style={{
                     margin: "2px 0 16px",
                     padding: isMobile ? "15px 16px" : "16px 18px",
-                    border: "1px solid #FF9F0A66",
+                    border: `1px solid ${radarLatestColor}66`,
                     borderRadius: 18,
-                    background: "linear-gradient(135deg, #FF9F0A18 0%, #18181B 58%, #18181B 100%)",
-                    boxShadow: "inset 3px 0 0 #FF9F0A"
+                    background: `linear-gradient(135deg, ${radarLatestColor}18 0%, #18181B 58%, #18181B 100%)`,
+                    boxShadow: `inset 3px 0 0 ${radarLatestColor}`
                   }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "#FF9F0A", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: radarLatestColor, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 }}>
                           <Info size={14} /> Profile readout
                         </div>
                         <span style={{
@@ -4791,9 +4791,8 @@ function TrainingLog() {
 
         /* Radar profile readout is explicitly theme-aware. */
         .ui-day .profile-readout-card {
-          background:linear-gradient(135deg, #FFF3D9 0%, #E7DFD2 62%, #E7DFD2 100%) !important;
-          border-color:#D79A27 !important;
-          box-shadow:inset 4px 0 0 #FF9F0A !important;
+          background:#E7DFD2 !important;
+          box-shadow:none;
         }
         .ui-day .profile-readout-card .profile-readout-text {
           color:#1A1917 !important;
