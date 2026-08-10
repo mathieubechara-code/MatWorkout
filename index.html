@@ -3017,6 +3017,60 @@ function SwimmingTab({ isMobile }) {
             </>
           )}
 
+        </>
+      )}
+    </div>
+  );
+}
+
+function TrainingLog() {
+  const [sessions, setSessions] = useState(null);
+  const [tab, setTab] = useState("dashboard");
+  const [filter, setFilter] = useState("All");
+  const [metric, setMetric] = useState("reps");
+  const [range, setRange] = useState("all");
+  const [timeView, setTimeView] = useState("day"); // "day" (per session) or "week" (aggregated)
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmDeleteAllScope, setConfirmDeleteAllScope] = useState(null); // null | "workout" | "swim" | "all"
+  const [trackedExercises, setTrackedExercises] = useState([]);
+  const [customExercises, setCustomExercises] = useState([]);
+  const [ownerName, setOwnerName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [showAddExercise, setShowAddExercise] = useState(false);
+  const [addExDraft, setAddExDraft] = useState({ name: "", group: "Pull", ratio: "1.0", target: "" });
+  const [draft, setDraft] = useState(() => emptyDraft([]));
+  const [pasteText, setPasteText] = useState("");
+  const [parseNote, setParseNote] = useState("");
+  const [unmatchedNames, setUnmatchedNames] = useState([]);
+  const [selectedCompare, setSelectedCompare] = useState([]);
+  const [showCompare, setShowCompare] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 560 : false);
+  const [targetSettings, setTargetSettings] = useState(null); // { startDate, weeks } — null until loaded, then falls back to defaults
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [targetDraft, setTargetDraft] = useState({ startDate: "", weeks: "12" });
+  const [selectedHeatDate, setSelectedHeatDate] = useState(null);
+  const [chartFocus, setChartFocus] = useState(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  // Which exercises show up in the PR card. null = show all (default); array = only these.
+  const [prSelection, setPrSelection] = useState(null);
+  const [showPrPicker, setShowPrPicker] = useState(false);
+  // Fluid heatmap: the square size is computed from the container's actual measured width
+  // (see the effect near HEATMAP_WEEKS below) rather than a fixed pixel value, so 24 weeks
+  // always fit exactly without needing horizontal scroll/swipe on narrow phone screens.
+  const [heatmapCellSize, setHeatmapCellSize] = useState(14);
+  const heatmapGridRef = useRef(null);
+  const TARGET_KEY = "target-settings-v1";
+  const TRACKED_KEY = "tracked-exercises-v1";
+  const CUSTOM_LIB_KEY = "custom-exercises-v1";
+  const OWNER_KEY = "owner-name-v1";
+  const PR_SELECTION_KEY = "pr-selection-v1";
+  const fileInputRef = useRef(null);
+
   // ---- History & Log: Workout / Swim toggle -------------------------------------------
   // Controls which "log new session" flow shows (paste/manual form vs. .FIT upload) and
   // what the Import button expects (JSON vs. .FIT). Logging itself lives here now; the
@@ -3049,6 +3103,11 @@ function SwimmingTab({ isMobile }) {
   const persistSwim = async (next) => {
     setSwimSessions(next);
     try { await window.storage.set(SWIM_KEY, JSON.stringify(next), false); } catch (_) {}
+  };
+
+  const unmarkSwimCssTest = async (sessionId) => {
+    const next = (swimSessions || []).map((s) => s.id === sessionId ? { ...s, isCssTest: false, cssTest: null } : s);
+    await persistSwim(next);
   };
 
   // Attempts to auto-fill the 200m/400m split times for a CSS test from the session's own
@@ -5014,7 +5073,7 @@ function SwimmingTab({ isMobile }) {
                         <div style={{ minWidth: 0 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><ChevronDown size={13} style={{ color: "#6b7078", transform: open ? "rotate(180deg)" : "none" }} /><span className="disp" style={{ fontWeight: 700, fontSize: 15, color: "#F5F3EE" }}>{fmtDate(s.date)}</span><span className="mono" style={{ fontSize: 9.5, color: s.isCssTest ? "#2EC4B6" : "#56CCF2", border: `1px solid ${s.isCssTest ? "#2EC4B6" : "#56CCF2"}55`, borderRadius: 5, padding: "1px 5px" }}>{s.isCssTest ? "CSS TEST" : "WORKOUT"}</span></div><div className="mono" style={{ fontSize: 11, color: "#6b7078", marginLeft: 21 }}>{s.fileName}</div></div>
                         <div style={{ display: "flex", gap: 16, fontSize: 12, alignItems: "center" }}><div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{s.distance != null ? `${s.distance}m` : "—"}</div><div style={{ color: "#6b7078", fontSize: 10 }}>distance</div></div><div style={{ textAlign: "right" }}><div className="mono" style={{ color: "#F5F3EE", fontWeight: 700 }}>{fmtPace100(s.pace100Overall)}</div><div style={{ color: "#6b7078", fontSize: 10 }}>pace</div></div><Trash2 size={15} style={{ cursor: "pointer", color: "#5a5f66" }} onClick={(e) => { e.stopPropagation(); setConfirmDelete({ id: s.id, date: s.date, distance: s.distance, kind: "swim" }); }} /></div>
                       </div>
-                      {open && <div style={{ padding: "0 16px 14px 37px", background: "#0c0d10" }}><div style={{ fontSize: 10.5, color: "#8a8f98", marginBottom: 8 }}>Session detail · lengths, flags and CSS annotation</div><div style={{ display: "grid", gap: 6 }}>{(s.lengths || []).map((l, li) => { const el = effectiveLength(l); return <div key={li} style={{ display: "grid", gridTemplateColumns: "52px 1fr 1fr 1fr", gap: 8, fontSize: 10.5, color: "#9a9fa6", padding: "6px 8px", border: "1px solid #1d2024", borderRadius: 8 }}><span className="mono">{el.distance != null ? `${el.distance}m` : "—"}</span><span>{SWIM_STROKE_LABELS[el.stroke] || el.stroke || "—"}</span><span>{el.pace100 != null ? fmtPace100(el.pace100) : "—"}</span><span>{el.swolf != null ? `SWOLF ${Math.round(el.swolf)}` : ""}{el.userExcluded ? " · excluded" : ""}</span></div>; })}</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>{s.isCssTest ? <button onClick={() => unmarkCssTest(s.id)} style={{ cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 8, padding: "5px 9px", fontSize: 10.5 }}>Unmark as CSS test</button> : <span style={{ fontSize: 10.5, color: "#6b7078" }}>Not flagged as CSS test → Workout</span>}{s.qualityNote && <span style={{ fontSize: 10.5, color: "#F2994A" }}>⚠ {s.qualityNote}</span>}</div></div>}
+                      {open && <div style={{ padding: "0 16px 14px 37px", background: "#0c0d10" }}><div style={{ fontSize: 10.5, color: "#8a8f98", marginBottom: 8 }}>Session detail · lengths, flags and CSS annotation</div><div style={{ display: "grid", gap: 6 }}>{(s.lengths || []).map((l, li) => { const el = effectiveLength(l); return <div key={li} style={{ display: "grid", gridTemplateColumns: "52px 1fr 1fr 1fr", gap: 8, fontSize: 10.5, color: "#9a9fa6", padding: "6px 8px", border: "1px solid #1d2024", borderRadius: 8 }}><span className="mono">{el.distance != null ? `${el.distance}m` : "—"}</span><span>{SWIM_STROKE_LABELS[el.stroke] || el.stroke || "—"}</span><span>{el.pace100 != null ? fmtPace100(el.pace100) : "—"}</span><span>{el.swolf != null ? `SWOLF ${Math.round(el.swolf)}` : ""}{el.userExcluded ? " · excluded" : ""}</span></div>; })}</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>{s.isCssTest ? <button onClick={() => unmarkSwimCssTest(s.id)} style={{ cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 8, padding: "5px 9px", fontSize: 10.5 }}>Unmark as CSS test</button> : <span style={{ fontSize: 10.5, color: "#6b7078" }}>Not flagged as CSS test → Workout</span>}{s.qualityNote && <span style={{ fontSize: 10.5, color: "#F2994A" }}>⚠ {s.qualityNote}</span>}</div></div>}
                     </div>;
                   })}
                   {(!swimSessions || swimSessions.length === 0) && <div style={{ padding: "20px 16px", fontSize: 12.5, color: "#6b7078" }}>No swim sessions logged yet — upload a .FIT file above.</div>}
