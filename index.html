@@ -2269,19 +2269,28 @@ function SwimmingTab({ isMobile }) {
       return { mean, sd };
     };
     const renderPersonalBands = (values, direction = "neutral") => {
-      const stats = personalBandStats(values);
+      const vals = values.filter((v) => v != null && Number.isFinite(v));
+      const stats = personalBandStats(vals);
       if (!stats) return null;
       const span = stats.sd > 0 ? stats.sd : Math.max(Math.abs(stats.mean) * 0.025, 0.5);
-      const lo = stats.mean - span;
-      const hi = stats.mean + span;
-      const outer = span * 3;
-      const lowLabel = direction === "lower" ? "Above baseline" : direction === "higher" ? "Below baseline" : "Lower than usual";
-      const highLabel = direction === "lower" ? "Below baseline" : direction === "higher" ? "Above baseline" : "Higher than usual";
       return (
         <>
-          <ReferenceArea y1={stats.mean - outer} y2={lo} fill={direction === "lower" ? "#30D158" : direction === "higher" ? "#FF453A" : "#64D2FF"} fillOpacity={0.055} strokeWidth={0} label={{ value: lowLabel, position: "insideLeft", fill: "#8E8E93", fontSize: 9 }} />
-          <ReferenceArea y1={lo} y2={hi} fill="#8E8E93" fillOpacity={0.07} strokeWidth={0} label={{ value: "Typical", position: "insideLeft", fill: "#8E8E93", fontSize: 9 }} />
-          <ReferenceArea y1={hi} y2={stats.mean + outer} fill={direction === "lower" ? "#FF453A" : direction === "higher" ? "#30D158" : "#64D2FF"} fillOpacity={0.055} strokeWidth={0} label={{ value: highLabel, position: "insideLeft", fill: "#8E8E93", fontSize: 9 }} />
+          {vals.length >= 3 && (
+            <ReferenceArea
+              y1={stats.mean - span}
+              y2={stats.mean + span}
+              fill="#8E8E93"
+              fillOpacity={0.045}
+              strokeWidth={0}
+            />
+          )}
+          <ReferenceLine
+            y={stats.mean}
+            stroke="#A7A7AC"
+            strokeWidth={1}
+            strokeDasharray="4 5"
+            label={{ value: "Typical", position: "insideTopLeft", fill: "#8E8E93", fontSize: 9 }}
+          />
         </>
       );
     };
@@ -2291,7 +2300,6 @@ function SwimmingTab({ isMobile }) {
         <div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#27272A" strokeOpacity={0.55} />
               {renderPersonalBands(trendDataView.map((d) => d[paceDataKey]), "lower")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} />
               <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
@@ -2314,7 +2322,6 @@ function SwimmingTab({ isMobile }) {
         <div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#27272A" strokeOpacity={0.55} />
               {renderPersonalBands(trendDataView.map((d) => d.avgHR), "neutral")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} />
               <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
@@ -2345,7 +2352,6 @@ function SwimmingTab({ isMobile }) {
           {overlaySelector}
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#27272A" strokeOpacity={0.55} />
               {(() => {
                 const bandKey = strokeFilter === "all"
                   ? (key === "swolf" ? "swolf_all" : key === "cadence" ? "cadence_all" : "dps_all")
@@ -2998,16 +3004,30 @@ function SwimmingTab({ isMobile }) {
             </>
           )}
 
-          {swimSection === "radar" && (
+          {(() => {
+            const radarAxisTick = ({ x, y, payload, textAnchor }) => {
+              const label = payload && payload.value ? String(payload.value) : "";
+              const words = label.split(" ");
+              const shouldWrap = isMobile && words.length > 1 && label.length > 12;
+              return (
+                <text x={x} y={y} textAnchor={textAnchor} fill="#8E8E93" fontSize={isMobile ? 9.5 : 10.5}>
+                  {shouldWrap ? (
+                    <>
+                      <tspan x={x} dy="-0.25em">{words.slice(0, -1).join(" ")}</tspan>
+                      <tspan x={x} dy="1.15em">{words[words.length - 1]}</tspan>
+                    </>
+                  ) : (
+                    <tspan x={x} dy="0.35em">{label}</tspan>
+                  )}
+                </text>
+              );
+            };
+            return swimSection === "radar" ? (
             <>
               {renderFilterBar()}
               <div style={cardStyle}>
                 <div style={{ ...labelStyle, marginBottom: 2 }}>CURRENT PROFILE</div>
                 <div style={{ fontSize: 12, color: "#8E8E93", marginBottom: 4 }}>Latest session vs previous 6 weeks</div>
-                <div style={{ fontSize: 11, color: "#636366", marginBottom: 12, lineHeight: 1.45 }}>
-                  Personal performance profile — <strong style={{ color: "#D1D1D6" }}>100 = your baseline</strong>; &gt;100 = above baseline; &lt;100 = below baseline.
-                </div>
-
                 {radarInterpretation && (
                   <div style={{ marginBottom: 12, padding: "11px 12px", border: "1px solid #2C2C2E", borderRadius: 12, background: "#18181B" }}>
                     <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Profile readout</div>
@@ -3052,9 +3072,9 @@ function SwimmingTab({ isMobile }) {
                 ) : (
                   <>
                     <ResponsiveContainer width="100%" height={360}>
-                      <RadarChart data={radarVisibleProfile} outerRadius="72%">
+                      <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "64%" : "72%"} margin={isMobile ? { top: 18, right: 32, bottom: 18, left: 32 } : undefined}>
                         <PolarGrid stroke="#2C2C2E" />
-                        <PolarAngleAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10.5 }} />
+                        <PolarAngleAxis dataKey="label" tick={radarAxisTick} />
                         <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#48484A", fontSize: 9 }} axisLine={false} />
                         <Radar name="6-week baseline" dataKey={() => 100} stroke="#64D2FF" strokeWidth={2} fill="#64D2FF" fillOpacity={0.07} strokeDasharray="5 4" />
                         <Radar name="Latest session" dataKey="displayValue" stroke="#FF9F0A" fill="#FF9F0A" fillOpacity={0.28} />
@@ -3069,6 +3089,10 @@ function SwimmingTab({ isMobile }) {
                       </RadarChart>
                     </ResponsiveContainer>
 
+                    <div style={{ fontSize: 10.5, color: "#636366", margin: "2px 2px 12px", lineHeight: 1.45, textAlign: isMobile ? "left" : "center" }}>
+                      Personal performance profile · <strong style={{ color: "#8E8E93", fontWeight: 700 }}>100 = your baseline</strong> · &gt;100 above baseline · &lt;100 below baseline
+                    </div>
+
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginTop: 2 }}>
                       {radarVisibleProfile.map((axis) => (
                         <div key={axis.key} style={{ border: "1px solid #2C2C2E", borderRadius: 12, padding: "9px 10px", background: "#18181B" }}>
@@ -3078,6 +3102,29 @@ function SwimmingTab({ isMobile }) {
                       ))}
                     </div>
 
+                    <details style={{ marginTop: 10, border: "1px solid #2C2C2E", borderRadius: 12, background: "#18181B", overflow: "hidden" }}>
+                      <summary style={{ cursor: "pointer", listStyle: "none", padding: "10px 12px", display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "#8E8E93", fontWeight: 700 }}>
+                        <Info size={13} /> What do these axes mean?
+                      </summary>
+                      <div style={{ padding: "0 12px 11px", display: "grid", gap: 8 }}>
+                        {radarVisibleProfile.map((axis) => {
+                          const descriptions = {
+                            pace: "Speed — compares the latest pace with your previous 6-week pace baseline. Higher than 100 means faster than your normal baseline.",
+                            efficiency: "Stroke Efficiency — blends SWOLF (lower is better) with distance per stroke (higher is better), each relative to your own baseline.",
+                            consistency: "Consistency — measures how typical today's pace was compared with your normal training variability. Around 100 means it stayed within your usual range.",
+                            endurance: "Endurance — compares the latest session distance with your average qualifying session distance over the previous 6 weeks.",
+                            aerobic: "Aerobic Efficiency — compares pace per heartbeat with your baseline. It appears only when real heart-rate coverage is sufficient; higher than 100 means better efficiency than baseline.",
+                          };
+                          return (
+                            <div key={axis.key} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "start" }}>
+                              <span style={{ width: 7, height: 7, borderRadius: "50%", background: axis.color, marginTop: 5 }} />
+                              <div style={{ fontSize: 10.5, color: "#8E8E93", lineHeight: 1.45 }}>{descriptions[axis.key]}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
+
                     <div style={{ fontSize: 10, color: "#48484A", marginTop: 10, lineHeight: 1.45 }}>
                       Display is limited to 70–130 only for the visual scale; raw calculated scores are unchanged and shown in the tooltip and values above.
                       {!radarProfile.some((a) => a.key === "aerobic") && " Aerobic Efficiency is omitted when real HR coverage is insufficient."}
@@ -3086,7 +3133,8 @@ function SwimmingTab({ isMobile }) {
                 )}
               </div>
             </>
-          )}
+            ) : null;
+          })()}
           </React.Fragment>
 
         </>
@@ -4495,6 +4543,8 @@ function TrainingLog() {
 
         /* Personal-history chart bands: quiet enough to support rather than dominate. */
         .trend-band-label { font-size:9px; font-weight:700; letter-spacing:.02em; }
+        details > summary::-webkit-details-marker { display:none; }
+        details > summary::marker { display:none; content:""; }
         .file-btn { position: relative; overflow: hidden; }
         .file-btn input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
         @media (max-width: 560px) {
