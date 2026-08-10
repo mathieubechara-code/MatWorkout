@@ -45,6 +45,124 @@
 <script crossorigin src="https://unpkg.com/recharts@2.15.4/umd/Recharts.js"></script>
 <!-- Babel standalone: lets the browser compile the JSX below on the fly (no build step needed) -->
 <script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+<style id="cream-ui-trial">
+  :root {
+    --bg: #F4F1EA;
+    --card: #FFFEFA;
+    --card-2: #F8F5EE;
+    --border: #E4E0D8;
+    --border-2: #D8D3CA;
+    --text: #161616;
+    --text-dim: #6F6F73;
+    --text-dimmer: #8E8E93;
+    --text-faint: #B0ADA6;
+  }
+
+  html, body, #root { background: #F4F1EA !important; }
+  body { color: #161616 !important; }
+
+  /* Main application canvas */
+  #root > div {
+    background: #F4F1EA !important;
+    color: #161616 !important;
+  }
+
+  /* Existing cards: preserve layout/location, only restyle surfaces */
+  #root div[style*="border: 1px solid #27272A"],
+  #root div[style*="border: 1px solid #2C2C2E"],
+  #root div[style*="background: #1C1C1E"],
+  #root div[style*="background: rgb(28, 28, 30)"] {
+    background: #FFFEFA !important;
+    border-color: #E4E0D8 !important;
+    box-shadow: 0 8px 28px rgba(57, 48, 36, .055) !important;
+  }
+
+  /* Dark nested surfaces become quiet cream inset surfaces */
+  #root div[style*="background: #000000"],
+  #root div[style*="background: #111216"],
+  #root div[style*="background: #18181B"] {
+    background: #F8F5EE !important;
+  }
+
+  /* Header / separators */
+  #root div[style*="borderBottom: \"1px solid #27272A\""],
+  #root div[style*="border-bottom"] {
+    border-color: #E4E0D8 !important;
+  }
+
+  /* Text translation from dark palette */
+  #root [style*="color: #FFFFFF"],
+  #root [style*="color: #F5F3EE"],
+  #root [style*="color: #F2F2F7"],
+  #root [style*="color: #D1D1D6"],
+  #root [style*="color: #c9cdd3"] { color: #161616 !important; }
+
+  #root [style*="color: #8E8E93"],
+  #root [style*="color: #9a9fa6"],
+  #root [style*="color: #6b7078"] { color: #6F6F73 !important; }
+
+  #root [style*="color: #636366"],
+  #root [style*="color: #5a5f66"],
+  #root [style*="color: #48484A"] { color: #98958E !important; }
+
+  /* Native-looking controls */
+  #root input, #root textarea, #root select {
+    background: #F8F5EE !important;
+    border-color: #DED9D0 !important;
+    color: #161616 !important;
+    color-scheme: light !important;
+  }
+  #root input::placeholder, #root textarea::placeholder { color: #A7A39B !important; }
+
+  .pill {
+    box-shadow: none !important;
+    border-color: #DED9D0 !important;
+  }
+
+  /* Recharts: quieter grid / readable labels on cream */
+  .recharts-cartesian-grid line,
+  .recharts-polar-grid-concentric-polygon,
+  .recharts-polar-grid-angle line {
+    stroke: #DDD8CF !important;
+  }
+  .recharts-cartesian-axis-tick text,
+  .recharts-polar-angle-axis-tick text,
+  .recharts-polar-radius-axis-tick text {
+    fill: #85827C !important;
+  }
+  .recharts-default-tooltip {
+    background: rgba(255,254,250,.97) !important;
+    border-color: #DDD8CF !important;
+    color: #161616 !important;
+    box-shadow: 0 12px 34px rgba(57,48,36,.12) !important;
+  }
+  .recharts-tooltip-label, .recharts-tooltip-item { color: #161616 !important; }
+
+  /* Trend cards: collapsed state is intentionally slim. Existing click-to-expand behavior remains. */
+  .trend-metric-card {
+    background: #FFFEFA !important;
+    border: 1px solid #E4E0D8 !important;
+    box-shadow: 0 5px 18px rgba(57,48,36,.045) !important;
+  }
+  .trend-metric-card.is-collapsed {
+    padding: 10px 12px !important;
+  }
+  .trend-metric-card.is-collapsed .trend-mini-chart {
+    height: 34px !important;
+    opacity: .82;
+  }
+  .trend-metric-card.is-expanded {
+    padding: 14px !important;
+  }
+
+  @media (max-width: 560px) {
+    #root > div { padding-bottom: 18px; }
+    .trend-metric-card.is-collapsed { padding: 9px 11px !important; }
+    .trend-metric-card.is-collapsed .trend-mini-chart { height: 28px !important; }
+  }
+</style>
+
 </head>
 <body>
 <div id="root"></div>
@@ -2670,7 +2788,7 @@ function SwimmingTab({ isMobile }) {
                 const isOpen = expandedMetrics.has(card.key);
                 const pts = sparkPoints(card.series);
                 return (
-                  <div key={card.key} style={{ background: "#000000", border: `1.5px solid ${card.color}${isOpen ? "cc" : "70"}`, borderRadius: 16, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
+                  <div key={card.key} className={`trend-metric-card ${isOpen ? "is-expanded" : "is-collapsed"}`} style={{ background: "#000000", border: `1.5px solid ${card.color}${isOpen ? "cc" : "70"}`, borderRadius: 18, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 600, color: "#D1D1D6" }}>{card.title}</div>
@@ -2691,12 +2809,12 @@ function SwimmingTab({ isMobile }) {
                       </div>
                     </div>
                     {!isOpen && (pts.length >= 2 ? (
-                      <ResponsiveContainer width="100%" height={64}>
+                      <div className="trend-mini-chart"><ResponsiveContainer width="100%" height="100%">
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
                           <YAxis hide domain={["dataMin", "dataMax"]} reversed={METRIC_AXIS_DIRECTION[card.key] === "lower"} />
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
                         </LineChart>
-                      </ResponsiveContainer>
+                      </ResponsiveContainer></div>
                     ) : (
                       <div style={{ fontSize: 10.5, color: "#48484A", padding: "18px 0" }}>Not enough data yet</div>
                     ))}
