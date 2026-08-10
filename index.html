@@ -1490,7 +1490,7 @@ function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel
   return top;
 }
 
-function SwimmingTab({ isMobile }) {
+function SwimmingTab({ isMobile, onExit }) {
   const [sessions, setSessions] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [strokeFilter, setStrokeFilter] = useState("all");
@@ -2202,7 +2202,7 @@ function SwimmingTab({ isMobile }) {
               <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
                 cursor: "pointer", background: selected ? color : `${color}1a`,
                 border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#000000" : color,
-                borderRadius: 11, padding: isMobile ? "4px 8px" : "5px 9px", fontSize: isMobile ? 10.5 : 11, fontWeight: 700,
+                borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
               }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
             );
           })}
@@ -2223,7 +2223,7 @@ function SwimmingTab({ isMobile }) {
               <button key={v} onClick={() => setCategoryFilter(v)} className="pill" style={{
                 display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
                 background: selected ? c : `${c}1a`, border: `1.5px solid ${selected ? c : c + "55"}`,
-                color: selected ? "#000000" : c, borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 9px", fontSize: isMobile ? 10.5 : 11, fontWeight: 700,
+                color: selected ? "#000000" : c, borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
               }}>{Ic && <Ic size={11} />}{l}</button>
             );
           })}
@@ -2302,7 +2302,7 @@ function SwimmingTab({ isMobile }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d[paceDataKey]), "lower")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeCardColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2324,7 +2324,7 @@ function SwimmingTab({ isMobile }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d.avgHR), "neutral")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => (v != null ? `${Math.round(v)} bpm` : "—")} />
               <Line type="monotone" dataKey="avgHR" name="Avg HR" stroke="#FF453A" strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2363,7 +2363,7 @@ function SwimmingTab({ isMobile }) {
               {/* reversed reads METRIC_AXIS_DIRECTION — the same registry the collapsed
                   sparkline's YAxis reads above — instead of a per-branch key check, so this
                   can't quietly drift out of sync with the sparkline again (item 6). */}
-              <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
@@ -2498,17 +2498,29 @@ function SwimmingTab({ isMobile }) {
               this content, so it no longer needs to reserve space for the outer nav above it
               (item 5). Dashboard holds everything that isn't Trend or Compare (PRs, streak,
               distance breakdown, insights) — Radar keeps its own tab as before. */}
-          <div className="swim-subnav" style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 4, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 15, padding: 5, marginBottom: 14, boxShadow: "none" }}>
+          <div className="swim-subnav swim-primary-nav" style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 3, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 5, marginBottom: 14, boxShadow: "none" }}>
+            <button
+              onClick={() => onExit && onExit()}
+              title="Back to Today"
+              style={{
+                flex: "0 0 auto", display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+                cursor: "pointer", background: "transparent", border: "none", borderRadius: 9,
+                color: "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 11,
+                padding: isMobile ? "7px 5px" : "8px 7px", whiteSpace: "nowrap"
+              }}
+            >
+              ‹ Today
+            </button>
             {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Radar", RadarIcon]].map(([v, l, Ic]) => {
               const selected = swimSection === v;
               return (
                 <button key={v} onClick={() => setSwimSection(v)} style={{
                   flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
                   background: selected ? "#FF9F0A" : "transparent", border: "none", borderRadius: 10,
-                  color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 11.5 : 12.5, padding: isMobile ? "7px 6px" : "8px 9px",
+                  color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 12, padding: isMobile ? "7px 4px" : "8px 7px",
                   transition: "background 0.15s, color 0.15s",
                 }}>
-                  <Ic size={isMobile ? 12.5 : 13.5} />
+                  <Ic size={isMobile ? 11 : 13} />
                   {l}
                 </button>
               );
@@ -2735,8 +2747,7 @@ function SwimmingTab({ isMobile }) {
                     </div>
                     {!isOpen && (pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={36}>
-                        <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 5 }}>
-                          <XAxis dataKey="i" tick={false} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.5 }} height={5} />
+                        <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
                           <YAxis hide domain={["dataMin", "dataMax"]} reversed={METRIC_AXIS_DIRECTION[card.key] === "lower"} />
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
                         </LineChart>
@@ -2765,7 +2776,7 @@ function SwimmingTab({ isMobile }) {
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                     <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-                    <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+                    <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#636366", strokeOpacity: 0.34 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
                     <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                     <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
                   </LineChart>
@@ -4596,6 +4607,16 @@ function TrainingLog() {
           color:#6E675F;
         }
 
+        /* Swim replaces the app-level nav while inside the Swim area. */
+        .ui-night .swim-primary-nav {
+          background:#24211E !important;
+          border-color:#3A3530 !important;
+        }
+        .ui-day .swim-primary-nav {
+          background:#EEE8DD !important;
+          border-color:#D4CCBF !important;
+        }
+
         /* Radar profile readout is explicitly theme-aware. */
         .ui-day .profile-readout-card {
           background:linear-gradient(135deg, #FFF3D9 0%, #E7DFD2 62%, #E7DFD2 100%) !important;
@@ -4666,6 +4687,8 @@ function TrainingLog() {
           Trends/Compare/Web chart switcher is the one that floats while scrolling now; having
           both float at once meant this bar's sticky region could sit on top of and hide the
           inner switcher depending on scroll position, which is what item 5 fixes. */}
+      {tab !== "swim" && (
+        <>
       <div style={{ background: FLOATING_BAR_BG_SOFT, borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
           <div style={{ display: "flex", gap: 4, overflowX: "auto", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 18, padding: 4 }}>
@@ -4683,6 +4706,9 @@ function TrainingLog() {
           </div>
         </div>
       </div>
+
+        </>
+      )}
 
       <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "14px 12px" : "18px 16px" }}>
 
@@ -5161,7 +5187,7 @@ function TrainingLog() {
           </>
         )}
 
-        {tab === "swim" && <SwimmingTab isMobile={isMobile} />}
+        {tab === "swim" && <SwimmingTab isMobile={isMobile} onExit={() => setTab("dashboard")} />}
 
         {tab === "history" && (
           <>
