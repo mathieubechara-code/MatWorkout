@@ -1512,7 +1512,7 @@ function SwimmingTab({ isMobile }) {
   const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
   const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
   const [metricValueMode, setMetricValueMode] = useState("latest"); // "latest" | "avg6" — headline number on each Trends card
-  const [swimSection, setSwimSection] = useState("trends"); // "trends" | "compare" | "radar" — the 3 tabs within the Swim tab. Session Detail
+  const [swimSection, setSwimSection] = useState("dashboard"); // "dashboard" | "trends" | "compare" | "radar" — the 4 tabs within the Swim tab. Session Detail
                                                               // lives below the switcher now, outside all three (see render, item 2).
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "workout" | "csstest" — filters Trends + Compare only (Session
                                                                  // Detail below always shows everything). Derived straight from isCssTest,
@@ -2362,15 +2362,16 @@ function SwimmingTab({ isMobile }) {
         </div>
       ) : (
         <>
-          {/* Swim section tabs — Trends / Compare / Web chart. Segmented control styled like the
-              floating filter bars elsewhere in this tab (solid warm-dark background, pill
-              buttons), sticky so it stays reachable while scrolling a long tab's content.
+          {/* Swim section tabs — Dashboard / Trend / Compare / Radar. Segmented control styled
+              like the floating filter bars elsewhere in this tab (solid warm-dark background,
+              pill buttons), sticky so it stays reachable while scrolling a long tab's content.
               top is tuned near 0 now that the OUTER nav (Today/Workout/Swim/History & Log) is
               no longer sticky itself — this inner switcher is now the only thing floating above
               this content, so it no longer needs to reserve space for the outer nav above it
-              (item 5). */}
+              (item 5). Dashboard holds everything that isn't Trend or Compare (PRs, streak,
+              distance breakdown, insights) — Radar keeps its own tab as before. */}
           <div style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 6, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 6, marginBottom: 14, boxShadow: "0 8px 20px -10px rgba(0,0,0,0.6)" }}>
-            {[["trends", "Trends", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Web chart", RadarIcon]].map(([v, l, Ic]) => {
+            {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Radar", RadarIcon]].map(([v, l, Ic]) => {
               const selected = swimSection === v;
               return (
                 <button key={v} onClick={() => setSwimSection(v)} style={{
@@ -2386,7 +2387,7 @@ function SwimmingTab({ isMobile }) {
             })}
           </div>
 
-          {swimSection === "trends" && (
+          {swimSection === "dashboard" && (
             <>
           {/* PR card — top, matching the Workout tab's emphasis on PRs first */}
           <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
@@ -2531,7 +2532,11 @@ function SwimmingTab({ isMobile }) {
               );
             })()}
           </div>
+            </>
+          )}
 
+          {swimSection === "trends" && (
+            <>
           {renderFilterBar()}
 
           {/* Trends — compact sparkline cards, tap to expand */}
