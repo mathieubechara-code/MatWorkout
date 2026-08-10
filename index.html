@@ -568,7 +568,7 @@ const COMPARE_MODE_DESCRIPTIONS = {
   hr: "Speed vs effort — see whether you're getting faster without your heart rate climbing.",
   swolfhr: "Efficiency vs effort — see whether your stroke efficiency is improving without more cardiovascular strain.",
 };
-const SWIM_STROKE_COLORS = { freestyle: "#64D2FF", backstroke: "#BF5AF2", breaststroke: "#FF9F0A", butterfly: "#FF453A", drill: "#30D158", mixed: "#FF9F0A", im: "#0A84FF", unknown: "#636366", kick_free: "#FF375F", kick_frog: "#FF9F0A" };
+const SWIM_STROKE_COLORS = { freestyle: "#64D2FF", backstroke: "#BF5AF2", breaststroke: "#FF9F0A", butterfly: "#FF453A", drill: "#30D158", mixed: "#FF9F0A", im: "#0A84FF", unknown: "#636366", kick_free: "#FF375F", kick_frog: "#FFD60A" };
 // Shared background for every floating/sticky bar in the app (top tab nav + the Swim tab's
 // swim-type filter bar) — a warm, dark cream tone (not a cold near-black) so the two bars read
 // as one continuous, deliberately-toned piece rather than separate floating panels. Solid (no
@@ -2301,7 +2301,7 @@ function SwimmingTab({ isMobile }) {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d[paceDataKey]), "lower")}
-              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={false} tickLine={false} tickMargin={7} minTickGap={24} />
+              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.48 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
               <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeCardColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -2323,7 +2323,7 @@ function SwimmingTab({ isMobile }) {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d.avgHR), "neutral")}
-              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={false} tickLine={false} tickMargin={7} minTickGap={24} />
+              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.48 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
               <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => (v != null ? `${Math.round(v)} bpm` : "—")} />
               <Line type="monotone" dataKey="avgHR" name="Avg HR" stroke="#FF453A" strokeWidth={2} dot={{ r: 3 }} connectNulls />
@@ -2359,7 +2359,7 @@ function SwimmingTab({ isMobile }) {
                 const direction = key === "swolf" ? "lower" : key === "dps" ? "higher" : "neutral";
                 return renderPersonalBands(trendDataView.map((d) => d[bandKey]), direction);
               })()}
-              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={false} tickLine={false} tickMargin={7} minTickGap={24} />
+              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.48 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
               {/* reversed reads METRIC_AXIS_DIRECTION — the same registry the collapsed
                   sparkline's YAxis reads above — instead of a per-branch key check, so this
                   can't quietly drift out of sync with the sparkline again (item 6). */}
@@ -2462,7 +2462,7 @@ function SwimmingTab({ isMobile }) {
         {overlaySelector}
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={false} tickLine={false} tickMargin={7} minTickGap={24} />
+            <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.48 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
             <YAxis
               tick={{ fill: "#636366", fontSize: 10.5 }}
               tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
@@ -2764,7 +2764,7 @@ function SwimmingTab({ isMobile }) {
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#27272A" />
-                    <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={false} tickLine={false} tickMargin={7} minTickGap={24} />
+                    <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.48 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
                     <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
                     <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                     <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
@@ -2977,7 +2977,7 @@ function SwimmingTab({ isMobile }) {
                               setSelectedComparePoint((prev) => (prev === clickedDate ? null : clickedDate));
                             }}
                           >
-                            <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 9 }} axisLine={false} tickLine={false} tickMargin={8} minTickGap={34} />
+                            <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 9.5 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.48 }} tickLine={false} tickMargin={8} interval="preserveStartEnd" />
                             <YAxis tick={false} axisLine={false} tickLine={false} width={8} domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]} />
                             {/* Bright teal, distinct from every line color this chart can show (blue
                                 primary, gold or red secondary) so "Avg" reads clearly against all of them —
@@ -3026,13 +3026,6 @@ function SwimmingTab({ isMobile }) {
               <div style={cardStyle}>
                 <div style={{ ...labelStyle, marginBottom: 2 }}>CURRENT PROFILE</div>
                 <div style={{ fontSize: 12, color: "#8E8E93", marginBottom: 4 }}>Latest session vs previous 6 weeks</div>
-                {radarInterpretation && (
-                  <div style={{ marginBottom: 12, padding: "11px 12px", border: "1px solid #2C2C2E", borderRadius: 12, background: "#18181B" }}>
-                    <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Profile readout</div>
-                    <div style={{ fontSize: 12, color: "#D1D1D6", lineHeight: 1.45 }}>{radarInterpretation}</div>
-                  </div>
-                )}
-
                 {radarLatestSession && (
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
                     <div><div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase" }}>Latest session</div><div className="mono" style={{ fontSize: 13, color: "#FFFFFF", fontWeight: 700 }}>{fmtDate(radarLatestSession.date)}</div></div>
@@ -3065,12 +3058,21 @@ function SwimmingTab({ isMobile }) {
                   </div>
                 )}
 
+                {radarInterpretation && (
+                  <div style={{ margin: "0 0 14px", padding: "12px 14px", border: "1px solid #FF9F0A55", borderRadius: 14, background: "#FF9F0A0D" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10, color: "#FF9F0A", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 800, marginBottom: 5 }}>
+                      <Info size={13} /> Profile readout
+                    </div>
+                    <div style={{ fontSize: 13, color: "#F2F2F7", lineHeight: 1.5, fontWeight: 600 }}>{radarInterpretation}</div>
+                  </div>
+                )}
+
                 {radarVisibleProfile.length < 3 ? (
                   <div style={{ padding: "30px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5, lineHeight: 1.55 }}>Pick at least 3 available axes to draw the profile. Missing axes are omitted rather than estimated.</div>
                 ) : (
                   <>
-                    <ResponsiveContainer width="100%" height={isMobile ? 430 : 390}>
-                      <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "78%" : "74%"} margin={isMobile ? { top: 18, right: 14, bottom: 18, left: 14 } : undefined}>
+                    <ResponsiveContainer width="100%" height={isMobile ? 455 : 405}>
+                      <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "82%" : "76%"} margin={isMobile ? { top: 16, right: 10, bottom: 16, left: 10 } : undefined}>
                         <PolarGrid stroke="#2C2C2E" />
                         <PolarAngleAxis dataKey="label" tick={radarAxisTick} />
                         <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#636366", fontSize: 8.5 }} axisLine={false} tickLine={false} />
@@ -4545,9 +4547,9 @@ function TrainingLog() {
         details > summary::marker { display:none; content:""; }
 
         /* Chart chrome: dates are annotations, not the visual frame. */
-        .recharts-xAxis .recharts-cartesian-axis-line { stroke-opacity:.12 !important; }
+        .recharts-xAxis .recharts-cartesian-axis-line { stroke:#636366 !important; stroke-opacity:.48 !important; }
         .recharts-xAxis .recharts-cartesian-axis-tick-line { stroke-opacity:0 !important; }
-        .recharts-xAxis .recharts-cartesian-axis-tick text { opacity:.62; font-size:9px !important; }
+        .recharts-xAxis .recharts-cartesian-axis-tick text { opacity:.78; font-size:9.5px !important; }
         .recharts-yAxis .recharts-cartesian-axis-line { stroke-opacity:.14 !important; }
         .recharts-yAxis .recharts-cartesian-axis-tick-line { stroke-opacity:0 !important; }
         .recharts-yAxis .recharts-cartesian-axis-tick text { opacity:.62; }
