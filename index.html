@@ -766,9 +766,11 @@ function processSwimFit(parsed, fileName) {
   let qualityNote = metrics.qualityNote;
   if (distanceMismatchNote) qualityNote = qualityNote ? qualityNote + " " + distanceMismatchNote : distanceMismatchNote;
 
-  // Average HR from record messages within the session's timeframe (if the device recorded HR).
+  // Average + peak HR from record messages within the session's timeframe (if the device
+  // recorded HR). Peak is a genuine max of real readings, not estimated.
   const hrValues = (recordMsgs || []).map((r) => r.f3).filter((v) => v != null && v > 0);
   const avgHR = hrValues.length ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : null;
+  const peakHR = hrValues.length ? Math.max(...hrValues) : null;
 
   const dateISO = sessionStart ? toISODate(sessionStart) : new Date().toISOString().slice(0, 10);
 
@@ -785,6 +787,7 @@ function processSwimFit(parsed, fileName) {
     restTimeSec: metrics.restTimeSec,
     pace100Overall: metrics.pace100Overall,
     avgHR,
+    peakHR,
     totalActiveLengths: metrics.totalActiveLengths,
     validActiveLengths: metrics.validActiveLengths,
     excludedCount: metrics.excludedCount,
@@ -794,6 +797,9 @@ function processSwimFit(parsed, fileName) {
     reps: metrics.reps,
     isCssTest: false,
     cssTest: null, // { t200, t400 } seconds, entered manually — see SwimmingTab
+    sessionCategory: "workout", // "workout" | "test" — user-set label, see setSessionCategory in SwimmingTab.
+                                  // Drives the All/Test/Workout filter on Trends + Compare (keeps easy
+                                  // recovery/drill swims from diluting those two views).
   };
 }
 
@@ -890,7 +896,13 @@ function backfillSwimSessions(list) {
   let changed = false;
   const next = (list || []).map((s) => {
     const migrated = migrateSwimSessionToOverrideLayer(s);
-    const fixed = backfillSwimSessionStrokeStats(migrated);
+    let fixed = backfillSwimSessionStrokeStats(migrated);
+    // Sessions logged before the Workout/Test categorization existed default to "workout" —
+    // the common case — so the All/Test/Workout filter has a real value to read immediately
+    // rather than treating old data as neither.
+    if (fixed.sessionCategory == null) {
+      fixed = { ...fixed, sessionCategory: "workout" };
+    }
     if (fixed !== s) changed = true;
     return fixed;
   });
@@ -1497,6 +1509,8 @@ function SwimmingTab({ isMobile }) {
   const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
   const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
   const [metricValueMode, setMetricValueMode] = useState("latest"); // "latest" | "avg6" — headline number on each Trends card
+  const [swimSection, setSwimSection] = useState("trends"); // "trends" | "compare" | "log" — the 3 tabs within the Swim tab
+  const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "test" | "workout" — filters Trends + Compare only, Log always shows everything
   const SWIM_KEY = "swim-sessions-v1";
 
   useEffect(() => {
@@ -1650,6 +1664,15 @@ function SwimmingTab({ isMobile }) {
     await persist(next);
   };
 
+  // Workout/Test categorization (Part: Log filtering) — independent of isCssTest, which only
+  // flags a CSS-speed-calculation session specifically. "Test" here is the broader label for
+  // any time-trial/effort-test swim a person wants excluded from casual Trends/Compare noise;
+  // "Workout" (the default) covers everything else, including easy/recovery swims.
+  const setSessionCategory = async (sessionId, category) => {
+    const next = (sessions || []).map((s) => (s.id === sessionId ? { ...s, sessionCategory: category } : s));
+    await persist(next);
+  };
+
   const todayStr = toISODate(new Date());
 
   const streak = useMemo(() => {
@@ -1679,29 +1702,42 @@ function SwimmingTab({ isMobile }) {
     return { weekStreak: wStreak, dayStreak: dStreak, daysSinceLast, totalSessions: sessions.length };
   }, [sessions, todayStr]);
 
-  const chronSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : []), [sessions]);
+  // Session's category, defaulting untagged/legacy sessions to "workout" (see backfillSwimSessions,
+  // which persists this same default — this fallback just covers the render before that backfill
+  // effect has run once on mount).
+  const sessionCategoryOf = (s) => s.sessionCategory || "workout";
+
+  // chronSessions feeds Trends + Compare (and Insights) — filtered by the Workout/Test picker so
+  // active-recovery/easy-swim noise (or, flipped, casual swims) can be excluded from those views.
+  // sortedSessions feeds the Log tab, which always lists every session regardless of this filter,
+  // since that's where the category itself gets set.
+  const chronSessions = useMemo(() => {
+    const chron = sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
+    return categoryFilter === "all" ? chron : chron.filter((s) => sessionCategoryOf(s) === categoryFilter);
+  }, [sessions, categoryFilter]);
   const sortedSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => (a.date < b.date ? 1 : -1)) : []), [sessions]);
 
   const allStrokesSeen = useMemo(() => {
     const set = new Set();
-    (sessions || []).forEach((s) => Object.keys(s.strokeStats || {}).forEach((k) => set.add(k)));
+    (chronSessions || []).forEach((s) => Object.keys(s.strokeStats || {}).forEach((k) => set.add(k)));
     return Array.from(set);
-  }, [sessions]);
+  }, [chronSessions]);
 
   // The stroke with the most sessions of data — used as the default single line shown on the
   // collapsed sparkline cards for the per-stroke metrics (SWOLF, cadence, distance/stroke).
   const primaryStroke = useMemo(() => {
     const counts = {};
-    (sessions || []).forEach((s) => Object.keys(s.strokeStats || {}).forEach((k) => { counts[k] = (counts[k] || 0) + 1; }));
+    (chronSessions || []).forEach((s) => Object.keys(s.strokeStats || {}).forEach((k) => { counts[k] = (counts[k] || 0) + 1; }));
     let best = null, bestCount = -1;
     Object.keys(counts).forEach((k) => { if (counts[k] > bestCount) { best = k; bestCount = counts[k]; } });
     return best;
-  }, [sessions]);
+  }, [chronSessions]);
 
   // Trend series, oldest -> newest, one point per session.
   const trendData = useMemo(() => {
     return chronSessions.map((s) => {
-      const point = { date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall, avgHR: s.avgHR };
+      const energy100 = s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null;
+      const point = { date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall, avgHR: s.avgHR, peakHR: s.peakHR, energy100 };
       allStrokesSeen.forEach((stroke) => {
         const st = s.strokeStats && s.strokeStats[stroke];
         point[`pace100_${stroke}`] = st ? st.pace100 : null;
@@ -1729,7 +1765,16 @@ function SwimmingTab({ isMobile }) {
       const weekSessions = buckets[weekKey];
       const pace100Vals = weekSessions.map((s) => s.pace100Overall).filter((v) => v != null);
       const hrVals = weekSessions.map((s) => s.avgHR).filter((v) => v != null);
-      const point = { date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals), avgHR: avg(hrVals), sessionCount: weekSessions.length };
+      const peakHrVals = weekSessions.map((s) => s.peakHR).filter((v) => v != null);
+      const energy100Vals = weekSessions.map((s) => (s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null)).filter((v) => v != null);
+      const point = {
+        date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals), avgHR: avg(hrVals),
+        // Peak HR aggregates as the week's actual highest reading, not an average of peaks —
+        // "peak" stays meaningful as the hardest single effort that week.
+        peakHR: peakHrVals.length ? Math.max(...peakHrVals) : null,
+        energy100: avg(energy100Vals),
+        sessionCount: weekSessions.length,
+      };
       allStrokesSeen.forEach((stroke) => {
         const pace100StrokeVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].pace100 : null)).filter((v) => v != null);
         const swolfVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgSwolf : null)).filter((v) => v != null);
@@ -1894,6 +1939,8 @@ function SwimmingTab({ isMobile }) {
   const paceDataKey = strokeFilter === "all" ? "pace100" : `pace100_${strokeFilter}`;
   const paceSeries = seriesFor(paceDataKey);
   const hrSeries = seriesFor("avgHR");
+  const peakHrSeries = seriesFor("peakHR");
+  const energySeries = seriesFor("energy100");
   const swolfSeries = activeStroke ? seriesFor(`swolf_${activeStroke}`) : [];
   const cadenceSeries = activeStroke ? seriesFor(`cadence_${activeStroke}`) : [];
   const dpsSeries = activeStroke ? seriesFor(`dps_${activeStroke}`) : [];
@@ -1964,6 +2011,36 @@ function SwimmingTab({ isMobile }) {
       perStroke: true,
       color: strokeCardColor,
     },
+    {
+      key: "heart",
+      title: "Heart",
+      series: hrSeries,
+      // No verdict: whole-session average HR alone has no universal "better" direction —
+      // it moves with effort, not fitness, so a rising/falling line is context, not a grade.
+      verdict: null,
+      value: headlineOf(hrSeries) != null ? `${Math.round(headlineOf(hrSeries))} bpm` : "—",
+      perStroke: false,
+      color: "#E63946",
+    },
+    {
+      key: "peakhr",
+      title: "Peak HR",
+      series: peakHrSeries,
+      verdict: null,
+      value: headlineOf(peakHrSeries) != null ? `${Math.round(headlineOf(peakHrSeries))} bpm` : "—",
+      perStroke: false,
+      color: "#BB86FC",
+    },
+    {
+      key: "energy100",
+      title: "Energy /100m",
+      series: energySeries,
+      verdict: computeVerdict(energySeries, "lower-better"),
+      value: headlineOf(energySeries) != null ? `${Math.round(headlineOf(energySeries))} kcal` : "—",
+      perStroke: false,
+      lowerBetter: true,
+      color: "#F2994A",
+    },
   ];
 
   const allMetricsExpanded = metricCards.length > 0 && metricCards.every((c) => expandedMetrics.has(c.key));
@@ -1977,6 +2054,53 @@ function SwimmingTab({ isMobile }) {
   const toggleExpandAllMetrics = () => {
     setExpandedMetrics(allMetricsExpanded ? new Set() : new Set(metricCards.map((c) => c.key)));
   };
+
+  // Shared by the Trends and Compare tabs — both read the same strokeFilter/categoryFilter
+  // state, so a pick here filters both tabs even though each only renders this bar while
+  // it's the active tab (previously this one bar visually spanned both cards at once, back
+  // when Trends+Compare were stacked instead of tabbed).
+  const renderFilterBar = () => (
+    <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", flexDirection: "column", gap: 8, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 14, padding: "6px 8px", marginBottom: 10, boxShadow: "0 6px 16px -8px rgba(0,0,0,0.65)" }}>
+      {allStrokesSeen.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+          {["all", ...allStrokesSeen].map((s) => {
+            // Part 2: every swim-type slicer button uses that stroke's own color from
+            // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
+            // selected state (solid fill) vs. a tinted, low-contrast unselected state —
+            // reused verbatim (same colors) everywhere else in the Swim tab.
+            const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
+            const selected = strokeFilter === s;
+            return (
+              <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
+                cursor: "pointer", background: selected ? color : `${color}1a`,
+                border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
+                borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
+              }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
+            );
+          })}
+        </div>
+      )}
+      {/* Workout/Test filter — excludes whichever category isn't picked from Trends + Compare
+          (chronSessions itself is filtered by this, so every chart/card downstream inherits it
+          automatically). Log always shows everything regardless, so nothing is ever hidden for
+          good — this only narrows what these two tabs analyze. */}
+      {(sessions || []).length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", paddingTop: allStrokesSeen.length > 0 ? 6 : 0, borderTop: allStrokesSeen.length > 0 ? "1px solid #2b241a" : "none" }}>
+          <span style={{ fontSize: 10, color: "#6b7078", marginRight: 2 }}>Log type</span>
+          {[["all", "All", "#F5F3EE", null], ["workout", "Workout", "#56CCF2", Dumbbell], ["test", "Test", "#2EC4B6", Target]].map(([v, l, c, Ic]) => {
+            const selected = categoryFilter === v;
+            return (
+              <button key={v} onClick={() => setCategoryFilter(v)} className="pill" style={{
+                display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
+                background: selected ? c : `${c}1a`, border: `1.5px solid ${selected ? c : c + "55"}`,
+                color: selected ? "#0c0d10" : c, borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
+              }}>{Ic && <Ic size={11} />}{l}</button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 
   const expandedChartFor = (key) => {
     const overlay = chartOverlaySel[key] || "none";
@@ -2019,6 +2143,31 @@ function SwimmingTab({ isMobile }) {
       );
     }
 
+    if (key === "heart" || key === "peakhr" || key === "energy100") {
+      // Whole-session metrics — one line, no per-stroke overlay (HR/energy aren't tracked
+      // per-stroke), no reason to offer the stroke-rate/HR overlay picker either.
+      const dataKey = key === "heart" ? "avgHR" : key === "peakhr" ? "peakHR" : "energy100";
+      const color = key === "heart" ? "#E63946" : key === "peakhr" ? "#BB86FC" : "#F2994A";
+      const lowerBetter = key === "energy100";
+      const tickFmt = key === "energy100" ? (v) => `${Math.round(v)}` : (v) => `${Math.round(v)}`;
+      const tooltipFmt = key === "energy100" ? (v) => (v != null ? `${Math.round(v)} kcal` : "—") : (v) => (v != null ? `${Math.round(v)} bpm` : "—");
+      return (
+        <div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
+              <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
+              {/* Reversed exactly when the collapsed sparkline is reversed (lowerBetter), so the
+                  line's up/down direction always reads the same whether the card is open or shut. */}
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={tickFmt} reversed={lowerBetter} domain={["dataMin - 2", "dataMax + 2"]} />
+              <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={tooltipFmt} />
+              <Line type="monotone" dataKey={dataKey} name={key === "heart" ? "Avg HR" : key === "peakhr" ? "Peak HR" : "Energy /100m"} stroke={color} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
     const dataKeyPrefix = key === "swolf" ? "swolf_" : key === "cadence" ? "cadence_" : "dps_";
     const baseFormatter = key === "dps" ? (v) => (v != null ? fmtNum(v, 2) + "m" : "—") : (v) => fmtNum(v, key === "swolf" ? 0 : 1);
     const strokesToShow = strokeFilter === "all" ? allStrokesSeen : [strokeFilter];
@@ -2039,7 +2188,10 @@ function SwimmingTab({ isMobile }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtNum(v, 2)} domain={["dataMin - 2", "dataMax + 2"]} />
+              {/* reversed matches the collapsed sparkline's reversed={!!card.lowerBetter} for this
+                  same metric (SWOLF is lower-is-better) — without this the expanded chart's line
+                  ran the opposite direction from its own collapsed sparkline. */}
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtNum(v, 2)} reversed={key === "swolf"} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
@@ -2167,6 +2319,28 @@ function SwimmingTab({ isMobile }) {
         </div>
       ) : (
         <>
+          {/* Swim section tabs — Trends / Compare / Log. Segmented control styled like the
+              floating filter bars elsewhere in this tab (solid warm-dark background, pill
+              buttons), sticky so it stays reachable while scrolling a long tab's content. */}
+          <div style={{ position: "sticky", top: isMobile ? 8 : 12, zIndex: 31, display: "flex", gap: 6, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 6, marginBottom: 14, boxShadow: "0 8px 20px -10px rgba(0,0,0,0.6)" }}>
+            {[["trends", "Trends", TrendingUp], ["compare", "Compare", GitCompare], ["log", "Log", History]].map(([v, l, Ic]) => {
+              const selected = swimSection === v;
+              return (
+                <button key={v} onClick={() => setSwimSection(v)} style={{
+                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
+                  background: selected ? "#F2994A" : "transparent", border: "none", borderRadius: 11,
+                  color: selected ? "#0c0d10" : "#8a8f98", fontWeight: 700, fontSize: 13, padding: "9px 10px",
+                  transition: "background 0.15s, color 0.15s",
+                }}>
+                  <Ic size={14} />
+                  {l}
+                </button>
+              );
+            })}
+          </div>
+
+          {swimSection === "trends" && (
+            <>
           {/* PR card — top, matching the Workout tab's emphasis on PRs first */}
           <div style={{ background: "linear-gradient(180deg, #191b20 0%, #131418 100%)", border: "1px solid #23262d", borderRadius: 20, boxShadow: "0 10px 24px -14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)", padding: 16, marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
@@ -2311,30 +2485,7 @@ function SwimmingTab({ isMobile }) {
             })()}
           </div>
 
-          {/* Swim-type filter — shared by Trends and Compare below, wrapped around both so it
-              stays floating/sticky across the whole span of both cards, not just Trends (Day/Week
-              and 6-wk avg stay put in the Trends header, since those only apply there). Solid
-              (non-blurred) background, matched to the floating tab nav above by default, so the
-              two read as one continuous block instead of two separate see-through layers. */}
-          {allStrokesSeen.length > 0 && (
-            <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 14, padding: "6px 8px", marginBottom: 10, boxShadow: "0 6px 16px -8px rgba(0,0,0,0.65)" }}>
-              {["all", ...allStrokesSeen].map((s) => {
-                // Part 2: every swim-type slicer button uses that stroke's own color from
-                // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
-                // selected state (solid fill) vs. a tinted, low-contrast unselected state —
-                // reused verbatim (same colors) everywhere else in the Swim tab.
-                const color = s === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[s] || "#8a8f98");
-                const selected = strokeFilter === s;
-                return (
-                  <button key={s} onClick={() => setStrokeFilter(s)} className="pill" style={{
-                    cursor: "pointer", background: selected ? color : `${color}1a`,
-                    border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#0c0d10" : color,
-                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
-                  }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
-                );
-              })}
-            </div>
-          )}
+          {renderFilterBar()}
 
           {/* Trends — compact sparkline cards, tap to expand */}
           <div style={cardStyle}>
@@ -2441,7 +2592,12 @@ function SwimmingTab({ isMobile }) {
               )}
             </div>
           </div>
+            </>
+          )}
 
+          {swimSection === "compare" && (
+            <>
+          {renderFilterBar()}
           {/* Compare — optional metric overlays (Pace+StrokeRate, Pace+StrokeDistance, Pace+HR,
               SWOLF+HR). Additive to the Trends chart above, not a replacement. Reuses the same
               z-score normalization approach as the Pace/HR overlay in Trends (see
@@ -2648,7 +2804,10 @@ function SwimmingTab({ isMobile }) {
                             <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
                             <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
                             <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`} domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]} />
-                            <ReferenceLine y={0} stroke="#9a9fa6" strokeDasharray="4 3" label={{ value: "Avg", position: "insideTopRight", fill: "#9a9fa6", fontSize: 10.5, fontWeight: 600 }} />
+                            {/* Bright teal, distinct from every line color this chart can show (blue
+                                primary, gold or red secondary) so "Avg" reads clearly against all of them —
+                                previously a low-contrast gray that nearly disappeared on the dark background. */}
+                            <ReferenceLine y={0} stroke="#2EC4B6" strokeWidth={1.5} strokeDasharray="4 3" label={{ value: "Avg", position: "insideTopRight", fill: "#2EC4B6", fontSize: 11, fontWeight: 700 }} />
                             <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                             <Legend wrapperStyle={{ fontSize: 11 }} />
                             <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={makeDot("#56CCF2")} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
@@ -2662,7 +2821,11 @@ function SwimmingTab({ isMobile }) {
               );
             })()}
           </div>
+            </>
+          )}
 
+          {swimSection === "log" && (
+            <>
           {/* Session detail — the length-by-length drill-down. History & Log has a lighter
               summary list of the same sessions; this is where the per-length breakdown lives. */}
           <div style={cardStyle}>
@@ -2680,6 +2843,7 @@ function SwimmingTab({ isMobile }) {
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE", display: "flex", alignItems: "center", gap: 6 }}>
                             {fmtDateFull(s.date)}
                             {s.isCssTest && <span className="mono" style={{ fontSize: 9.5, color: "#2EC4B6", border: "1px solid #2EC4B655", borderRadius: 5, padding: "1px 5px" }}>CSS TEST</span>}
+                            {sessionCategoryOf(s) === "test" && <span className="mono" style={{ fontSize: 9.5, color: "#F2994A", border: "1px solid #F2994A55", borderRadius: 5, padding: "1px 5px" }}>TEST</span>}
                             {s.qualityNote && <AlertTriangle size={12} style={{ color: "#F2994A" }} title={s.qualityNote} />}
                           </div>
                           <div className="mono" style={{ fontSize: 11, color: "#6b7078" }}>{s.fileName}</div>
@@ -2975,6 +3139,21 @@ function SwimmingTab({ isMobile }) {
                           {s.isCssTest && s.cssTest && (
                             <span className="mono" style={{ fontSize: 11.5, color: "#2EC4B6" }}>CSS pace: {fmtPace100(s.cssTest.pace100)} ({s.cssTest.cssSpeed.toFixed(2)} m/s)</span>
                           )}
+                          {/* Workout/Test categorization — drives the Log-type filter on the
+                              Trends/Compare tabs (see renderFilterBar + chronSessions above).
+                              Independent of "CSS test" above, which only flags a CSS-speed calc. */}
+                          <div style={{ display: "flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                            {[["workout", "Workout", "#56CCF2", Dumbbell], ["test", "Test", "#F2994A", Target]].map(([v, l, c, Ic]) => {
+                              const selected = sessionCategoryOf(s) === v;
+                              return (
+                                <button key={v} onClick={() => setSessionCategory(s.id, v)} className="pill" style={{
+                                  display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
+                                  background: selected ? c : `${c}1a`, border: `1px solid ${selected ? c : c + "55"}`,
+                                  color: selected ? "#0c0d10" : c, borderRadius: 8, padding: "5px 9px", fontSize: 10.5, fontWeight: 700,
+                                }}><Ic size={10} />{l}</button>
+                              );
+                            })}
+                          </div>
                           <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 12, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
                         </div>
                       </div>
@@ -2984,6 +3163,8 @@ function SwimmingTab({ isMobile }) {
               })}
             </div>
           </div>
+            </>
+          )}
         </>
       )}
     </div>
