@@ -2317,7 +2317,7 @@ function SwimmingTab({ isMobile, onExit }) {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
             </LineChart>
@@ -2333,7 +2333,7 @@ function SwimmingTab({ isMobile, onExit }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d[paceDataKey]), "lower")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeCardColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2355,7 +2355,7 @@ function SwimmingTab({ isMobile, onExit }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d.avgHR), "neutral")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => (v != null ? `${Math.round(v)} bpm` : "—")} />
               <Line type="monotone" dataKey="avgHR" name="Avg HR" stroke="#FF453A" strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2377,7 +2377,10 @@ function SwimmingTab({ isMobile, onExit }) {
     if (!showHR) {
       // No HR overlay requested: raw values on a single axis, exactly as before — no
       // cross-metric scaling problem to solve when only one unit is on the chart.
-      const tooltipFormatter = (v, name) => [baseFor      {overlaySelector}
+      const tooltipFormatter = (v, name) => [baseFormatter(v), name];
+      return (
+        <div>
+          {overlaySelector}
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {(() => {
@@ -2391,7 +2394,7 @@ function SwimmingTab({ isMobile, onExit }) {
               {/* reversed reads METRIC_AXIS_DIRECTION — the same registry the collapsed
                   sparkline's YAxis reads above — instead of a per-branch key check, so this
                   can't quietly drift out of sync with the sparkline again (item 6). */}
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.72 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
@@ -2776,7 +2779,7 @@ function SwimmingTab({ isMobile, onExit }) {
                     {!isOpen && (pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={36}>
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                          <YAxis hide domain={["dataMin", "dataMax"]} reversed={card.key === "css" || METRIC_AXIS_DIRECTION[card.key] === "lower"} />
+                          <YAxis hide domain={["dataMin", "dataMax"]} reversed={card.lowerBetter || METRIC_AXIS_DIRECTION[card.key] === "lower"} />
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
@@ -2793,6 +2796,24 @@ function SwimmingTab({ isMobile, onExit }) {
               })}
             </div>
 
+            {/* CSS trend — kept full-size since it's rare/high-signal */}
+            <div style={{ display: "none", marginTop: 18 }} aria-hidden="true">
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#D1D1D6", marginBottom: 8 }}>Critical Swim Speed (CSS) over time</div>
+              {cssTrendData.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#636366", background: "#000000", border: "1px dashed #27272A", borderRadius: 16, padding: "12px 14px" }}>
+                  No CSS test logged yet. CSS isn't estimated from casual sessions — mark a session as a CSS test at upload time (in History &amp; Log) to start this chart.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+                    <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+                    <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
+                    <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
           </div>
             </>
           )}
@@ -4617,13 +4638,13 @@ function TrainingLog() {
           color:#6E675F;
         }
 
-        /* Swim filters are secondary controls, intentionally smaller than navigation. */
+        /* Swim analysis filters are secondary controls, smaller than navigation. */
         .swim-filter-pill {
           min-height: 28px !important;
           padding: 3px 7px !important;
           font-size: 10px !important;
-          border-radius: 9px !important;
           line-height: 1.1 !important;
+          border-radius: 9px !important;
         }
         @media (max-width: 560px) {
           .swim-filter-pill {
