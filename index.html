@@ -2134,6 +2134,10 @@ function SwimmingTab({ isMobile, onExit }) {
   const radarProfileStrokeLabel = strokeFilter === "all"
     ? "All swim types"
     : (SWIM_STROKE_LABELS[strokeFilter] || strokeFilter);
+  const radarBaselineColor = "#BF5AF2";
+  const radarLatestColor = strokeFilter === "all"
+    ? "#FF9F0A"
+    : (SWIM_STROKE_COLORS[strokeFilter] || "#FF9F0A");
 
   const radarInterpretation = (() => {
     const byKey = Object.fromEntries(radarVisibleProfile.map((a) => [a.key, a.score]));
@@ -2228,7 +2232,7 @@ function SwimmingTab({ isMobile, onExit }) {
             // the centralized SWIM_STROKE_COLORS map, with a strong, unambiguous
             // selected state (solid fill) vs. a tinted, low-contrast unselected state —
             // reused verbatim (same colors) everywhere else in the Swim tab.
-            const color = s === "all" ? "#FFFFFF" : (SWIM_STROKE_COLORS[s] || "#8E8E93");
+            const color = s === "all" ? "#F5F5F7" : (SWIM_STROKE_COLORS[s] || "#8E8E93");
             const selected = strokeFilter === s;
             return (
               <button key={s} onClick={() => setStrokeFilter(s)} className="pill swim-filter-pill" style={{
@@ -2865,7 +2869,7 @@ function SwimmingTab({ isMobile, onExit }) {
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {[["cadence", "Pace + Stroke Rate", "#64D2FF"], ["dps", "Pace + Stroke Distance", "#30D158"], ["hr", "Pace + HR", "#FF453A"], ["swolfhr", "SWOLF + HR", "#BF5AF2"]].map(([v, l, c]) => (
-                  <button key={v} onClick={() => setCompareMode(v)} className="pill" style={{
+                  <button key={v} onClick={() => setCompareMode(v)} className="pill compare-combo-pill" style={{
                     cursor: "pointer", background: compareMode === v ? c : `${c}1a`,
                     border: `1.5px solid ${compareMode === v ? c : c + "55"}`,
                     color: compareMode === v ? "#000000" : c,
@@ -2897,7 +2901,7 @@ function SwimmingTab({ isMobile, onExit }) {
               const primaryFmt = cfg.primary === "pace" ? fmtPace100 : (v) => Math.round(v);
               const otherKey = cfg.secKey, otherLabel = cfg.secLabel, otherFmt = cfg.secFmt, otherColor = cfg.secColor;
               const comparePrimaryColor = strokeFilter === "all"
-                ? "#64D2FF"
+                ? "#F5F5F7"
                 : (SWIM_STROKE_COLORS[strokeFilter] || "#64D2FF");
               const strokeLabel = strokeFilter === "all" ? "All swim types" : SWIM_STROKE_LABELS[activeStroke];
 
@@ -3081,10 +3085,12 @@ function SwimmingTab({ isMobile, onExit }) {
           {(() => {
             const radarAxisTick = ({ x, y, payload, textAnchor }) => {
               const label = payload && payload.value ? String(payload.value) : "";
+              const axisMeta = radarVisibleProfile.find((a) => a.label === label);
+              const tickColor = axisMeta ? axisMeta.color : "#8E8E93";
               const words = label.split(" ");
               const shouldWrap = isMobile && words.length > 1 && label.length > 12;
               return (
-                <text x={x} y={y} textAnchor={textAnchor} fill="#8E8E93" fontSize={10}>
+                <text x={x} y={y} textAnchor={textAnchor} fill={tickColor} fontSize={10}>
                   {shouldWrap ? (
                     <>
                       <tspan x={x} dy="-0.25em">{words.slice(0, -1).join(" ")}</tspan>
@@ -3110,8 +3116,8 @@ function SwimmingTab({ isMobile, onExit }) {
                 )}
 
                 <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 8, fontSize: 10.5 }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#FF9F0A" }}><span style={{ width: 18, height: 3, background: "#FF9F0A", display: "inline-block", borderRadius: 2 }} /> Latest session</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#64D2FF" }}><span style={{ width: 18, height: 0, borderTop: "2px dashed #64D2FF", display: "inline-block" }} /> 6-week baseline = 100</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: radarLatestColor }}><span style={{ width: 18, height: 3, background: radarLatestColor, display: "inline-block", borderRadius: 2 }} /> Latest session</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: radarBaselineColor }}><span style={{ width: 18, height: 0, borderTop: `2px dashed ${radarBaselineColor}`, display: "inline-block" }} /> 6-week baseline = 100</span>
                 </div>
 
                 {radarProfile.length >= 3 && (
@@ -3171,8 +3177,8 @@ function SwimmingTab({ isMobile, onExit }) {
                         <PolarGrid stroke="#636366" strokeOpacity={0.42} />
                         <PolarAngleAxis dataKey="label" tick={radarAxisTick} />
                         <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <Radar name="6-week baseline" dataKey={() => 100} stroke="#64D2FF" strokeWidth={2.6} fill="#64D2FF" fillOpacity={0.09} strokeDasharray="6 4" />
-                        <Radar name="Latest session" dataKey="displayValue" stroke="#FF9F0A" strokeWidth={3} fill="#FF9F0A" fillOpacity={0.24} />
+                        <Radar name="6-week baseline" dataKey={() => 100} stroke={radarBaselineColor} strokeWidth={2.6} fill={radarBaselineColor} fillOpacity={0.08} strokeDasharray="6 4" />
+                        <Radar name="Latest session" dataKey="displayValue" stroke={radarLatestColor} strokeWidth={3} fill={radarLatestColor} fillOpacity={0.22} />
                         <Tooltip
                           contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 11.5 }}
                           formatter={(v, name, props) => name === "Latest session" ? [`${props.payload.score.toFixed(1)} (raw score)`, name] : ["100", name]}
@@ -4718,6 +4724,21 @@ function TrainingLog() {
         .app-nav-back {
           color:#8E8E93 !important;
         }
+        .compare-combo-pill {
+          min-height:27px !important;
+          padding:3px 7px !important;
+          font-size:9.8px !important;
+          border-radius:8px !important;
+          line-height:1.05 !important;
+        }
+        @media (max-width: 560px) {
+          .compare-combo-pill {
+            min-height:25px !important;
+            padding:3px 6px !important;
+            font-size:9.2px !important;
+          }
+        }
+
         .radar-axis-pill {
           min-height:27px !important;
           padding:4px 7px !important;
