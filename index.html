@@ -61,7 +61,7 @@
      evaluates the result. -->
 <script type="text/plain" id="app-source">
 const { useState, useEffect, useMemo, useRef } = React;
-const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine, ReferenceArea } = Recharts;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine, ReferenceArea, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } = Recharts;
 
 // ---- Lightweight inline icon set (stand-ins for lucide-react, no external icon dependency) ----
 function Icon({ children, size = 16, color = "currentColor", strokeWidth = 2, style, onClick, title }) {
@@ -108,6 +108,7 @@ const TrendingDown = (p) => <Icon {...p}><polyline points="3 7 9 13 13 9 21 17" 
 const Clock = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></Icon>;
 const Info = (p) => <Icon {...p}><circle cx="12" cy="12" r="9" /><line x1="12" y1="11" x2="12" y2="16" /><line x1="12" y1="8" x2="12" y2="8.01" /></Icon>;
 const Sparkles = (p) => <Icon {...p}><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z" /><path d="M5 17l.8 2.2L8 20l-2.2.8L5 23l-.8-2.2L2 20l2.2-.8L5 17z" /><path d="M19 15l.7 1.8L21.5 17.5l-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7L19 15z" /></Icon>;
+const RadarIcon = (p) => <Icon {...p}><path d="M12 2v10l7-4.5" /><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></Icon>;
 
 // ---- window.storage polyfill backed by localStorage (persists per-browser on GitHub Pages) ----
 window.storage = {
@@ -601,6 +602,17 @@ const SWIM_CHART_OVERLAY_OPTIONS = {
   dps: [{ value: "none", label: "None" }],
 };
 
+// Single source of truth for which direction counts as "better" per Trends metric — "lower"
+// flips the Y axis (and z-score sign, where z-scores are used) so improvement always reads as
+// "up"; "higher" leaves it as-is; "neutral" means there's no universal better direction (e.g.
+// whole-session HR moves with effort, not fitness). Every place that needs to reverse an axis
+// or flip a sign for one of these metrics reads from HERE instead of re-deciding locally —
+// that's the actual fix for item 6: the previous pass patched the SWOLF branch's `reversed`
+// prop directly, which is exactly the kind of per-branch fix that's easy to apply in one place
+// and miss in another. Centralizing it means collapsed sparklines, every expanded-chart branch,
+// and the radar tab's z-score flip all agree by construction.
+const METRIC_AXIS_DIRECTION = { pace: "lower", swolf: "lower", cadence: "higher", dps: "higher", heart: "neutral" };
+
 // ---- Length-level correction/override layer (Part 1E / Part 9) -----------------------------
 // Every length keeps its original imported fields (stroke, lengthType) untouched forever.
 // A person's corrections live alongside them in userExcluded / userLengthType / userStroke and
@@ -797,9 +809,6 @@ function processSwimFit(parsed, fileName) {
     reps: metrics.reps,
     isCssTest: false,
     cssTest: null, // { t200, t400 } seconds, entered manually — see SwimmingTab
-    sessionCategory: "workout", // "workout" | "test" — user-set label, see setSessionCategory in SwimmingTab.
-                                  // Drives the All/Test/Workout filter on Trends + Compare (keeps easy
-                                  // recovery/drill swims from diluting those two views).
   };
 }
 
@@ -897,12 +906,6 @@ function backfillSwimSessions(list) {
   const next = (list || []).map((s) => {
     const migrated = migrateSwimSessionToOverrideLayer(s);
     let fixed = backfillSwimSessionStrokeStats(migrated);
-    // Sessions logged before the Workout/Test categorization existed default to "workout" —
-    // the common case — so the All/Test/Workout filter has a real value to read immediately
-    // rather than treating old data as neither.
-    if (fixed.sessionCategory == null) {
-      fixed = { ...fixed, sessionCategory: "workout" };
-    }
     if (fixed !== s) changed = true;
     return fixed;
   });
@@ -1509,8 +1512,14 @@ function SwimmingTab({ isMobile }) {
   const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
   const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
   const [metricValueMode, setMetricValueMode] = useState("latest"); // "latest" | "avg6" — headline number on each Trends card
-  const [swimSection, setSwimSection] = useState("trends"); // "trends" | "compare" | "log" — the 3 tabs within the Swim tab
-  const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "test" | "workout" — filters Trends + Compare only, Log always shows everything
+  const [swimSection, setSwimSection] = useState("trends"); // "trends" | "compare" | "radar" — the 3 tabs within the Swim tab. Session Detail
+                                                              // lives below the switcher now, outside all three (see render, item 2).
+  const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "workout" | "csstest" — filters Trends + Compare only (Session
+                                                                 // Detail below always shows everything). Derived straight from isCssTest,
+                                                                 // no separate category field (see categoryValueOf below).
+  const [radarMetricKeys, setRadarMetricKeys] = useState(() => new Set(["pace", "swolf", "cadence", "avgHR", "energy100"])); // Web chart axis picker
+  const [radarCurrentId, setRadarCurrentId] = useState(null); // session id for the radar's "Current" polygon — null falls back to the latest session
+  const [radarBaselineId, setRadarBaselineId] = useState("avg6"); // "avg6" (last-6-session average) or a specific session id
   const SWIM_KEY = "swim-sessions-v1";
 
   useEffect(() => {
@@ -1664,15 +1673,6 @@ function SwimmingTab({ isMobile }) {
     await persist(next);
   };
 
-  // Workout/Test categorization (Part: Log filtering) — independent of isCssTest, which only
-  // flags a CSS-speed-calculation session specifically. "Test" here is the broader label for
-  // any time-trial/effort-test swim a person wants excluded from casual Trends/Compare noise;
-  // "Workout" (the default) covers everything else, including easy/recovery swims.
-  const setSessionCategory = async (sessionId, category) => {
-    const next = (sessions || []).map((s) => (s.id === sessionId ? { ...s, sessionCategory: category } : s));
-    await persist(next);
-  };
-
   const todayStr = toISODate(new Date());
 
   const streak = useMemo(() => {
@@ -1702,18 +1702,19 @@ function SwimmingTab({ isMobile }) {
     return { weekStreak: wStreak, dayStreak: dStreak, daysSinceLast, totalSessions: sessions.length };
   }, [sessions, todayStr]);
 
-  // Session's category, defaulting untagged/legacy sessions to "workout" (see backfillSwimSessions,
-  // which persists this same default — this fallback just covers the render before that backfill
-  // effect has run once on mount).
-  const sessionCategoryOf = (s) => s.sessionCategory || "workout";
+  // Category is derived straight from the existing isCssTest boolean — no separate settable
+  // field. Whatever already marks a session as a CSS test (the Reps/sets picker below, or
+  // upload-time in History & Log) is the single source of truth for this label everywhere.
+  const categoryLabelOf = (s) => (s.isCssTest ? "CSS Test" : "Workout");
+  const categoryValueOf = (s) => (s.isCssTest ? "csstest" : "workout");
 
-  // chronSessions feeds Trends + Compare (and Insights) — filtered by the Workout/Test picker so
-  // active-recovery/easy-swim noise (or, flipped, casual swims) can be excluded from those views.
-  // sortedSessions feeds the Log tab, which always lists every session regardless of this filter,
-  // since that's where the category itself gets set.
+  // chronSessions feeds Trends + Compare (and Insights) — filtered by the Workout/CSS Test
+  // picker so a CSS effort test (or, flipped, casual swims) can be excluded from those views.
+  // Session Detail always shows every session regardless of this filter, since that's where
+  // CSS tests actually get marked/unmarked.
   const chronSessions = useMemo(() => {
     const chron = sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
-    return categoryFilter === "all" ? chron : chron.filter((s) => sessionCategoryOf(s) === categoryFilter);
+    return categoryFilter === "all" ? chron : chron.filter((s) => categoryValueOf(s) === categoryFilter);
   }, [sessions, categoryFilter]);
   const sortedSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => (a.date < b.date ? 1 : -1)) : []), [sessions]);
 
@@ -1939,8 +1940,6 @@ function SwimmingTab({ isMobile }) {
   const paceDataKey = strokeFilter === "all" ? "pace100" : `pace100_${strokeFilter}`;
   const paceSeries = seriesFor(paceDataKey);
   const hrSeries = seriesFor("avgHR");
-  const peakHrSeries = seriesFor("peakHR");
-  const energySeries = seriesFor("energy100");
   const swolfSeries = activeStroke ? seriesFor(`swolf_${activeStroke}`) : [];
   const cadenceSeries = activeStroke ? seriesFor(`cadence_${activeStroke}`) : [];
   const dpsSeries = activeStroke ? seriesFor(`dps_${activeStroke}`) : [];
@@ -1971,6 +1970,69 @@ function SwimmingTab({ isMobile }) {
     if (!stroke) return "";
     return strokeFilter === "all" ? ` (${SWIM_STROKE_LABELS[stroke]} · most common)` : ` (${SWIM_STROKE_LABELS[stroke]})`;
   };
+
+  // ---- Web chart ("radar") metric registry --------------------------------------------------
+  // A small explicit table rather than hardcoded per-axis JSX, so the radar's available axes
+  // stay driven by data instead of by bespoke markup. Each entry knows how to read its own raw
+  // value off a session object (per-stroke metrics use activeStroke, same fallback as the
+  // Trends cards above) and its "better" direction, for the z-score sign-flip below. direction
+  // "neutral" (HR) isn't flipped — there's no universal better direction for effort.
+  const RADAR_METRIC_REGISTRY = [
+    { key: "pace", label: "Pace", color: "#56CCF2", direction: METRIC_AXIS_DIRECTION.pace, fmt: (v) => fmtPace100(v),
+      getValue: (s) => (strokeFilter === "all" ? s.pace100Overall : (s.strokeStats && s.strokeStats[strokeFilter] ? s.strokeStats[strokeFilter].pace100 : null)) },
+    { key: "swolf", label: "SWOLF", color: "#9CCC65", direction: METRIC_AXIS_DIRECTION.swolf, fmt: (v) => fmtNum(v, 0),
+      getValue: (s) => (activeStroke && s.strokeStats && s.strokeStats[activeStroke] ? s.strokeStats[activeStroke].avgSwolf : null) },
+    { key: "cadence", label: "Stroke rate", color: "#F2C94C", direction: METRIC_AXIS_DIRECTION.cadence, fmt: (v) => `${fmtNum(v, 1)} spm`,
+      getValue: (s) => (activeStroke && s.strokeStats && s.strokeStats[activeStroke] ? s.strokeStats[activeStroke].avgCadence : null) },
+    { key: "dps", label: "Distance/stroke", color: "#2EC4B6", direction: METRIC_AXIS_DIRECTION.dps, fmt: (v) => `${fmtNum(v, 2)}m`,
+      getValue: (s) => (activeStroke && s.strokeStats && s.strokeStats[activeStroke] ? s.strokeStats[activeStroke].avgDistPerStroke : null) },
+    { key: "avgHR", label: "Avg HR", color: "#E63946", direction: "neutral", fmt: (v) => `${Math.round(v)} bpm`,
+      getValue: (s) => s.avgHR },
+    { key: "peakHR", label: "Peak HR", color: "#BB86FC", direction: "neutral", fmt: (v) => `${Math.round(v)} bpm`,
+      getValue: (s) => s.peakHR },
+    { key: "energy100", label: "Energy /100m", color: "#F2994A", direction: "lower", fmt: (v) => `${Math.round(v)} kcal`,
+      getValue: (s) => (s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null) },
+  ];
+
+  const latestChronSession = chronSessions.length ? chronSessions[chronSessions.length - 1] : null;
+  const radarCurrentSession = chronSessions.find((s) => s.id === radarCurrentId) || latestChronSession;
+
+  // radarData: one row per selected metric, each with a z-scored current + baseline value
+  // (mean/std computed over chronSessions — the same category+stroke-filtered pool Trends and
+  // Compare read — reusing computeMeanStd/zScoreOf rather than a new normalization approach).
+  // Sign is flipped for lower-better metrics so "farther out" always reads as "better" on every
+  // axis, same convention as the reversed Y axes elsewhere in this tab.
+  const radarData = RADAR_METRIC_REGISTRY.filter((m) => radarMetricKeys.has(m.key)).map((m) => {
+    const poolVals = chronSessions.map(m.getValue);
+    const stats = computeMeanStd(poolVals);
+    const currentRaw = radarCurrentSession ? m.getValue(radarCurrentSession) : null;
+
+    let baselineRaw = null;
+    if (radarBaselineId === "avg6") {
+      const vals = chronSessions
+        .filter((s) => !radarCurrentSession || s.id !== radarCurrentSession.id)
+        .map(m.getValue)
+        .filter((v) => v != null)
+        .slice(-6);
+      baselineRaw = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    } else {
+      const baselineSession = chronSessions.find((s) => s.id === radarBaselineId);
+      baselineRaw = baselineSession ? m.getValue(baselineSession) : null;
+    }
+
+    let currentZ = zScoreOf(currentRaw, stats);
+    let baselineZ = zScoreOf(baselineRaw, stats);
+    if (m.direction === "lower") {
+      if (currentZ != null) currentZ = -currentZ;
+      if (baselineZ != null) baselineZ = -baselineZ;
+    }
+    return {
+      metric: m.label,
+      current: currentZ != null ? Math.max(-2.4, Math.min(2.4, currentZ)) : 0,
+      baseline: baselineZ != null ? Math.max(-2.4, Math.min(2.4, baselineZ)) : 0,
+      currentRaw, baselineRaw, fmt: m.fmt,
+    };
+  });
 
   const metricCards = [
     {
@@ -2022,25 +2084,6 @@ function SwimmingTab({ isMobile }) {
       perStroke: false,
       color: "#E63946",
     },
-    {
-      key: "peakhr",
-      title: "Peak HR",
-      series: peakHrSeries,
-      verdict: null,
-      value: headlineOf(peakHrSeries) != null ? `${Math.round(headlineOf(peakHrSeries))} bpm` : "—",
-      perStroke: false,
-      color: "#BB86FC",
-    },
-    {
-      key: "energy100",
-      title: "Energy /100m",
-      series: energySeries,
-      verdict: computeVerdict(energySeries, "lower-better"),
-      value: headlineOf(energySeries) != null ? `${Math.round(headlineOf(energySeries))} kcal` : "—",
-      perStroke: false,
-      lowerBetter: true,
-      color: "#F2994A",
-    },
   ];
 
   const allMetricsExpanded = metricCards.length > 0 && metricCards.every((c) => expandedMetrics.has(c.key));
@@ -2060,7 +2103,7 @@ function SwimmingTab({ isMobile }) {
   // it's the active tab (previously this one bar visually spanned both cards at once, back
   // when Trends+Compare were stacked instead of tabbed).
   const renderFilterBar = () => (
-    <div style={{ position: "sticky", top: isMobile ? 64 : 68, zIndex: 30, display: "flex", flexDirection: "column", gap: 8, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 14, padding: "6px 8px", marginBottom: 10, boxShadow: "0 6px 16px -8px rgba(0,0,0,0.65)" }}>
+    <div style={{ position: "sticky", top: isMobile ? 52 : 56, zIndex: 30, display: "flex", flexDirection: "column", gap: 8, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 14, padding: "6px 8px", marginBottom: 10, boxShadow: "0 6px 16px -8px rgba(0,0,0,0.65)" }}>
       {allStrokesSeen.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
           {["all", ...allStrokesSeen].map((s) => {
@@ -2080,14 +2123,16 @@ function SwimmingTab({ isMobile }) {
           })}
         </div>
       )}
-      {/* Workout/Test filter — excludes whichever category isn't picked from Trends + Compare
-          (chronSessions itself is filtered by this, so every chart/card downstream inherits it
-          automatically). Log always shows everything regardless, so nothing is ever hidden for
-          good — this only narrows what these two tabs analyze. */}
+      {/* Workout/CSS Test filter — excludes whichever category isn't picked from Trends +
+          Compare + the radar tab (chronSessions itself is filtered by this, so every
+          chart/card downstream inherits it automatically). Session Detail always shows
+          everything regardless, so nothing is ever hidden for good — this only narrows what
+          these tabs analyze. Category comes straight from isCssTest (item 3), not a separate
+          field. */}
       {(sessions || []).length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", paddingTop: allStrokesSeen.length > 0 ? 6 : 0, borderTop: allStrokesSeen.length > 0 ? "1px solid #2b241a" : "none" }}>
-          <span style={{ fontSize: 10, color: "#6b7078", marginRight: 2 }}>Log type</span>
-          {[["all", "All", "#F5F3EE", null], ["workout", "Workout", "#56CCF2", Dumbbell], ["test", "Test", "#2EC4B6", Target]].map(([v, l, c, Ic]) => {
+          <span style={{ fontSize: 10, color: "#6b7078", marginRight: 2 }}>Category</span>
+          {[["all", "All", "#F5F3EE", null], ["workout", "Workout", "#56CCF2", Dumbbell], ["csstest", "CSS Test", "#2EC4B6", Target]].map(([v, l, c, Ic]) => {
             const selected = categoryFilter === v;
             return (
               <button key={v} onClick={() => setCategoryFilter(v)} className="pill" style={{
@@ -2134,7 +2179,7 @@ function SwimmingTab({ isMobile }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeCardColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2143,25 +2188,22 @@ function SwimmingTab({ isMobile }) {
       );
     }
 
-    if (key === "heart" || key === "peakhr" || key === "energy100") {
-      // Whole-session metrics — one line, no per-stroke overlay (HR/energy aren't tracked
-      // per-stroke), no reason to offer the stroke-rate/HR overlay picker either.
-      const dataKey = key === "heart" ? "avgHR" : key === "peakhr" ? "peakHR" : "energy100";
-      const color = key === "heart" ? "#E63946" : key === "peakhr" ? "#BB86FC" : "#F2994A";
-      const lowerBetter = key === "energy100";
-      const tickFmt = key === "energy100" ? (v) => `${Math.round(v)}` : (v) => `${Math.round(v)}`;
-      const tooltipFmt = key === "energy100" ? (v) => (v != null ? `${Math.round(v)} kcal` : "—") : (v) => (v != null ? `${Math.round(v)} bpm` : "—");
+    if (key === "heart") {
+      // Whole-session metric — one line, no per-stroke overlay (HR isn't tracked per-stroke),
+      // no reason to offer the stroke-rate overlay picker either.
+      // reversed reads the METRIC_AXIS_DIRECTION registry — same single source of truth the
+      // collapsed sparkline reads (see its YAxis above), so the two can never drift out of
+      // sync again the way the SWOLF-only patch previously did (item 6).
+      const reversed = METRIC_AXIS_DIRECTION.heart === "lower";
       return (
         <div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-              {/* Reversed exactly when the collapsed sparkline is reversed (lowerBetter), so the
-                  line's up/down direction always reads the same whether the card is open or shut. */}
-              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={tickFmt} reversed={lowerBetter} domain={["dataMin - 2", "dataMax + 2"]} />
-              <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={tooltipFmt} />
-              <Line type="monotone" dataKey={dataKey} name={key === "heart" ? "Avg HR" : key === "peakhr" ? "Peak HR" : "Energy /100m"} stroke={color} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
+              <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={(v) => (v != null ? `${Math.round(v)} bpm` : "—")} />
+              <Line type="monotone" dataKey="avgHR" name="Avg HR" stroke="#E63946" strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -2171,10 +2213,11 @@ function SwimmingTab({ isMobile }) {
     const dataKeyPrefix = key === "swolf" ? "swolf_" : key === "cadence" ? "cadence_" : "dps_";
     const baseFormatter = key === "dps" ? (v) => (v != null ? fmtNum(v, 2) + "m" : "—") : (v) => fmtNum(v, key === "swolf" ? 0 : 1);
     const strokesToShow = strokeFilter === "all" ? allStrokesSeen : [strokeFilter];
-    // Same "better" direction per metric matters for the sign-flip below: lower SWOLF is
-    // better (flip, like pace), higher distance-per-stroke is better (no flip), and cadence
-    // has no universal "better" direction so it's left unflipped and called out as such.
-    const metricDirection = key === "swolf" ? "lower-better" : "neutral-or-higher-better";
+    // "Better" direction per metric, read from the shared METRIC_AXIS_DIRECTION registry (item
+    // 6) rather than decided locally — lower SWOLF is better (flip, like pace), higher
+    // distance-per-stroke is better (no flip), and cadence has no universal "better" direction
+    // so it's left unflipped and called out as such.
+    const metricDirection = METRIC_AXIS_DIRECTION[key] === "lower" ? "lower-better" : "neutral-or-higher-better";
     const metricLabel = key === "swolf" ? "SWOLF" : key === "cadence" ? "cadence" : "distance per stroke";
 
     if (!showHR) {
@@ -2188,10 +2231,10 @@ function SwimmingTab({ isMobile }) {
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#23262d" />
               <XAxis dataKey="label" tick={{ fill: "#6b7078", fontSize: 10.5 }} />
-              {/* reversed matches the collapsed sparkline's reversed={!!card.lowerBetter} for this
-                  same metric (SWOLF is lower-is-better) — without this the expanded chart's line
-                  ran the opposite direction from its own collapsed sparkline. */}
-              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtNum(v, 2)} reversed={key === "swolf"} domain={["dataMin - 2", "dataMax + 2"]} />
+              {/* reversed reads METRIC_AXIS_DIRECTION — the same registry the collapsed
+                  sparkline's YAxis reads above — instead of a per-branch key check, so this
+                  can't quietly drift out of sync with the sparkline again (item 6). */}
+              <YAxis tick={{ fill: "#6b7078", fontSize: 10.5 }} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
@@ -2319,11 +2362,15 @@ function SwimmingTab({ isMobile }) {
         </div>
       ) : (
         <>
-          {/* Swim section tabs — Trends / Compare / Log. Segmented control styled like the
+          {/* Swim section tabs — Trends / Compare / Web chart. Segmented control styled like the
               floating filter bars elsewhere in this tab (solid warm-dark background, pill
-              buttons), sticky so it stays reachable while scrolling a long tab's content. */}
-          <div style={{ position: "sticky", top: isMobile ? 8 : 12, zIndex: 31, display: "flex", gap: 6, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 6, marginBottom: 14, boxShadow: "0 8px 20px -10px rgba(0,0,0,0.6)" }}>
-            {[["trends", "Trends", TrendingUp], ["compare", "Compare", GitCompare], ["log", "Log", History]].map(([v, l, Ic]) => {
+              buttons), sticky so it stays reachable while scrolling a long tab's content.
+              top is tuned near 0 now that the OUTER nav (Today/Workout/Swim/History & Log) is
+              no longer sticky itself — this inner switcher is now the only thing floating above
+              this content, so it no longer needs to reserve space for the outer nav above it
+              (item 5). */}
+          <div style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 6, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 6, marginBottom: 14, boxShadow: "0 8px 20px -10px rgba(0,0,0,0.6)" }}>
+            {[["trends", "Trends", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Web chart", RadarIcon]].map(([v, l, Ic]) => {
               const selected = swimSection === v;
               return (
                 <button key={v} onClick={() => setSwimSection(v)} style={{
@@ -2555,7 +2602,7 @@ function SwimmingTab({ isMobile }) {
                     {!isOpen && (pts.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={64}>
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                          <YAxis hide domain={["dataMin", "dataMax"]} reversed={!!card.lowerBetter} />
+                          <YAxis hide domain={["dataMin", "dataMax"]} reversed={METRIC_AXIS_DIRECTION[card.key] === "lower"} />
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
@@ -2824,10 +2871,105 @@ function SwimmingTab({ isMobile }) {
             </>
           )}
 
-          {swimSection === "log" && (
+          {swimSection === "radar" && (
             <>
-          {/* Session detail — the length-by-length drill-down. History & Log has a lighter
-              summary list of the same sessions; this is where the per-length breakdown lives. */}
+          {renderFilterBar()}
+          {/* Web chart — Current vs Baseline swim, normalized across whichever metrics are
+              picked, drawn as two overlapping radar polygons (item 4). Respects the same
+              stroke + Workout/CSS Test filters as Trends/Compare via chronSessions. */}
+          <div style={cardStyle}>
+            <div style={{ ...labelStyle, marginBottom: 2 }}>Web chart</div>
+            <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 14 }}>Current session vs a baseline, normalized onto one shared scale so differently-scaled metrics can share one chart. Pick which axes to show and which two sessions to compare.</div>
+
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Current</div>
+                <select
+                  value={radarCurrentSession ? radarCurrentSession.id : ""}
+                  onChange={(e) => setRadarCurrentId(e.target.value)}
+                  className="mono"
+                  style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 9px", color: "#c9cdd3", fontSize: 11.5, cursor: "pointer" }}
+                >
+                  {[...chronSessions].reverse().map((s) => (
+                    <option key={s.id} value={s.id}>{fmtDate(s.date)}{s.id === latestChronSession?.id ? " (latest)" : ""}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Baseline</div>
+                <select
+                  value={radarBaselineId}
+                  onChange={(e) => setRadarBaselineId(e.target.value)}
+                  className="mono"
+                  style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 9px", color: "#c9cdd3", fontSize: 11.5, cursor: "pointer" }}
+                >
+                  <option value="avg6">Last 6 avg</option>
+                  {[...chronSessions].reverse().filter((s) => !radarCurrentSession || s.id !== radarCurrentSession.id).map((s) => (
+                    <option key={s.id} value={s.id}>{fmtDate(s.date)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14 }}>
+              {RADAR_METRIC_REGISTRY.map((m) => {
+                const selected = radarMetricKeys.has(m.key);
+                return (
+                  <button
+                    key={m.key}
+                    onClick={() => setRadarMetricKeys((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(m.key)) next.delete(m.key); else next.add(m.key);
+                      return next;
+                    })}
+                    className="pill"
+                    style={{
+                      cursor: "pointer", background: selected ? m.color : `${m.color}1a`,
+                      border: `1.5px solid ${selected ? m.color : m.color + "55"}`,
+                      color: selected ? "#0c0d10" : m.color, borderRadius: 12, padding: "5px 10px", fontSize: 11, fontWeight: 700,
+                    }}
+                  >{m.label}</button>
+                );
+              })}
+            </div>
+
+            {chronSessions.length === 0 ? (
+              <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5 }}>No sessions match the current filters.</div>
+            ) : radarData.length < 3 ? (
+              <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>Pick at least 3 metrics above to draw the radar.</div>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={320}>
+                  <RadarChart data={radarData} outerRadius="72%">
+                    <PolarGrid stroke="#2a2e33" />
+                    <PolarAngleAxis dataKey="metric" tick={{ fill: "#9a9fa6", fontSize: 11 }} />
+                    <PolarRadiusAxis tick={false} axisLine={false} domain={[-2.4, 2.4]} />
+                    <Tooltip
+                      contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }}
+                      formatter={(v, name, props) => {
+                        const raw = name === "Baseline" ? props.payload.baselineRaw : props.payload.currentRaw;
+                        return [raw != null ? props.payload.fmt(raw) : "—", name];
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Radar name="Baseline" dataKey="baseline" stroke="#6b7078" fill="#6b7078" fillOpacity={0.18} connectNulls />
+                    <Radar name="Current" dataKey="current" stroke="#F2994A" fill="#F2994A" fillOpacity={0.32} connectNulls />
+                  </RadarChart>
+                </ResponsiveContainer>
+                <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
+                  Each axis is normalized to standard deviations from that metric's own mean across the filtered sessions above, flipped where lower is better (Pace, SWOLF, Energy/100m), so farther out always reads as "better" — real values are in the tooltip.
+                  {radarData.some((d) => d.currentRaw == null || d.baselineRaw == null) && " Some axes are missing data for the current filters and are shown centered."}
+                </div>
+              </>
+            )}
+          </div>
+            </>
+          )}
+
+          {/* Session detail — the length-by-length drill-down. Always visible, outside the tab
+              switcher above (item 2) — this is where CSS-test flagging happens, so it needs to
+              stay reachable regardless of which of the three tabs is selected. History & Log
+              has a lighter summary list of the same sessions. */}
           <div style={cardStyle}>
             <div style={{ ...labelStyle, marginBottom: 2 }}>Session detail</div>
             <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 12 }}>Full length-by-length breakdown, glitch flags, and CSS annotations — for a quick summary list instead, see History &amp; Log.</div>
@@ -2842,8 +2984,7 @@ function SwimmingTab({ isMobile }) {
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#F5F3EE", display: "flex", alignItems: "center", gap: 6 }}>
                             {fmtDateFull(s.date)}
-                            {s.isCssTest && <span className="mono" style={{ fontSize: 9.5, color: "#2EC4B6", border: "1px solid #2EC4B655", borderRadius: 5, padding: "1px 5px" }}>CSS TEST</span>}
-                            {sessionCategoryOf(s) === "test" && <span className="mono" style={{ fontSize: 9.5, color: "#F2994A", border: "1px solid #F2994A55", borderRadius: 5, padding: "1px 5px" }}>TEST</span>}
+                            <span className="mono" style={{ fontSize: 9.5, color: s.isCssTest ? "#2EC4B6" : "#56CCF2", border: `1px solid ${s.isCssTest ? "#2EC4B6" : "#56CCF2"}55`, borderRadius: 5, padding: "1px 5px" }}>{categoryLabelOf(s)}</span>
                             {s.qualityNote && <AlertTriangle size={12} style={{ color: "#F2994A" }} title={s.qualityNote} />}
                           </div>
                           <div className="mono" style={{ fontSize: 11, color: "#6b7078" }}>{s.fileName}</div>
@@ -3139,21 +3280,6 @@ function SwimmingTab({ isMobile }) {
                           {s.isCssTest && s.cssTest && (
                             <span className="mono" style={{ fontSize: 11.5, color: "#2EC4B6" }}>CSS pace: {fmtPace100(s.cssTest.pace100)} ({s.cssTest.cssSpeed.toFixed(2)} m/s)</span>
                           )}
-                          {/* Workout/Test categorization — drives the Log-type filter on the
-                              Trends/Compare tabs (see renderFilterBar + chronSessions above).
-                              Independent of "CSS test" above, which only flags a CSS-speed calc. */}
-                          <div style={{ display: "flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
-                            {[["workout", "Workout", "#56CCF2", Dumbbell], ["test", "Test", "#F2994A", Target]].map(([v, l, c, Ic]) => {
-                              const selected = sessionCategoryOf(s) === v;
-                              return (
-                                <button key={v} onClick={() => setSessionCategory(s.id, v)} className="pill" style={{
-                                  display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
-                                  background: selected ? c : `${c}1a`, border: `1px solid ${selected ? c : c + "55"}`,
-                                  color: selected ? "#0c0d10" : c, borderRadius: 8, padding: "5px 9px", fontSize: 10.5, fontWeight: 700,
-                                }}><Ic size={10} />{l}</button>
-                              );
-                            })}
-                          </div>
                           <button onClick={() => deleteSession(s.id)} style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "1px solid #E6394655", color: "#E63946", borderRadius: 12, padding: "7px 12px", fontWeight: 600, fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}><Trash2 size={12} /> Delete</button>
                         </div>
                       </div>
@@ -3163,8 +3289,6 @@ function SwimmingTab({ isMobile }) {
               })}
             </div>
           </div>
-            </>
-          )}
         </>
       )}
     </div>
@@ -4489,11 +4613,11 @@ function TrainingLog() {
         </div>
       </div>
 
-      {/* Floating nav — sticky so section switching (Today/Workout/Swim/Training Log) never
-          requires scrolling back to the top. Unobtrusive: same pill styling as before, just
-          pinned, with a soft backdrop so content passing underneath doesn't look like it's
-          poking through. */}
-      <div style={{ position: "sticky", top: 0, zIndex: 40, background: FLOATING_BAR_BG_SOFT, backdropFilter: "blur(10px)", borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
+      {/* Outer nav — a normal static bar now (no longer sticky). The Swim tab's own inner
+          Trends/Compare/Web chart switcher is the one that floats while scrolling now; having
+          both float at once meant this bar's sticky region could sit on top of and hide the
+          inner switcher depending on scroll position, which is what item 5 fixes. */}
+      <div style={{ background: FLOATING_BAR_BG_SOFT, borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
           <div style={{ display: "flex", gap: 4, overflowX: "auto", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 18, padding: 4 }}>
             {TABS.map(({ id, label, Icon }) => (
