@@ -2977,12 +2977,19 @@ function SwimmingTab({ isMobile }) {
                               setSelectedComparePoint((prev) => (prev === clickedDate ? null : clickedDate));
                             }}
                           >
-                            <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 9.5 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.48 }} tickLine={false} tickMargin={8} interval="preserveStartEnd" />
-                            <YAxis tick={false} axisLine={false} tickLine={false} width={8} domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]} />
+                            <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#636366", strokeOpacity: 0.6 }} tickLine={false} tickMargin={8} interval="preserveStartEnd" />
+                            <YAxis
+                              tick={{ fill: "#8E8E93", fontSize: 9.5 }}
+                              tickLine={false}
+                              axisLine={{ stroke: "#636366", strokeOpacity: 0.32 }}
+                              width={42}
+                              tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
+                              domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
+                            />
                             {/* Bright teal, distinct from every line color this chart can show (blue
                                 primary, gold or red secondary) so "Avg" reads clearly against all of them —
                                 previously a low-contrast gray that nearly disappeared on the dark background. */}
-                            <ReferenceLine y={0} stroke="#A7A7AC" strokeWidth={1} strokeDasharray="4 5" label={{ value: "Avg", position: "insideTopRight", fill: "#8E8E93", fontSize: 9, fontWeight: 600 }} />
+                            <ReferenceLine y={0} stroke="#A7A7AC" strokeWidth={1} strokeDasharray="4 5" label={{ value: "Avg", position: "insideTopRight", fill: "#8E8E93", fontSize: 9.5, fontWeight: 700 }} />
                             <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                             <Legend wrapperStyle={{ fontSize: 11 }} />
                             {/* Keep the primary series visually dominant and make the secondary
@@ -3059,11 +3066,23 @@ function SwimmingTab({ isMobile }) {
                 )}
 
                 {radarInterpretation && (
-                  <div style={{ margin: "0 0 14px", padding: "12px 14px", border: "1px solid #FF9F0A55", borderRadius: 14, background: "#FF9F0A0D" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10, color: "#FF9F0A", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 800, marginBottom: 5 }}>
-                      <Info size={13} /> Profile readout
+                  <div style={{
+                    margin: "2px 0 16px",
+                    padding: isMobile ? "15px 16px" : "16px 18px",
+                    border: "1px solid #FF9F0A66",
+                    borderRadius: 18,
+                    background: "linear-gradient(135deg, #FF9F0A18 0%, #18181B 58%, #18181B 100%)",
+                    boxShadow: "inset 3px 0 0 #FF9F0A"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "#FF9F0A", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 }}>
+                        <Info size={14} /> Profile readout
+                      </div>
+                      <span style={{ fontSize: 9.5, color: "#8E8E93", fontWeight: 700 }}>Latest vs 6-week baseline</span>
                     </div>
-                    <div style={{ fontSize: 13, color: "#F2F2F7", lineHeight: 1.5, fontWeight: 600 }}>{radarInterpretation}</div>
+                    <div style={{ fontSize: isMobile ? 15 : 15.5, color: "#F5F5F7", lineHeight: 1.45, fontWeight: 750, letterSpacing: "-0.01em" }}>
+                      {radarInterpretation}
+                    </div>
                   </div>
                 )}
 
