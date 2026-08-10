@@ -1994,163 +1994,68 @@ function SwimmingTab({ isMobile }) {
     return ` (${SWIM_STROKE_LABELS[stroke]})`;
   };
 
-  // ---- Personalized Radar profile ----------------------------------------------------------
-  // Radar is deliberately separate from the generic Trends normalization. Each axis keeps its
-  // own raw metric, baseline, relative score and display value so the chart can be debugged
-  // without changing the underlying data.
-  const radarLatestSession = chronSessions.length ? chronSessions[chronSessions.length - 1] : null;
+  // ---- Web chart ("radar") metric registry --------------------------------------------------
+  // A small explicit table rather than hardcoded per-axis JSX, so the radar's available axes
+  // stay driven by data instead of by bespoke markup. Each entry knows how to read its own raw
+  // value off a session object (per-stroke metrics use activeStroke, same fallback as the
+  // Trends cards above) and its "better" direction, for the z-score sign-flip below. direction
+  // "neutral" (HR) isn't flipped — there's no universal better direction for effort.
+  const RADAR_METRIC_REGISTRY = [
+    { key: "pace", label: "Pace", color: "#56CCF2", direction: METRIC_AXIS_DIRECTION.pace, fmt: (v) => fmtPace100(v),
+      getValue: (s) => (strokeFilter === "all" ? s.pace100Overall : (s.strokeStats && s.strokeStats[strokeFilter] ? s.strokeStats[strokeFilter].pace100 : null)) },
+    { key: "swolf", label: "SWOLF", color: "#9CCC65", direction: METRIC_AXIS_DIRECTION.swolf, fmt: (v) => fmtNum(v, 0),
+      getValue: (s) => (activeStroke && s.strokeStats && s.strokeStats[activeStroke] ? s.strokeStats[activeStroke].avgSwolf : null) },
+    { key: "cadence", label: "Stroke rate", color: "#F2C94C", direction: METRIC_AXIS_DIRECTION.cadence, fmt: (v) => `${fmtNum(v, 1)} spm`,
+      getValue: (s) => (activeStroke && s.strokeStats && s.strokeStats[activeStroke] ? s.strokeStats[activeStroke].avgCadence : null) },
+    { key: "dps", label: "Distance/stroke", color: "#2EC4B6", direction: METRIC_AXIS_DIRECTION.dps, fmt: (v) => `${fmtNum(v, 2)}m`,
+      getValue: (s) => (activeStroke && s.strokeStats && s.strokeStats[activeStroke] ? s.strokeStats[activeStroke].avgDistPerStroke : null) },
+    { key: "avgHR", label: "Avg HR", color: "#E63946", direction: "neutral", fmt: (v) => `${Math.round(v)} bpm`,
+      getValue: (s) => s.avgHR },
+    { key: "peakHR", label: "Peak HR", color: "#BB86FC", direction: "neutral", fmt: (v) => `${Math.round(v)} bpm`,
+      getValue: (s) => s.peakHR },
+    { key: "energy100", label: "Energy /100m", color: "#F2994A", direction: "lower", fmt: (v) => `${Math.round(v)} kcal`,
+      getValue: (s) => (s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null) },
+  ];
 
-  const radarMetricValue = (s, key) => {
-    if (!s) return null;
-    const stroke = strokeFilter;
-    if (key === "pace") {
-      return stroke === "all" ? s.pace100Overall : (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].pace100 : null);
+  const latestChronSession = chronSessions.length ? chronSessions[chronSessions.length - 1] : null;
+  const radarCurrentSession = chronSessions.find((s) => s.id === radarCurrentId) || latestChronSession;
+
+  // radarData: one row per selected metric, each with a z-scored current + baseline value
+  // (mean/std computed over chronSessions — the same category+stroke-filtered pool Trends and
+  // Compare read — reusing computeMeanStd/zScoreOf rather than a new normalization approach).
+  // Sign is flipped for lower-better metrics so "farther out" always reads as "better" on every
+  // axis, same convention as the reversed Y axes elsewhere in this tab.
+  const radarData = RADAR_METRIC_REGISTRY.filter((m) => radarMetricKeys.has(m.key)).map((m) => {
+    const poolVals = chronSessions.map(m.getValue);
+    const stats = computeMeanStd(poolVals);
+    const currentRaw = radarCurrentSession ? m.getValue(radarCurrentSession) : null;
+
+    let baselineRaw = null;
+    if (radarBaselineId === "avg6") {
+      const vals = chronSessions
+        .filter((s) => !radarCurrentSession || s.id !== radarCurrentSession.id)
+        .map(m.getValue)
+        .filter((v) => v != null)
+        .slice(-6);
+      baselineRaw = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    } else {
+      const baselineSession = chronSessions.find((s) => s.id === radarBaselineId);
+      baselineRaw = baselineSession ? m.getValue(baselineSession) : null;
     }
-    if (key === "swolf") {
-      return stroke === "all" ? allStrokeMetric(s, "avgSwolf") : (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgSwolf : null);
+
+    let currentZ = zScoreOf(currentRaw, stats);
+    let baselineZ = zScoreOf(baselineRaw, stats);
+    if (m.direction === "lower") {
+      if (currentZ != null) currentZ = -currentZ;
+      if (baselineZ != null) baselineZ = -baselineZ;
     }
-    if (key === "dps") {
-      return stroke === "all" ? allStrokeMetric(s, "avgDistPerStroke") : (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgDistPerStroke : null);
-    }
-    if (key === "distance") return s.distance;
-    if (key === "avgHR") return s.avgHR;
-    return null;
-  };
-
-  const radarMetricFormat = {
-    pace: (v) => fmtPace100(v),
-    swolf: (v) => `${fmtNum(v, 0)}`,
-    dps: (v) => `${fmtNum(v, 2)}m`,
-    distance: (v) => `${fmtNum(v, 0)}m`,
-    avgHR: (v) => `${Math.round(v)} bpm`,
-  };
-
-  const radarAxisMeta = {
-    pace: { label: "Speed", color: "#56CCF2", lowerBetter: true },
-    efficiency: { label: "Stroke Efficiency", color: "#9CCC65" },
-    consistency: { label: "Consistency", color: "#BB86FC" },
-    endurance: { label: "Endurance", color: "#F2C94C" },
-    aerobic: { label: "Aerobic Efficiency", color: "#E63946" },
-  };
-
-  // HR coverage is calculated from the existing length-level HR values. A length counts as
-  // covered only when a real avgHR was recorded for that length; no HR is estimated.
-  const radarHrCoverage = (s) => {
-    if (!s || !Array.isArray(s.lengths)) return 0;
-    const active = s.lengths.map(effectiveLength).filter((l) => l.lengthType === "active" && !l.userExcluded && l.elapsedSec > 0);
-    const totalSec = active.reduce((a, l) => a + l.elapsedSec, 0);
-    const coveredSec = active.filter((l) => l.avgHR != null && Number.isFinite(l.avgHR) && l.avgHR > 0)
-      .reduce((a, l) => a + l.elapsedSec, 0);
-    return totalSec > 0 ? coveredSec / totalSec : 0;
-  };
-
-  const radarBaselineSessions = useMemo(() => {
-    if (!radarLatestSession) return [];
-    const latestDate = radarLatestSession.date;
-    const cutoff = new Date(`${latestDate}T00:00:00`);
-    cutoff.setDate(cutoff.getDate() - 42);
-    const cutoffStr = toISODate(cutoff);
-    // chronSessions is already the single eligibility/filtering source for Trend/Compare.
-    // Exclude the latest session first, then use the preceding 6 calendar weeks only.
-    return chronSessions.slice(0, -1).filter((s) => s.date >= cutoffStr && s.date < latestDate);
-  }, [chronSessions, radarLatestSession]);
-
-  const radarMean = (values) => {
-    const vals = values.filter((v) => v != null && Number.isFinite(v));
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-  };
-  const radarStd = (values) => {
-    const vals = values.filter((v) => v != null && Number.isFinite(v));
-    if (vals.length < 2) return null;
-    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
-  };
-  const radarZ = (value, values) => {
-    if (value == null) return null;
-    const mean = radarMean(values), sd = radarStd(values);
-    if (mean == null || sd == null) return null;
-    return sd > 0 ? (value - mean) / sd : 0;
-  };
-
-  const radarProfile = useMemo(() => {
-    const latest = radarLatestSession;
-    if (!latest) return [];
-
-    const profile = [];
-    const addAxis = (key, rawMetric, baselineRaw, score, detail) => {
-      if (rawMetric == null || baselineRaw == null || score == null || !Number.isFinite(score)) return;
-      profile.push({
-        key,
-        label: radarAxisMeta[key].label,
-        color: radarAxisMeta[key].color,
-        rawMetric,
-        baselineRaw,
-        score,
-        displayValue: Math.max(70, Math.min(130, score)),
-        detail,
-      });
+    return {
+      metric: m.label,
+      current: currentZ != null ? Math.max(-2.4, Math.min(2.4, currentZ)) : 0,
+      baseline: baselineZ != null ? Math.max(-2.4, Math.min(2.4, baselineZ)) : 0,
+      currentRaw, baselineRaw, fmt: m.fmt,
     };
-
-    // 1. Speed: lower pace is better.
-    const paceBaseline = radarBaselineSessions.map((s) => radarMetricValue(s, "pace"));
-    const paceBase = radarMean(paceBaseline);
-    const latestPace = radarMetricValue(latest, "pace");
-    if (latestPace != null && paceBase != null && latestPace > 0) {
-      addAxis("pace", latestPace, paceBase, 100 * (paceBase / latestPace), { latest: latestPace, baseline: paceBase });
-    }
-
-    // 2. Stroke Efficiency: SWOLF (lower better) + DPS (higher better), each z-scored
-    // against its own baseline sessions, then blended. This is the only z-score blend.
-    const efficiencyBaseline = radarBaselineSessions.map((s) => ({ swolf: radarMetricValue(s, "swolf"), dps: radarMetricValue(s, "dps") }))
-      .filter((x) => x.swolf != null && x.dps != null);
-    const latestSwolf = radarMetricValue(latest, "swolf");
-    const latestDps = radarMetricValue(latest, "dps");
-    const swolfBaseVals = efficiencyBaseline.map((x) => x.swolf);
-    const dpsBaseVals = efficiencyBaseline.map((x) => x.dps);
-    const swolfZ = radarZ(latestSwolf, swolfBaseVals);
-    const dpsZ = radarZ(latestDps, dpsBaseVals);
-    if (swolfZ != null && dpsZ != null) {
-      const efficiencyZ = ((-swolfZ) + dpsZ) / 2;
-      addAxis("efficiency", { swolf: latestSwolf, dps: latestDps }, { swolf: radarMean(swolfBaseVals), dps: radarMean(dpsBaseVals) }, 100 + efficiencyZ * 10, { swolfZ: -swolfZ, dpsZ, efficiencyZ });
-    }
-
-    // 3. Consistency: how typical today's pace is versus the baseline distribution.
-    const consistencyBaseVals = paceBaseline.filter((v) => v != null);
-    const consistencyMean = radarMean(consistencyBaseVals);
-    const consistencyStd = radarStd(consistencyBaseVals);
-    if (latestPace != null && consistencyMean != null && consistencyStd != null) {
-      const distanceZ = consistencyStd > 0 ? Math.abs((latestPace - consistencyMean) / consistencyStd) : (latestPace === consistencyMean ? 0 : Infinity);
-      // Inside one baseline standard deviation is normal (100). Outside it falls gradually;
-      // this is a typicality score, not an intensity or effort score.
-      const consistencyScore = Number.isFinite(distanceZ) ? Math.max(0, 100 - Math.max(0, distanceZ - 1) * 20) : 0;
-      addAxis("consistency", latestPace, consistencyMean, consistencyScore, { mean: consistencyMean, std: consistencyStd, z: distanceZ });
-    }
-
-    // 4. Endurance: session distance only, with no split/fade weighting.
-    const distanceBaseVals = radarBaselineSessions.map((s) => radarMetricValue(s, "distance"));
-    const distanceBase = radarMean(distanceBaseVals);
-    const latestDistance = radarMetricValue(latest, "distance");
-    if (latestDistance != null && distanceBase != null && distanceBase > 0) {
-      addAxis("endurance", latestDistance, distanceBase, 100 * (latestDistance / distanceBase), { latest: latestDistance, baseline: distanceBase });
-    }
-
-    // 5. Aerobic Efficiency: only when the latest session and every baseline session used for
-    // this axis have >=70% real HR coverage. Missing HR is never fabricated or substituted.
-    const aerobicEligibleBaseline = radarBaselineSessions.filter((s) => radarHrCoverage(s) >= 0.70 && radarMetricValue(s, "pace") != null && s.avgHR != null && s.avgHR > 0);
-    const latestHrCoverage = radarHrCoverage(latest);
-    const latestHR = latest.avgHR;
-    const aerobicBasePairs = aerobicEligibleBaseline.map((s) => {
-      const pace = radarMetricValue(s, "pace");
-      return pace != null && s.avgHR > 0 ? pace / s.avgHR : null;
-    }).filter((v) => v != null && Number.isFinite(v));
-    const latestPacePerHeartbeat = latestPace != null && latestHR != null && latestHR > 0 ? latestPace / latestHR : null;
-    const aerobicBase = radarMean(aerobicBasePairs);
-    if (latestHrCoverage >= 0.70 && latestPacePerHeartbeat != null && aerobicBase != null && latestPacePerHeartbeat > 0) {
-      addAxis("aerobic", latestPacePerHeartbeat, aerobicBase, 100 * (aerobicBase / latestPacePerHeartbeat), { latest: latestPacePerHeartbeat, baseline: aerobicBase, latestHrCoverage, baselineCount: aerobicEligibleBaseline.length });
-    }
-
-    return profile;
-  }, [radarLatestSession, radarBaselineSessions, strokeFilter, allStrokesSeen]);
+  });
 
   const metricCards = [
     {
@@ -2988,78 +2893,96 @@ function SwimmingTab({ isMobile }) {
 
           {swimSection === "radar" && (
             <>
-              {renderFilterBar()}
-              <div style={cardStyle}>
-                <div style={{ ...labelStyle, marginBottom: 2 }}>CURRENT PROFILE</div>
-                <div style={{ fontSize: 12, color: "#9a9fa6", marginBottom: 4 }}>Latest session vs previous 6 weeks</div>
-                <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 14, lineHeight: 1.45 }}>
-                  Your profile is relative to your own history. <strong style={{ color: "#c9cdd3" }}>100 = personal baseline</strong>; above 100 is better than baseline, below 100 is below baseline.
-                </div>
+          {renderFilterBar()}
+          {/* Web chart — Current vs Baseline swim, normalized across whichever metrics are
+              picked, drawn as two overlapping radar polygons (item 4). Respects the same
+              stroke + Workout/CSS Test filters as Trends/Compare via chronSessions. */}
+          <div style={cardStyle}>
+            <div style={{ ...labelStyle, marginBottom: 2 }}>Web chart</div>
+            <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 14 }}>Current session vs a baseline, normalized onto one shared scale so differently-scaled metrics can share one chart. Pick which axes to show and which two sessions to compare.</div>
 
-                {radarLatestSession && (
-                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
-                    <div>
-                      <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Latest</div>
-                      <div className="mono" style={{ fontSize: 13, color: "#F5F3EE", fontWeight: 700 }}>{fmtDate(radarLatestSession.date)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Baseline</div>
-                      <div className="mono" style={{ fontSize: 13, color: "#9a9fa6" }}>Previous 6 weeks</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sessions</div>
-                      <div className="mono" style={{ fontSize: 13, color: "#9a9fa6" }}>{radarBaselineSessions.length}</div>
-                    </div>
-                  </div>
-                )}
-
-                {radarProfile.length < 2 ? (
-                  <div style={{ padding: "30px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.55 }}>
-                    Not enough qualifying data to build a radar profile yet. Missing axes are omitted rather than estimated.
-                  </div>
-                ) : (
-                  <>
-                    <ResponsiveContainer width="100%" height={360}>
-                      <RadarChart data={radarProfile} outerRadius="72%">
-                        <PolarGrid stroke="#2a2e33" />
-                        <PolarAngleAxis dataKey="label" tick={{ fill: "#9a9fa6", fontSize: 10.5 }} />
-                        <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#5a5f66", fontSize: 9 }} axisLine={false} />
-                        <Radar name="Personal baseline" dataKey={() => 100} stroke="#6b7078" fill="#6b7078" fillOpacity={0.08} strokeDasharray="4 3" />
-                        <Radar name="Current profile" dataKey="displayValue" stroke="#F2994A" fill="#F2994A" fillOpacity={0.28} />
-                        <Tooltip
-                          contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 11.5 }}
-                          formatter={(v, name, props) => {
-                            if (name === "Current profile") return [`${props.payload.score.toFixed(1)} (raw score)`, name];
-                            return ["100", name];
-                          }}
-                          labelFormatter={(label, payload) => {
-                            const p = payload && payload[0] ? payload[0].payload : null;
-                            if (!p) return label;
-                            return `${label} · ${p.score.toFixed(1)}`;
-                          }}
-                        />
-                      </RadarChart>
-                    </ResponsiveContainer>
-
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginTop: 4 }}>
-                      {radarProfile.map((axis) => (
-                        <div key={axis.key} style={{ border: "1px solid #2a2e33", borderRadius: 12, padding: "9px 10px", background: "#111216" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                            <div style={{ fontSize: 11, color: axis.color, fontWeight: 700 }}>{axis.label}</div>
-                            <div className="mono" style={{ fontSize: 12, color: "#F5F3EE", fontWeight: 700 }}>{axis.score.toFixed(1)}</div>
-                          </div>
-                          <div style={{ fontSize: 9.5, color: "#5a5f66", marginTop: 4 }}>100 = personal baseline</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 12, lineHeight: 1.45 }}>
-                      The chart uses a display range of 70–130 to keep extreme scores from flattening the profile. Raw scores remain unchanged and are available in the tooltip/cards.
-                      {radarProfile.length < 5 && " Aerobic Efficiency is omitted when real HR coverage is insufficient; other axes are omitted when their required data is unavailable."}
-                    </div>
-                  </>
-                )}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Current</div>
+                <select
+                  value={radarCurrentSession ? radarCurrentSession.id : ""}
+                  onChange={(e) => setRadarCurrentId(e.target.value)}
+                  className="mono"
+                  style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 9px", color: "#c9cdd3", fontSize: 11.5, cursor: "pointer" }}
+                >
+                  {[...chronSessions].reverse().map((s) => (
+                    <option key={s.id} value={s.id}>{fmtDate(s.date)}{s.id === latestChronSession?.id ? " (latest)" : ""}</option>
+                  ))}
+                </select>
               </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#8a8f98", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Baseline</div>
+                <select
+                  value={radarBaselineId}
+                  onChange={(e) => setRadarBaselineId(e.target.value)}
+                  className="mono"
+                  style={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 8, padding: "6px 9px", color: "#c9cdd3", fontSize: 11.5, cursor: "pointer" }}
+                >
+                  <option value="avg6">Last 6 avg</option>
+                  {[...chronSessions].reverse().filter((s) => !radarCurrentSession || s.id !== radarCurrentSession.id).map((s) => (
+                    <option key={s.id} value={s.id}>{fmtDate(s.date)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14 }}>
+              {RADAR_METRIC_REGISTRY.map((m) => {
+                const selected = radarMetricKeys.has(m.key);
+                return (
+                  <button
+                    key={m.key}
+                    onClick={() => setRadarMetricKeys((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(m.key)) next.delete(m.key); else next.add(m.key);
+                      return next;
+                    })}
+                    className="pill"
+                    style={{
+                      cursor: "pointer", background: selected ? m.color : `${m.color}1a`,
+                      border: `1.5px solid ${selected ? m.color : m.color + "55"}`,
+                      color: selected ? "#0c0d10" : m.color, borderRadius: 12, padding: "5px 10px", fontSize: 11, fontWeight: 700,
+                    }}
+                  >{m.label}</button>
+                );
+              })}
+            </div>
+
+            {chronSessions.length === 0 ? (
+              <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5 }}>No sessions match the current filters.</div>
+            ) : radarData.length < 3 ? (
+              <div style={{ padding: "26px 10px", textAlign: "center", color: "#5a5f66", fontSize: 12.5, lineHeight: 1.5 }}>Pick at least 3 metrics above to draw the radar.</div>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={320}>
+                  <RadarChart data={radarData} outerRadius="72%">
+                    <PolarGrid stroke="#2a2e33" />
+                    <PolarAngleAxis dataKey="metric" tick={{ fill: "#9a9fa6", fontSize: 11 }} />
+                    <PolarRadiusAxis tick={false} axisLine={false} domain={[-2.4, 2.4]} />
+                    <Tooltip
+                      contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }}
+                      formatter={(v, name, props) => {
+                        const raw = name === "Baseline" ? props.payload.baselineRaw : props.payload.currentRaw;
+                        return [raw != null ? props.payload.fmt(raw) : "—", name];
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Radar name="Baseline" dataKey="baseline" stroke="#6b7078" fill="#6b7078" fillOpacity={0.18} connectNulls />
+                    <Radar name="Current" dataKey="current" stroke="#F2994A" fill="#F2994A" fillOpacity={0.32} connectNulls />
+                  </RadarChart>
+                </ResponsiveContainer>
+                <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 6 }}>
+                  Each axis is normalized to standard deviations from that metric's own mean across the filtered sessions above, flipped where lower is better (Pace, SWOLF, Energy/100m), so farther out always reads as "better" — real values are in the tooltip.
+                  {radarData.some((d) => d.currentRaw == null || d.baselineRaw == null) && " Some axes are missing data for the current filters and are shown centered."}
+                </div>
+              </>
+            )}
+          </div>
             </>
           )}
 
