@@ -1734,11 +1734,35 @@ function SwimmingTab({ isMobile }) {
     return best;
   }, [chronSessions]);
 
+  // "All strokes" technique metrics must represent the whole swim, not the most-common
+  // stroke. Per-stroke stats are length-level averages with `count` = contributing lengths,
+  // so a count-weighted aggregation gives one session value across every swim type present.
+  const allStrokeMetric = (s, field) => {
+    const stats = Object.values(s.strokeStats || {});
+    let weightedTotal = 0;
+    let weight = 0;
+    stats.forEach((st) => {
+      const value = st && st[field];
+      const count = st && Number.isFinite(st.count) ? st.count : 0;
+      if (value != null && Number.isFinite(value) && count > 0) {
+        weightedTotal += value * count;
+        weight += count;
+      }
+    });
+    return weight ? weightedTotal / weight : null;
+  };
+
   // Trend series, oldest -> newest, one point per session.
   const trendData = useMemo(() => {
     return chronSessions.map((s) => {
       const energy100 = s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null;
-      const point = { date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall, avgHR: s.avgHR, peakHR: s.peakHR, energy100 };
+      const point = {
+        date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall,
+        swolf_all: allStrokeMetric(s, "avgSwolf"),
+        cadence_all: allStrokeMetric(s, "avgCadence"),
+        dps_all: allStrokeMetric(s, "avgDistPerStroke"),
+        avgHR: s.avgHR, peakHR: s.peakHR, energy100,
+      };
       allStrokesSeen.forEach((stroke) => {
         const st = s.strokeStats && s.strokeStats[stroke];
         point[`pace100_${stroke}`] = st ? st.pace100 : null;
@@ -1768,8 +1792,13 @@ function SwimmingTab({ isMobile }) {
       const hrVals = weekSessions.map((s) => s.avgHR).filter((v) => v != null);
       const peakHrVals = weekSessions.map((s) => s.peakHR).filter((v) => v != null);
       const energy100Vals = weekSessions.map((s) => (s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null)).filter((v) => v != null);
+      const swolfAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgSwolf")).filter((v) => v != null);
+      const cadenceAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgCadence")).filter((v) => v != null);
+      const dpsAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgDistPerStroke")).filter((v) => v != null);
       const point = {
-        date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals), avgHR: avg(hrVals),
+        date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals),
+        swolf_all: avg(swolfAllVals), cadence_all: avg(cadenceAllVals), dps_all: avg(dpsAllVals),
+        avgHR: avg(hrVals),
         // Peak HR aggregates as the week's actual highest reading, not an average of peaks —
         // "peak" stays meaningful as the hardest single effort that week.
         peakHR: peakHrVals.length ? Math.max(...peakHrVals) : null,
@@ -1931,18 +1960,16 @@ function SwimmingTab({ isMobile }) {
 
   const sparkPoints = (series) => series.map((v, i) => ({ i, v })).filter((p) => p.v != null);
 
-  // The stroke driving the per-stroke cards: whichever the always-visible filter pills
-  // have selected, falling back to the most-common stroke when "All strokes" is chosen.
+  // The stroke used by views that need one concrete stroke label (e.g. Compare/Radar).
+  // Trend technique cards do NOT use this fallback when "All strokes" is selected.
   const activeStroke = strokeFilter === "all" ? primaryStroke : strokeFilter;
-  // Pace: "All strokes" shows genuine whole-session pace; a specific stroke shows that
-  // stroke's own pace (time-in-that-stroke ÷ that stroke's own distance) — a real, distinct
-  // series from the whole-session figure, not a repeat of it.
+  // "All strokes" uses genuine whole-session pace plus count-weighted technique metrics
+  // across every swim type present. A specific filter switches each metric to that stroke.
   const paceDataKey = strokeFilter === "all" ? "pace100" : `pace100_${strokeFilter}`;
   const paceSeries = seriesFor(paceDataKey);
-  const hrSeries = seriesFor("avgHR");
-  const swolfSeries = activeStroke ? seriesFor(`swolf_${activeStroke}`) : [];
-  const cadenceSeries = activeStroke ? seriesFor(`cadence_${activeStroke}`) : [];
-  const dpsSeries = activeStroke ? seriesFor(`dps_${activeStroke}`) : [];
+  const swolfSeries = seriesFor(strokeFilter === "all" ? "swolf_all" : `swolf_${strokeFilter}`);
+  const cadenceSeries = seriesFor(strokeFilter === "all" ? "cadence_all" : `cadence_${strokeFilter}`);
+  const dpsSeries = seriesFor(strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`);
 
   const latestOf = (series) => { const vals = series.filter((v) => v != null); return vals.length ? vals[vals.length - 1] : null; };
   // Mean of the most recent 6 non-null points (fewer if there isn't 6 yet). This is the
@@ -1957,18 +1984,14 @@ function SwimmingTab({ isMobile }) {
   // Card accent color: Pace is the only one of these four that has a genuine "All strokes"
   // value (pace100 is a real whole-session figure — total time ÷ total distance across every
   // stroke swum, not any one stroke's number). SWOLF, stroke rate, and distance/stroke are all
-  // technique-dependent — a butterfly stroke rate and a backstroke stroke rate aren't on the
-  // same scale, so there's no meaningful way to blend them into one number, same reasoning for
-  // all three, SWOLF included. When "All strokes" is selected, none of the four should be
-  // painted with one arbitrary stroke's color (which used to make it look like that color WAS
-  // "all"); use the neutral "all" white instead. The headline number itself still falls back to
-  // the most-common stroke for SWOLF/cadence/dps (see activeStroke above) since a single card
-  // can only show one number — the title suffix below makes that fallback explicit — while the
-  // expanded chart for each already draws every stroke as its own line.
+  // When "All strokes" is selected, technique cards use the genuine count-weighted
+  // aggregate across every swim type in the session rather than silently falling back to one
+  // stroke. Keep the neutral "all" color so the card does not imply a single stroke is shown.
   const strokeCardColor = strokeFilter === "all" ? "#F5F3EE" : (SWIM_STROKE_COLORS[strokeFilter] || "#F5F3EE");
   const strokeTitleSuffix = (stroke) => {
+    if (strokeFilter === "all") return " (All swim types)";
     if (!stroke) return "";
-    return strokeFilter === "all" ? ` (${SWIM_STROKE_LABELS[stroke]} · most common)` : ` (${SWIM_STROKE_LABELS[stroke]})`;
+    return ` (${SWIM_STROKE_LABELS[stroke]})`;
   };
 
   // ---- Web chart ("radar") metric registry --------------------------------------------------
@@ -2072,17 +2095,6 @@ function SwimmingTab({ isMobile }) {
       value: headlineOf(dpsSeries) != null ? `${headlineOf(dpsSeries).toFixed(2)}m` : "—",
       perStroke: true,
       color: strokeCardColor,
-    },
-    {
-      key: "heart",
-      title: "Heart",
-      series: hrSeries,
-      // No verdict: whole-session average HR alone has no universal "better" direction —
-      // it moves with effort, not fitness, so a rising/falling line is context, not a grade.
-      verdict: null,
-      value: headlineOf(hrSeries) != null ? `${Math.round(headlineOf(hrSeries))} bpm` : "—",
-      perStroke: false,
-      color: "#E63946",
     },
   ];
 
@@ -2862,8 +2874,11 @@ function SwimmingTab({ isMobile }) {
                             <ReferenceLine y={0} stroke="#2EC4B6" strokeWidth={1.5} strokeDasharray="4 3" label={{ value: "Avg", position: "insideTopRight", fill: "#2EC4B6", fontSize: 11, fontWeight: 700 }} />
                             <Tooltip contentStyle={{ background: "#0c0d10", border: "1px solid #2a2e33", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
                             <Legend wrapperStyle={{ fontSize: 11 }} />
-                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2} dot={makeDot("#56CCF2")} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
-                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} dot={makeDot(otherColor)} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
+                            {/* Keep the primary series visually dominant and make the secondary
+                                series dashed/translucent so identical or near-identical values remain
+                                distinguishable without modifying the underlying data. */}
+                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2} strokeOpacity={0.78} strokeDasharray="6 4" dot={makeDot(otherColor)} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
+                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke="#56CCF2" strokeWidth={2.2} strokeOpacity={0.95} dot={makeDot("#56CCF2")} activeDot={{ r: 5, style: { cursor: "pointer" } }} connectNulls />
                           </LineChart>
                         </ResponsiveContainer>
                       </>
