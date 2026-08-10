@@ -2152,96 +2152,6 @@ function SwimmingTab({ isMobile }) {
     return profile;
   }, [radarLatestSession, radarBaselineSessions, strokeFilter, allStrokesSeen]);
 
-  // ---- Radar deterministic interpretation -----------------------------------------------
-  // Presentation/story only: this reads the already-calculated radarProfile scores.
-  // It never recalculates an axis and never assumes an axis exists.
-  const radarInterpretation = useMemo(() => {
-    const byKey = Object.fromEntries(radarProfile.map((a) => [a.key, a.score]));
-    const keys = Object.keys(byKey);
-    if (!keys.length) return null;
-
-    const has = (k) => byKey[k] != null;
-    const v = (k) => byKey[k];
-    const aroundBaseline = (x) => x >= 95 && x <= 105;
-    const above = (x) => x > 105;
-    const below = (x) => x < 95;
-
-    // Rule 1 — Speed + efficiency above baseline, aerobic efficiency below.
-    if (has("pace") && has("efficiency") && has("aerobic") &&
-        above(v("pace")) && above(v("efficiency")) && below(v("aerobic"))) {
-      return {
-        id: "fast-demanding",
-        title: "Fast, but demanding",
-        text: "Speed and stroke efficiency were above your 6-week baseline, while aerobic efficiency was lower.",
-      };
-    }
-
-    // Rule 2 — Broadly normal profile. Require most available axes to be in the
-    // 95–105 band so this remains true for both 4- and 5-axis profiles.
-    const baselineCount = keys.filter((k) => aroundBaseline(v(k))).length;
-    if (baselineCount >= Math.ceil(keys.length * 0.6)) {
-      return {
-        id: "baseline",
-        title: "Right on baseline",
-        text: "Your latest swim was broadly in line with your normal 6-week profile.",
-      };
-    }
-
-    // Rule 3 — Several performance axes above baseline while consistency stays normal.
-    const performanceKeys = ["pace", "efficiency", "endurance", "aerobic"].filter(has);
-    const performanceAbove = performanceKeys.filter((k) => above(v(k))).length;
-    if (performanceAbove >= Math.max(2, Math.ceil(performanceKeys.length * 0.5)) &&
-        has("consistency") && aroundBaseline(v("consistency"))) {
-      return {
-        id: "strong-overall",
-        title: "Strong overall session",
-        text: "Your latest swim was above your 6-week baseline across several dimensions while consistency remained normal.",
-      };
-    }
-
-    // Rule 4 — Speed above baseline while endurance is also above baseline.
-    if (has("pace") && has("endurance") && above(v("pace")) && above(v("endurance"))) {
-      return {
-        id: "fast-and-long",
-        title: "Fast and durable",
-        text: "You were faster than your 6-week baseline while also swimming a longer-than-usual session.",
-      };
-    }
-
-    // Rule 5 — Efficiency above baseline while speed is not materially above it.
-    if (has("efficiency") && above(v("efficiency")) &&
-        (!has("pace") || !above(v("pace")))) {
-      return {
-        id: "efficient",
-        title: "Efficiency-led session",
-        text: "Stroke efficiency was above your 6-week baseline without a similarly strong speed increase.",
-      };
-    }
-
-    // Deterministic fallback. Keep it neutral and only mention axes that exist.
-    const aboveCount = keys.filter((k) => above(v(k))).length;
-    const belowCount = keys.filter((k) => below(v(k))).length;
-    if (aboveCount > belowCount) {
-      return {
-        id: "above-mixed",
-        title: "Above baseline overall",
-        text: "More dimensions of your latest swim were above your 6-week baseline than below it.",
-      };
-    }
-    if (belowCount > aboveCount) {
-      return {
-        id: "below-mixed",
-        title: "Below baseline overall",
-        text: "More dimensions of your latest swim were below your 6-week baseline than above it.",
-      };
-    }
-    return {
-      id: "mixed",
-      title: "Mixed profile",
-      text: "Your latest swim was mixed relative to your normal 6-week profile.",
-    };
-  }, [radarProfile]);
-
   const metricCards = [
     {
       key: "pace",
@@ -2568,7 +2478,7 @@ function SwimmingTab({ isMobile }) {
               (item 5). Dashboard holds everything that isn't Trend or Compare (PRs, streak,
               distance breakdown, insights) — Radar keeps its own tab as before. */}
           <div style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 6, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 6, marginBottom: 14, boxShadow: "0 8px 20px -10px rgba(0,0,0,0.6)" }}>
-            {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Web Chart", RadarIcon]].map(([v, l, Ic]) => {
+            {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Radar", RadarIcon]].map(([v, l, Ic]) => {
               const selected = swimSection === v;
               return (
                 <button key={v} onClick={() => setSwimSection(v)} style={{
@@ -3082,18 +2992,8 @@ function SwimmingTab({ isMobile }) {
               <div style={cardStyle}>
                 <div style={{ ...labelStyle, marginBottom: 2 }}>CURRENT PROFILE</div>
                 <div style={{ fontSize: 12, color: "#9a9fa6", marginBottom: 4 }}>Latest session vs previous 6 weeks</div>
-                <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 12, lineHeight: 1.45 }}>
-                  A personal performance profile — not a universal swimmer score. <strong style={{ color: "#c9cdd3" }}>100 = your normal baseline</strong>; &gt;100 = above baseline; &lt;100 = below baseline.
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "#F5F3EE" }}>
-                    <span style={{ width: 20, height: 3, borderRadius: 3, background: "#F2994A", display: "inline-block" }} />
-                    Latest session
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "#9a9fa6" }}>
-                    <span style={{ width: 20, height: 0, borderTop: "2px dashed #6b7078", display: "inline-block" }} />
-                    6-week baseline · 100
-                  </div>
+                <div style={{ fontSize: 11, color: "#6b7078", marginBottom: 14, lineHeight: 1.45 }}>
+                  Your profile is relative to your own history. <strong style={{ color: "#c9cdd3" }}>100 = personal baseline</strong>; above 100 is better than baseline, below 100 is below baseline.
                 </div>
 
                 {radarLatestSession && (
@@ -3152,14 +3052,6 @@ function SwimmingTab({ isMobile }) {
                         </div>
                       ))}
                     </div>
-
-                    {radarInterpretation && (
-                      <div style={{ marginTop: 12, padding: "11px 12px", borderRadius: 13, background: "#15171b", border: "1px solid #2a2e33" }}>
-                        <div style={{ fontSize: 10, color: "#F2994A", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Profile read</div>
-                        <div style={{ fontSize: 13, color: "#F5F3EE", fontWeight: 700, marginBottom: 3 }}>{radarInterpretation.title}</div>
-                        <div style={{ fontSize: 11.5, color: "#9a9fa6", lineHeight: 1.45 }}>{radarInterpretation.text}</div>
-                      </div>
-                    )}
 
                     <div style={{ fontSize: 10, color: "#5a5f66", marginTop: 12, lineHeight: 1.45 }}>
                       The chart uses a display range of 70–130 to keep extreme scores from flattening the profile. Raw scores remain unchanged and are available in the tooltip/cards.
