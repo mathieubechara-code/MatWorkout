@@ -1506,8 +1506,17 @@ function SwimmingTab({ isMobile, onExit }) {
   const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
   const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
   const [metricValueMode, setMetricValueMode] = useState("latest"); // "latest" | "avg6" — headline number on each Trends card
-  const [swimSection, setSwimSection] = useState("dashboard"); // "dashboard" | "trends" | "compare" | "radar" — the 4 tabs within the Swim tab. Session Detail
+  const [swimSection, setSwimSection] = useState(() => {
+    try {
+      const saved = localStorage.getItem("swim-section-v1");
+      return ["dashboard", "trends", "compare", "radar"].includes(saved) ? saved : "dashboard";
+    } catch { return "dashboard"; }
+  }); // "dashboard" | "trends" | "compare" | "radar" — the 4 tabs within the Swim tab. Session Detail
                                                               // lives below the switcher now, outside all three (see render, item 2).
+  useEffect(() => {
+    try { localStorage.setItem("swim-section-v1", swimSection); } catch {}
+  }, [swimSection]);
+
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "workout" | "csstest" — filters Trends + Compare only (Session
                                                                  // Detail below always shows everything). Derived straight from isCssTest,
                                                                  // no separate category field (see categoryValueOf below).
@@ -1992,7 +2001,17 @@ function SwimmingTab({ isMobile, onExit }) {
   // IMPORTANT: this is the single Radar calculation layer. It keeps raw metrics, baseline
   // values, relative scores and display values separate so presentation/interpretation cannot
   // silently change the underlying calculation.
-  const radarLatestSession = chronSessions.length ? chronSessions[chronSessions.length - 1] : null;
+  // Radar session pool inherits the selected Swim Type before choosing "latest".
+  // All = every qualifying session; a specific swim type = sessions that actually contain it.
+  // This mirrors Trend's stroke-specific non-null behavior instead of selecting the latest
+  // overall session first and only then discovering that the chosen stroke is absent.
+  const radarEligibleSessions = strokeFilter === "all"
+    ? chronSessions
+    : chronSessions.filter((s) => {
+        const st = s && s.strokeStats ? s.strokeStats[strokeFilter] : null;
+        return !!(st && (st.pace100 != null || st.avgSwolf != null || st.avgDistPerStroke != null));
+      });
+  const radarLatestSession = radarEligibleSessions.length ? radarEligibleSessions[radarEligibleSessions.length - 1] : null;
   const radarMetricValue = (s, key) => {
     if (!s) return null;
     if (key === "pace") return strokeFilter === "all" ? s.pace100Overall : (s.strokeStats && s.strokeStats[strokeFilter] ? s.strokeStats[strokeFilter].pace100 : null);
@@ -2032,7 +2051,7 @@ function SwimmingTab({ isMobile, onExit }) {
     const cutoff = new Date(`${radarLatestSession.date}T00:00:00`);
     cutoff.setDate(cutoff.getDate() - 42);
     const cutoffStr = toISODate(cutoff);
-    return chronSessions.slice(0, -1).filter((s) => s.date >= cutoffStr && s.date < radarLatestSession.date);
+    return radarEligibleSessions.slice(0, -1).filter((s) => s.date >= cutoffStr && s.date < radarLatestSession.date);
   })();
 
   const radarAxisMeta = {
@@ -2112,6 +2131,10 @@ function SwimmingTab({ isMobile, onExit }) {
 
   // Deterministic interpretation only. It reads the already-calculated Radar scores; it never
   // recalculates a metric or invents a missing axis.
+  const radarProfileStrokeLabel = strokeFilter === "all"
+    ? "All swim types"
+    : (SWIM_STROKE_LABELS[strokeFilter] || strokeFilter);
+
   const radarInterpretation = (() => {
     const byKey = Object.fromEntries(radarVisibleProfile.map((a) => [a.key, a.score]));
     const vals = Object.values(byKey);
@@ -2316,8 +2339,8 @@ function SwimmingTab({ isMobile, onExit }) {
         <div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+              <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
             </LineChart>
@@ -2332,8 +2355,8 @@ function SwimmingTab({ isMobile, onExit }) {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d[paceDataKey]), "lower")}
-              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
+              <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
               <Line type="monotone" dataKey={paceDataKey} name="Pace /100m" stroke={strokeCardColor} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2354,8 +2377,8 @@ function SwimmingTab({ isMobile, onExit }) {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               {renderPersonalBands(trendDataView.map((d) => d.avgHR), "neutral")}
-              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
+              <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} width={46} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => (v != null ? `${Math.round(v)} bpm` : "—")} />
               <Line type="monotone" dataKey="avgHR" name="Avg HR" stroke="#FF453A" strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
@@ -2390,11 +2413,11 @@ function SwimmingTab({ isMobile, onExit }) {
                 const direction = key === "swolf" ? "lower" : key === "dps" ? "higher" : "neutral";
                 return renderPersonalBands(trendDataView.map((d) => d[bandKey]), direction);
               })()}
-              <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+              <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
               {/* reversed reads METRIC_AXIS_DIRECTION — the same registry the collapsed
                   sparkline's YAxis reads above — instead of a per-branch key check, so this
                   can't quietly drift out of sync with the sparkline again (item 6). */}
-              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
+              <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {strokesToShow.map((stroke) => (
@@ -2493,9 +2516,9 @@ function SwimmingTab({ isMobile, onExit }) {
         {overlaySelector}
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={normalizedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+            <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
             <YAxis
-              tick={{ fill: "#636366", fontSize: 10.5 }}
+              tick={{ fill: "#8E8E93", fontSize: 10 }}
               tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
               domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
             />
@@ -2531,6 +2554,7 @@ function SwimmingTab({ isMobile, onExit }) {
               distance breakdown, insights) — Radar keeps its own tab as before. */}
           <div className="swim-subnav swim-primary-nav" style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 3, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 5, marginBottom: 14, boxShadow: "none" }}>
             <button
+              className="app-nav-pill app-nav-back"
               onClick={() => onExit && onExit()}
               title="Back to Today"
               style={{
@@ -2545,7 +2569,7 @@ function SwimmingTab({ isMobile, onExit }) {
             {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Radar", RadarIcon]].map(([v, l, Ic]) => {
               const selected = swimSection === v;
               return (
-                <button key={v} onClick={() => setSwimSection(v)} style={{
+                <button key={v} className="app-nav-pill" onClick={() => setSwimSection(v)} style={{
                   flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
                   background: selected ? "#FF9F0A" : "transparent", border: "none", borderRadius: 10,
                   color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 12, padding: isMobile ? "7px 4px" : "8px 7px",
@@ -2806,8 +2830,8 @@ function SwimmingTab({ isMobile, onExit }) {
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={cssTrendData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} axisLine={{ stroke: "#A7A7AC", strokeOpacity: 0.72 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
-                    <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.78 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+                    <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={7} minTickGap={10} interval="preserveStartEnd" />
+                    <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} width={46} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
                     <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
                     <Line type="monotone" dataKey="cssPace100" name="CSS pace /100m" stroke="#0A84FF" strokeWidth={2} dot={{ r: 4 }} connectNulls />
                   </LineChart>
@@ -3019,11 +3043,11 @@ function SwimmingTab({ isMobile, onExit }) {
                               setSelectedComparePoint((prev) => (prev === clickedDate ? null : clickedDate));
                             }}
                           >
-                            <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.56 }} tickLine={false} tickMargin={8} interval="preserveStartEnd" />
+                            <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={8} interval="preserveStartEnd" />
                             <YAxis
-                              tick={{ fill: "#8E8E93", fontSize: 9.5 }}
+                              tick={{ fill: "#8E8E93", fontSize: 10 }}
                               tickLine={false}
-                              axisLine={{ stroke: "#636366", strokeOpacity: 0.32 }}
+                              axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }}
                               width={42}
                               tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
                               domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
@@ -3057,7 +3081,7 @@ function SwimmingTab({ isMobile, onExit }) {
               const words = label.split(" ");
               const shouldWrap = isMobile && words.length > 1 && label.length > 12;
               return (
-                <text x={x} y={y} textAnchor={textAnchor} fill="#A7A7AC" fontSize={isMobile ? 10.5 : 10.5}>
+                <text x={x} y={y} textAnchor={textAnchor} fill="#8E8E93" fontSize={10}>
                   {shouldWrap ? (
                     <>
                       <tspan x={x} dy="-0.25em">{words.slice(0, -1).join(" ")}</tspan>
@@ -3117,10 +3141,17 @@ function SwimmingTab({ isMobile, onExit }) {
                     boxShadow: "inset 3px 0 0 #FF9F0A"
                   }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "#FF9F0A", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 }}>
-                        <Info size={14} /> Profile readout
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: "#FF9F0A", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 }}>
+                          <Info size={14} /> Profile readout
+                        </div>
+                        <span style={{
+                          fontSize: 9.5, color: strokeFilter === "all" ? "#8E8E93" : (SWIM_STROKE_COLORS[strokeFilter] || "#64D2FF"),
+                          fontWeight: 800, border: `1px solid ${strokeFilter === "all" ? "#8E8E9366" : (SWIM_STROKE_COLORS[strokeFilter] || "#64D2FF") + "66"}`,
+                          borderRadius: 999, padding: "2px 6px", whiteSpace: "nowrap"
+                        }}>{radarProfileStrokeLabel}</span>
                       </div>
-                      <span style={{ fontSize: 9.5, color: "#8E8E93", fontWeight: 700 }}>Latest vs 6-week baseline</span>
+                      <span style={{ fontSize: 9.5, color: "#8E8E93", fontWeight: 700, whiteSpace: "nowrap" }}>Latest vs 6-week baseline</span>
                     </div>
                     <div className="profile-readout-text" style={{ fontSize: isMobile ? 15 : 15.5, color: "#F5F5F7", lineHeight: 1.45, fontWeight: 750, letterSpacing: "-0.01em" }}>
                       {radarInterpretation}
@@ -3134,11 +3165,11 @@ function SwimmingTab({ isMobile, onExit }) {
                   <>
                     <ResponsiveContainer width="100%" height={isMobile ? 455 : 405}>
                       <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "82%" : "76%"} margin={isMobile ? { top: 16, right: 10, bottom: 16, left: 10 } : undefined}>
-                        <PolarGrid stroke="#2C2C2E" />
+                        <PolarGrid stroke="#636366" strokeOpacity={0.42} />
                         <PolarAngleAxis dataKey="label" tick={radarAxisTick} />
-                        <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#636366", fontSize: 8.5 }} axisLine={false} tickLine={false} />
-                        <Radar name="6-week baseline" dataKey={() => 100} stroke="#64D2FF" strokeWidth={2} fill="#64D2FF" fillOpacity={0.07} strokeDasharray="5 4" />
-                        <Radar name="Latest session" dataKey="displayValue" stroke="#FF9F0A" fill="#FF9F0A" fillOpacity={0.28} />
+                        <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={false} tickLine={false} />
+                        <Radar name="6-week baseline" dataKey={() => 100} stroke="#64D2FF" strokeWidth={2.6} fill="#64D2FF" fillOpacity={0.09} strokeDasharray="6 4" />
+                        <Radar name="Latest session" dataKey="displayValue" stroke="#FF9F0A" strokeWidth={3} fill="#FF9F0A" fillOpacity={0.24} />
                         <Tooltip
                           contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 11.5 }}
                           formatter={(v, name, props) => name === "Latest session" ? [`${props.payload.score.toFixed(1)} (raw score)`, name] : ["100", name]}
@@ -3206,8 +3237,25 @@ function SwimmingTab({ isMobile, onExit }) {
 
 function TrainingLog() {
   const [sessions, setSessions] = useState(null);
-  const [uiTheme, setUiTheme] = useState("night"); // presentation-only Day/Night switch
-  const [tab, setTab] = useState("dashboard");
+  const [uiTheme, setUiTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ui-theme-v1");
+      return saved === "night" || saved === "day" ? saved : "day";
+    } catch { return "day"; }
+  }); // presentation-only Day/Night switch; Day is the default
+  const [tab, setTab] = useState(() => {
+    try {
+      const saved = localStorage.getItem("main-tab-v1");
+      return ["dashboard", "workout", "swim", "history"].includes(saved) ? saved : "dashboard";
+    } catch { return "dashboard"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("ui-theme-v1", uiTheme); } catch {}
+  }, [uiTheme]);
+  useEffect(() => {
+    try { localStorage.setItem("main-tab-v1", tab); } catch {}
+  }, [tab]);
+
   const [filter, setFilter] = useState("All");
   const [metric, setMetric] = useState("reps");
   const [range, setRange] = useState("all");
@@ -4617,12 +4665,20 @@ function TrainingLog() {
         .recharts-legend-item-text { opacity:.84; }
 
         /* All charts: keep only a clean horizontal X baseline as the main frame. */
-        .recharts-xAxis .recharts-cartesian-axis-line {
+        .recharts-xAxis .recharts-cartesian-axis-line,
+        .recharts-yAxis .recharts-cartesian-axis-line {
           stroke:#8E8E93 !important;
-          stroke-opacity:.56 !important;
+          stroke-opacity:.62 !important;
           stroke-width:1 !important;
         }
-        .recharts-xAxis .recharts-cartesian-axis-tick-line { display:none !important; }
+        .recharts-xAxis .recharts-cartesian-axis-tick-line,
+        .recharts-yAxis .recharts-cartesian-axis-tick-line { display:none !important; }
+        .recharts-xAxis .recharts-cartesian-axis-tick text,
+        .recharts-yAxis .recharts-cartesian-axis-tick text {
+          fill:#8E8E93 !important;
+          font-size:10px !important;
+          opacity:.82 !important;
+        }
         .recharts-cartesian-grid { opacity:0 !important; }
 
         /* Secondary Swim navigation: deliberately lighter than the app's primary nav. */
@@ -4638,19 +4694,40 @@ function TrainingLog() {
           color:#6E675F;
         }
 
+        /* Shared control scale: navigation is primary, filters are secondary. */
+        .app-nav-pill {
+          min-height:36px !important;
+          padding-top:7px !important;
+          padding-bottom:7px !important;
+          border-radius:11px !important;
+          font-size:11.5px !important;
+          line-height:1.1 !important;
+        }
+        .app-nav-back {
+          color:#8E8E93 !important;
+        }
+        @media (max-width: 560px) {
+          .app-nav-pill {
+            min-height:34px !important;
+            padding-top:6px !important;
+            padding-bottom:6px !important;
+            font-size:10.5px !important;
+          }
+        }
+
         /* Swim analysis filters are secondary controls, smaller than navigation. */
         .swim-filter-pill {
-          min-height: 28px !important;
-          padding: 3px 7px !important;
-          font-size: 10px !important;
+          min-height: 26px !important;
+          padding: 2px 6px !important;
+          font-size: 9.7px !important;
           line-height: 1.1 !important;
-          border-radius: 9px !important;
+          border-radius: 8px !important;
         }
         @media (max-width: 560px) {
           .swim-filter-pill {
-            min-height: 27px !important;
-            padding: 3px 6px !important;
-            font-size: 9.6px !important;
+            min-height: 26px !important;
+            padding: 2px 6px !important;
+            font-size: 9.5px !important;
           }
         }
 
@@ -4740,7 +4817,7 @@ function TrainingLog() {
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
           <div style={{ display: "flex", gap: 4, overflowX: "auto", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 18, padding: 4 }}>
             {TABS.map(({ id, label, Icon }) => (
-              <button key={id} onClick={() => setTab(id)} style={{
+              <button key={id} className="app-nav-pill" onClick={() => setTab(id)} style={{
                 display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", whiteSpace: "nowrap",
                 padding: "9px 14px", fontSize: 12.5, fontWeight: 700, color: tab === id ? "#000000" : "#8E8E93",
                 background: tab === id ? "#FF9F0A" : "transparent",
@@ -4835,7 +4912,7 @@ function TrainingLog() {
                   {dashBodyweightSeries.length >= 2 ? (
                     <ResponsiveContainer width="100%" height={140}>
                       <LineChart data={dashBodyweightSeries} margin={{ top: 5, right: 16, left: -10, bottom: 0 }}>
-                        <XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.56 }} tickLine={false} />
+                        <XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} />
                         <YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 1)} domain={targetWeight != null ? [(dataMin) => Math.min(dataMin - 1, targetWeight - 1), (dataMax) => Math.max(dataMax + 1, targetWeight + 1)] : ["dataMin - 1", "dataMax + 1"]} />
                         <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => [`${fmtNum(v, 1)}kg`, "Weight"]} />
                         {targetWeight != null && <ReferenceLine y={targetWeight} stroke="#FF9F0A" strokeDasharray="4 4" />}
@@ -5175,7 +5252,7 @@ function TrainingLog() {
               {metric === "1rm" && (<div style={{ fontSize: 11, color: "#636366", marginBottom: 6, paddingLeft: 8 }}>Estimated 1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), taken from the single best set of the session — reflects intensity rather than total work done.</div>)}
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
-                  <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.56 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                  <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
                     <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
                     {chartExercises.map((name) => (
@@ -5186,17 +5263,17 @@ function TrainingLog() {
                     )}
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
-                  <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.56 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                  <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
                     <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => [`${fmtNum(v, 2)} ${yLabel}`, filter.slice(6)]} />
                     <Line type="monotone" dataKey="value" stroke={GROUP_COLORS[filter.slice(6)]} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : timeView === "week" ? (
-                  <LineChart data={weeklySingleData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.56 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                  <LineChart data={weeklySingleData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
                     <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
                     <Line type="monotone" dataKey="Total" stroke={colorsMap[filter] || "#FFFFFF"} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : (
-                  <LineChart data={perSetData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.56 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                  <LineChart data={perSetData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
                     <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
                     {Array.from({ length: maxSets }).map((_, i) => {
@@ -5220,7 +5297,7 @@ function TrainingLog() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 2, paddingLeft: 8 }}>{filter} — added external load (kg), kept separate from reps</div>
                 <div style={{ fontSize: 11, color: "#636366", marginBottom: 6, paddingLeft: 8 }}>Shown on its own so reps and load never blend into one misleading number — 12 reps @ +5kg isn't directly comparable to 10 reps @ +15kg.</div>
                 <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
-                  <LineChart data={loadStepDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.56 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
+                  <LineChart data={loadStepDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
                     <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [`${fmtNum(v, 2)}kg`, name]} />
                     <Line type="stepAfter" dataKey="Added load (kg)" stroke="#FF453A" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
                   </LineChart>
@@ -5571,9 +5648,9 @@ function TrainingLog() {
                               )}
                               <ResponsiveContainer width="100%" height={160}>
                                 <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                                  <XAxis dataKey="x" type="number" domain={[0, cumTime]} tick={{ fill: "#636366", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} />
-                                  <YAxis yAxisId="pace" tick={{ fill: "#636366", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
-                                  {hasAnyHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#636366", fontSize: 10 }} domain={["dataMin - 5", "dataMax + 5"]} />}
+                                  <XAxis dataKey="x" type="number" domain={[0, cumTime]} tick={{ fill: "#8E8E93", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} />
+                                  <YAxis yAxisId="pace" tick={{ fill: "#8E8E93", fontSize: 10 }} tickFormatter={(v) => fmtMinSec(v)} reversed domain={["dataMin - 5", "dataMax + 5"]} />
+                                  {hasAnyHR && <YAxis yAxisId="hr" orientation="right" tick={{ fill: "#8E8E93", fontSize: 10 }} domain={["dataMin - 5", "dataMax + 5"]} />}
                                   <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => (name === "Avg HR" ? [v != null ? `${Math.round(v)} bpm` : "—", name] : [fmtPace100(v), name])} labelFormatter={(v) => `${fmtMinSec(v)} elapsed`} />
                                   {restBands.map((b, i) => (<ReferenceArea key={`rest-${i}`} yAxisId="pace" x1={b.start} x2={b.end} fill="#3A3A3C" fillOpacity={0.4} strokeWidth={0} />))}
                                   {otherStrokeBands.map((b, i) => (<ReferenceArea key={`other-${i}`} yAxisId="pace" x1={b.start} x2={b.end} fill={SWIM_STROKE_COLORS[b.stroke] || "#FF9F0A"} fillOpacity={0.14} strokeWidth={0} />))}
