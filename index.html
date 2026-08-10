@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Workout Log" />
-<meta name="theme-color" content="#000000" />
+<meta name="theme-color" content="#09090B" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <style>
   html, body { margin: 0; padding: 0; background: #000000; }
@@ -45,124 +45,6 @@
 <script crossorigin src="https://unpkg.com/recharts@2.15.4/umd/Recharts.js"></script>
 <!-- Babel standalone: lets the browser compile the JSX below on the fly (no build step needed) -->
 <script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
-
-<style id="cream-ui-trial">
-  :root {
-    --bg: #F4F1EA;
-    --card: #FFFEFA;
-    --card-2: #F8F5EE;
-    --border: #E4E0D8;
-    --border-2: #D8D3CA;
-    --text: #161616;
-    --text-dim: #6F6F73;
-    --text-dimmer: #8E8E93;
-    --text-faint: #B0ADA6;
-  }
-
-  html, body, #root { background: #F4F1EA !important; }
-  body { color: #161616 !important; }
-
-  /* Main application canvas */
-  #root > div {
-    background: #F4F1EA !important;
-    color: #161616 !important;
-  }
-
-  /* Existing cards: preserve layout/location, only restyle surfaces */
-  #root div[style*="border: 1px solid #27272A"],
-  #root div[style*="border: 1px solid #2C2C2E"],
-  #root div[style*="background: #1C1C1E"],
-  #root div[style*="background: rgb(28, 28, 30)"] {
-    background: #FFFEFA !important;
-    border-color: #E4E0D8 !important;
-    box-shadow: 0 8px 28px rgba(57, 48, 36, .055) !important;
-  }
-
-  /* Dark nested surfaces become quiet cream inset surfaces */
-  #root div[style*="background: #000000"],
-  #root div[style*="background: #111216"],
-  #root div[style*="background: #18181B"] {
-    background: #F8F5EE !important;
-  }
-
-  /* Header / separators */
-  #root div[style*="borderBottom: \"1px solid #27272A\""],
-  #root div[style*="border-bottom"] {
-    border-color: #E4E0D8 !important;
-  }
-
-  /* Text translation from dark palette */
-  #root [style*="color: #FFFFFF"],
-  #root [style*="color: #F5F3EE"],
-  #root [style*="color: #F2F2F7"],
-  #root [style*="color: #D1D1D6"],
-  #root [style*="color: #c9cdd3"] { color: #161616 !important; }
-
-  #root [style*="color: #8E8E93"],
-  #root [style*="color: #9a9fa6"],
-  #root [style*="color: #6b7078"] { color: #6F6F73 !important; }
-
-  #root [style*="color: #636366"],
-  #root [style*="color: #5a5f66"],
-  #root [style*="color: #48484A"] { color: #98958E !important; }
-
-  /* Native-looking controls */
-  #root input, #root textarea, #root select {
-    background: #F8F5EE !important;
-    border-color: #DED9D0 !important;
-    color: #161616 !important;
-    color-scheme: light !important;
-  }
-  #root input::placeholder, #root textarea::placeholder { color: #A7A39B !important; }
-
-  .pill {
-    box-shadow: none !important;
-    border-color: #DED9D0 !important;
-  }
-
-  /* Recharts: quieter grid / readable labels on cream */
-  .recharts-cartesian-grid line,
-  .recharts-polar-grid-concentric-polygon,
-  .recharts-polar-grid-angle line {
-    stroke: #DDD8CF !important;
-  }
-  .recharts-cartesian-axis-tick text,
-  .recharts-polar-angle-axis-tick text,
-  .recharts-polar-radius-axis-tick text {
-    fill: #85827C !important;
-  }
-  .recharts-default-tooltip {
-    background: rgba(255,254,250,.97) !important;
-    border-color: #DDD8CF !important;
-    color: #161616 !important;
-    box-shadow: 0 12px 34px rgba(57,48,36,.12) !important;
-  }
-  .recharts-tooltip-label, .recharts-tooltip-item { color: #161616 !important; }
-
-  /* Trend cards: collapsed state is intentionally slim. Existing click-to-expand behavior remains. */
-  .trend-metric-card {
-    background: #FFFEFA !important;
-    border: 1px solid #E4E0D8 !important;
-    box-shadow: 0 5px 18px rgba(57,48,36,.045) !important;
-  }
-  .trend-metric-card.is-collapsed {
-    padding: 10px 12px !important;
-  }
-  .trend-metric-card.is-collapsed .trend-mini-chart {
-    height: 34px !important;
-    opacity: .82;
-  }
-  .trend-metric-card.is-expanded {
-    padding: 14px !important;
-  }
-
-  @media (max-width: 560px) {
-    #root > div { padding-bottom: 18px; }
-    .trend-metric-card.is-collapsed { padding: 9px 11px !important; }
-    .trend-metric-card.is-collapsed .trend-mini-chart { height: 28px !important; }
-  }
-</style>
-
 </head>
 <body>
 <div id="root"></div>
@@ -2375,12 +2257,42 @@ function SwimmingTab({ isMobile }) {
       <div style={{ fontSize: 10, color: "#48484A", marginTop: 6 }}>HR is whole-session, not stroke-specific.</div>
     );
 
+    // Presentation-only personal bands. They do not change any metric, verdict, stored value,
+    // filtering, or insight logic. They simply describe the displayed series relative to itself.
+    const personalBandStats = (values) => {
+      const vals = values.filter((v) => v != null && Number.isFinite(v));
+      if (vals.length < 2) return null;
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+      const sd = Math.sqrt(variance);
+      if (!Number.isFinite(mean) || !Number.isFinite(sd)) return null;
+      return { mean, sd };
+    };
+    const renderPersonalBands = (values, direction = "neutral") => {
+      const stats = personalBandStats(values);
+      if (!stats) return null;
+      const span = stats.sd > 0 ? stats.sd : Math.max(Math.abs(stats.mean) * 0.025, 0.5);
+      const lo = stats.mean - span;
+      const hi = stats.mean + span;
+      const outer = span * 3;
+      const lowLabel = direction === "lower" ? "Above baseline" : direction === "higher" ? "Below baseline" : "Lower than usual";
+      const highLabel = direction === "lower" ? "Below baseline" : direction === "higher" ? "Above baseline" : "Higher than usual";
+      return (
+        <>
+          <ReferenceArea y1={stats.mean - outer} y2={lo} fill={direction === "lower" ? "#30D158" : direction === "higher" ? "#FF453A" : "#64D2FF"} fillOpacity={0.055} strokeWidth={0} label={{ value: lowLabel, position: "insideLeft", fill: "#8E8E93", fontSize: 9 }} />
+          <ReferenceArea y1={lo} y2={hi} fill="#8E8E93" fillOpacity={0.07} strokeWidth={0} label={{ value: "Typical", position: "insideLeft", fill: "#8E8E93", fontSize: 9 }} />
+          <ReferenceArea y1={hi} y2={stats.mean + outer} fill={direction === "lower" ? "#FF453A" : direction === "higher" ? "#30D158" : "#64D2FF"} fillOpacity={0.055} strokeWidth={0} label={{ value: highLabel, position: "insideLeft", fill: "#8E8E93", fontSize: 9 }} />
+        </>
+      );
+    };
+
     if (key === "pace") {
       return (
         <div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272A" />
+              <CartesianGrid vertical={false} stroke="#27272A" strokeOpacity={0.55} />
+              {renderPersonalBands(trendDataView.map((d) => d[paceDataKey]), "lower")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} />
               <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => fmtMinSec(v)} reversed={METRIC_AXIS_DIRECTION.pace === "lower"} domain={["dataMin - 5", "dataMax + 5"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => fmtPace100(v)} />
@@ -2402,7 +2314,8 @@ function SwimmingTab({ isMobile }) {
         <div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272A" />
+              <CartesianGrid vertical={false} stroke="#27272A" strokeOpacity={0.55} />
+              {renderPersonalBands(trendDataView.map((d) => d.avgHR), "neutral")}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} />
               <YAxis tick={{ fill: "#636366", fontSize: 10.5 }} tickFormatter={(v) => `${Math.round(v)}`} reversed={reversed} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => (v != null ? `${Math.round(v)} bpm` : "—")} />
@@ -2432,7 +2345,14 @@ function SwimmingTab({ isMobile }) {
           {overlaySelector}
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendDataView} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272A" />
+              <CartesianGrid vertical={false} stroke="#27272A" strokeOpacity={0.55} />
+              {(() => {
+                const bandKey = strokeFilter === "all"
+                  ? (key === "swolf" ? "swolf_all" : key === "cadence" ? "cadence_all" : "dps_all")
+                  : `${dataKeyPrefix}${strokeFilter}`;
+                const direction = key === "swolf" ? "lower" : key === "dps" ? "higher" : "neutral";
+                return renderPersonalBands(trendDataView.map((d) => d[bandKey]), direction);
+              })()}
               <XAxis dataKey="label" tick={{ fill: "#636366", fontSize: 10.5 }} />
               {/* reversed reads METRIC_AXIS_DIRECTION — the same registry the collapsed
                   sparkline's YAxis reads above — instead of a per-branch key check, so this
@@ -2788,7 +2708,7 @@ function SwimmingTab({ isMobile }) {
                 const isOpen = expandedMetrics.has(card.key);
                 const pts = sparkPoints(card.series);
                 return (
-                  <div key={card.key} className={`trend-metric-card ${isOpen ? "is-expanded" : "is-collapsed"}`} style={{ background: "#000000", border: `1.5px solid ${card.color}${isOpen ? "cc" : "70"}`, borderRadius: 18, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
+                  <div key={card.key} className="trend-compact-card" data-expanded={isOpen ? "true" : "false"} style={{ background: "#000000", border: `1.5px solid ${card.color}${isOpen ? "cc" : "70"}`, borderRadius: 18, padding: 12, cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => toggleMetric(card.key)}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 600, color: "#D1D1D6" }}>{card.title}</div>
@@ -2809,12 +2729,12 @@ function SwimmingTab({ isMobile }) {
                       </div>
                     </div>
                     {!isOpen && (pts.length >= 2 ? (
-                      <div className="trend-mini-chart"><ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer width="100%" height={36}>
                         <LineChart data={pts} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
                           <YAxis hide domain={["dataMin", "dataMax"]} reversed={METRIC_AXIS_DIRECTION[card.key] === "lower"} />
                           <Line type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.75} dot={false} isAnimationActive={false} />
                         </LineChart>
-                      </ResponsiveContainer></div>
+                      </ResponsiveContainer>
                     ) : (
                       <div style={{ fontSize: 10.5, color: "#48484A", padding: "18px 0" }}>Not enough data yet</div>
                     ))}
@@ -3177,6 +3097,7 @@ function SwimmingTab({ isMobile }) {
 
 function TrainingLog() {
   const [sessions, setSessions] = useState(null);
+  const [uiTheme, setUiTheme] = useState("night"); // presentation-only Day/Night switch
   const [tab, setTab] = useState("dashboard");
   const [filter, setFilter] = useState("All");
   const [metric, setMetric] = useState("reps");
@@ -4505,7 +4426,7 @@ function TrainingLog() {
   const compareSessions = selectedCompare.length === 2 ? selectedCompare.map((id) => sessions.find((s) => s.id === id)).sort((a, b) => a.date.localeCompare(b.date)) : null;
 
   return (
-    <div style={{ background: "#000000", minHeight: "100vh", color: "#F2F2F7", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif" }}>
+    <div className={`app-shell ui-${uiTheme}`} style={{ background: "#000000", minHeight: "100vh", color: "#F2F2F7", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif" }}>
       <style>{`
         .disp { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; letter-spacing: -0.025em; font-weight: 700; }
         .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace; font-variant-numeric: tabular-nums; }
@@ -4528,6 +4449,52 @@ function TrainingLog() {
         ::-webkit-scrollbar-thumb { background: #3A3A3C; border-radius: 999px; }
         .recharts-cartesian-grid line, .recharts-polar-grid-concentric-polygon, .recharts-polar-grid-angle line { stroke: #27272A !important; }
         .recharts-default-tooltip { background: rgba(28,28,30,.96) !important; border: 1px solid #2C2C2E !important; border-radius: 14px !important; box-shadow: 0 10px 30px rgba(0,0,0,.28) !important; }
+        /* UI-only Day/Night skin. Business logic and chart data remain unchanged. */
+        .app-shell { transition: background-color .2s ease, color .2s ease; }
+        .ui-night { --ui-bg:#09090B; --ui-card:#18181B; --ui-card2:#111113; --ui-border:#27272A; --ui-text:#F5F5F7; --ui-muted:#8E8E93; --ui-faint:#636366; --ui-grid:#2A2A2D; }
+        .ui-day { --ui-bg:#DCD6CB; --ui-card:#ECE6DB; --ui-card2:#E4DED3; --ui-border:#CBC3B7; --ui-text:#1A1917; --ui-muted:#6E6A64; --ui-faint:#918B82; --ui-grid:#CFC7BA; color-scheme: light; }
+        .ui-night, .ui-day { background:var(--ui-bg)!important; color:var(--ui-text)!important; }
+        .ui-day > div, .ui-day > div > div { border-color:var(--ui-border); }
+        .ui-day div[style*="background: #1C1C1E"],
+        .ui-day div[style*="background: #18181B"],
+        .ui-day div[style*="background: #111216"],
+        .ui-day div[style*="background: #000000"] { background:var(--ui-card)!important; border-color:var(--ui-border)!important; box-shadow:none!important; }
+        .ui-day div[style*="background: linear-gradient"] { background:var(--ui-card)!important; border-color:var(--ui-border)!important; box-shadow:none!important; }
+        .ui-day [style*="color: #FFFFFF"],
+        .ui-day [style*="color: #F5F3EE"],
+        .ui-day [style*="color: #F2F2F7"],
+        .ui-day [style*="color: #D1D1D6"],
+        .ui-day [style*="color: #c9cdd3"] { color:var(--ui-text)!important; }
+        .ui-day [style*="color: #8E8E93"],
+        .ui-day [style*="color: #9a9fa6"],
+        .ui-day [style*="color: #6b7078"] { color:var(--ui-muted)!important; }
+        .ui-day [style*="color: #636366"],
+        .ui-day [style*="color: #5a5f66"],
+        .ui-day [style*="color: #48484A"] { color:var(--ui-faint)!important; }
+        .ui-day input, .ui-day textarea, .ui-day select {
+          background:var(--ui-card2)!important; border-color:var(--ui-border)!important; color:var(--ui-text)!important; color-scheme:light!important;
+        }
+        .ui-day input::placeholder, .ui-day textarea::placeholder { color:#918B82!important; }
+        .ui-day .recharts-cartesian-grid line,
+        .ui-day .recharts-polar-grid-concentric-polygon,
+        .ui-day .recharts-polar-grid-angle line { stroke:var(--ui-grid)!important; }
+        .ui-day .recharts-cartesian-axis-tick text,
+        .ui-day .recharts-polar-angle-axis-tick text,
+        .ui-day .recharts-polar-radius-axis-tick text { fill:#756F67!important; }
+        .ui-day .recharts-default-tooltip { background:rgba(236,230,219,.98)!important; border-color:var(--ui-border)!important; color:var(--ui-text)!important; box-shadow:0 8px 24px rgba(62,52,40,.12)!important; }
+        .ui-day .recharts-tooltip-label, .ui-day .recharts-tooltip-item { color:var(--ui-text)!important; }
+
+        .theme-toggle { display:inline-flex; align-items:center; gap:2px; padding:3px; border-radius:999px; border:1px solid var(--ui-border); background:var(--ui-card2); }
+        .theme-toggle button { min-height:0!important; width:32px; height:28px; border:0; border-radius:999px; cursor:pointer; background:transparent; color:var(--ui-muted); display:flex; align-items:center; justify-content:center; font-size:14px; }
+        .theme-toggle button.active { background:var(--ui-text); color:var(--ui-bg); }
+
+        /* Compact collapsed Trend cards: same behavior, less vertical weight. */
+        .trend-compact-card { transition: background-color .18s ease, border-color .18s ease; }
+        .trend-compact-card[data-expanded="false"] { padding-top:9px!important; padding-bottom:9px!important; }
+        .trend-compact-card[data-expanded="false"] .recharts-responsive-container { max-height:36px!important; }
+
+        /* Personal-history chart bands: quiet enough to support rather than dominate. */
+        .trend-band-label { font-size:9px; font-weight:700; letter-spacing:.02em; }
         .file-btn { position: relative; overflow: hidden; }
         .file-btn input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
         @media (max-width: 560px) {
@@ -4539,9 +4506,15 @@ function TrainingLog() {
       {/* Header */}
       <div style={{ borderBottom: "1px solid #27272A", padding: isMobile ? "14px 12px 0" : "20px 16px 0" }}>
         <div style={{ maxWidth: 1060, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <Dumbbell size={20} color="#FF9F0A" strokeWidth={2.2} />
-            <span className="mono" style={{ fontSize: 11, letterSpacing: "0.15em", color: "#8E8E93", textTransform: "uppercase" }}>Calisthenics · Training Log</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Dumbbell size={20} color="#FF9F0A" strokeWidth={2.2} />
+              <span className="mono" style={{ fontSize: 11, letterSpacing: "0.15em", color: "#8E8E93", textTransform: "uppercase" }}>Calisthenics · Training Log</span>
+            </div>
+            <div className="theme-toggle" aria-label="Appearance">
+              <button className={uiTheme === "day" ? "active" : ""} onClick={() => setUiTheme("day")} title="Day">☀</button>
+              <button className={uiTheme === "night" ? "active" : ""} onClick={() => setUiTheme("night")} title="Night">☾</button>
+            </div>
           </div>
           {editingName ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 4px", flexWrap: "wrap" }}>
