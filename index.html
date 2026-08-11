@@ -1977,6 +1977,13 @@ function SwimmingTab({ isMobile, onExit }) {
   }, [sessions, categoryFilter, effortFilter, effortAssignments]);
   const sortedSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => (a.date < b.date ? 1 : -1)) : []), [sessions]);
 
+  // Dashboard is intentionally filter-neutral. Analysis filters belong to Trend / Compare /
+  // Radar and remain remembered there, but must never leak into the overview/Insights.
+  const dashboardChronSessions = useMemo(
+    () => sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : [],
+    [sessions]
+  );
+
   const allStrokesSeen = useMemo(() => {
     const set = new Set();
     (chronSessions || []).forEach((s) => Object.keys(s.strokeStats || {}).forEach((k) => set.add(k)));
@@ -2010,6 +2017,26 @@ function SwimmingTab({ isMobile, onExit }) {
     });
     return weight ? weightedTotal / weight : null;
   };
+
+  const dashboardSwolfReferencePool = useMemo(() => {
+    for (let i = dashboardChronSessions.length - 1; i >= 0; i--) {
+      const s = dashboardChronSessions[i];
+      if (s.poolLength != null) return s.poolLength;
+    }
+    return null;
+  }, [dashboardChronSessions]);
+
+  const dashboardTrendData = useMemo(() => dashboardChronSessions.map((s) => ({
+    date: s.date,
+    label: fmtDate(s.date),
+    pace100: s.pace100Overall,
+    swolf_all: poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgSwolf") : null,
+    cadence_all: allStrokeMetric(s, "avgCadence"),
+    dps_all: allStrokeMetric(s, "avgDistPerStroke"),
+    avgHR: s.avgHR,
+    peakHR: s.peakHR,
+    energy100: s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null,
+  })), [dashboardChronSessions, dashboardSwolfReferencePool]);
 
   const swolfReferencePools = useMemo(() => {
     const refs = { all: null };
@@ -2902,21 +2929,16 @@ function SwimmingTab({ isMobile, onExit }) {
                 <Sparkles size={13} color="#FF9F0A" />
                 <div style={{ ...labelStyle, marginBottom: 0 }}>Insights</div>
               </div>
-              {(strokeFilter !== "all" || categoryFilter !== "all" || effortFilter !== "all") && (
-                <div className="mono" style={{ fontSize: 9.5, color: "#636366", display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  <span>Analysis:</span>
-                  {strokeFilter !== "all" && <span style={{ color: SWIM_STROKE_COLORS[strokeFilter] || "#8E8E93" }}>{SWIM_STROKE_LABELS[strokeFilter]}</span>}
-                  {categoryFilter !== "all" && <span style={{ color: categoryFilter === "csstest" ? "#0A84FF" : "#64D2FF" }}>{categoryFilter === "csstest" ? "CSS Test" : "Workout"}</span>}
-                  {effortFilter !== "all" && <span style={{ color: SWIM_EFFORT_META[effortFilter].color }}>{SWIM_EFFORT_META[effortFilter].label}</span>}
-                </div>
-              )}
+              <span className="mono" style={{ fontSize: 9.5, color: "#636366" }}>Overall swim profile</span>
             </div>
             {(() => {
-              const insightStroke = strokeFilter === "all" ? null : strokeFilter;
-              const strokeLabel = strokeFilter === "all" ? "Overall" : (SWIM_STROKE_LABELS[strokeFilter] || "Swim");
               const swimInsights = buildSwimInsights({
-                chronSessions, trendData, activeStroke: insightStroke, strokeLabel, todayStr,
-                strokeFilterActive: strokeFilter !== "all",
+                chronSessions: dashboardChronSessions,
+                trendData: dashboardTrendData,
+                activeStroke: null,
+                strokeLabel: "Overall",
+                todayStr,
+                strokeFilterActive: false,
               });
               if (swimInsights.length === 0) {
                 return <div style={{ fontSize: 12.5, color: "#636366" }}>Log a swim to start seeing insights here.</div>;
