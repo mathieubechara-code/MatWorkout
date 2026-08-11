@@ -5128,8 +5128,21 @@ function TrainingLog() {
   const updateSwimLengthStroke = (sessionId, lengthIndex, newStroke) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userStroke: newStroke === l.stroke ? null : newStroke }));
   const markSwimLengthActive = (sessionId, lengthIndex, stroke) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userLengthType: "active", userStroke: stroke }));
   const markSwimLengthIdle = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userLengthType: l.lengthType === "idle" ? null : "idle", userStroke: null }));
-  const toggleExcludeSwimLength = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: !l.userExcluded }));
-  const resetSwimLengthOverrides = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: false, userLengthType: null, userStroke: null }));
+  const toggleExcludeSwimLength = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => {
+    const nextExcluded = !l.userExcluded;
+    const flagged = !!(l.glitch || l.reviewFlag);
+    return {
+      ...l,
+      userExcluded: nextExcluded,
+      userReviewResolution: flagged ? (nextExcluded ? "removed" : "kept") : l.userReviewResolution,
+    };
+  });
+  const keepSuspiciousSwimLength = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({
+    ...l,
+    userExcluded: false,
+    userReviewResolution: (l.glitch || l.reviewFlag) ? "kept" : l.userReviewResolution,
+  }));
+  const resetSwimLengthOverrides = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: false, userLengthType: null, userStroke: null, userReviewResolution: null }));
 
   const toggleSwimEffortSelection = (sessionId, lengthIndex) => {
     setSwimEffortSelected((prev) => {
@@ -7983,6 +7996,15 @@ function TrainingLog() {
                                       const editingEffort = swimEffortEditFor === s.id;
                                       const effort = eff.lengthType === "active" && !excluded ? swimEffortForLength(s, l, swimEffortAssignments) : null;
                                       const effortSelected = editingEffort && swimEffortSelected[s.id] && swimEffortSelected[s.id].has(l.index);
+                                      const flaggedForReview = !!(l.glitch || l.reviewFlag);
+                                      const reviewResolution = l.userReviewResolution || (excluded && flaggedForReview ? "removed" : null);
+                                      const reviewTag = reviewResolution === "removed"
+                                        ? { label: "Reviewed · Removed", color: "#FF9F0A" }
+                                        : reviewResolution === "kept"
+                                          ? { label: "Reviewed · Kept", color: "#30D158" }
+                                          : flaggedForReview
+                                            ? { label: "Needs review", color: l.glitch ? "#FF9F0A" : "#64D2FF" }
+                                            : null;
                                       return (
                                         <React.Fragment key={l.index}>
                                         <tr style={rowStyle}>
@@ -8020,7 +8042,15 @@ function TrainingLog() {
                                           <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.avgCadence : "—"}</td>
                                           <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.swolf : "—"}</td>
                                           <td style={{ padding: "5px 4px", textAlign: "right", position: "sticky", right: 0, background: l.glitch && !excluded ? "#1a1712" : (l.reviewFlag && !excluded ? "#071114" : "var(--card, #000000)") }} onClick={(e) => e.stopPropagation()}>
-                                            <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                                            <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", flexWrap: "wrap", alignItems: "center" }}>
+                                              {reviewTag && (
+                                                <span className="mono" title={reviewResolution ? "You already reviewed this flagged length" : "This flagged length still needs your decision"} style={{ color: reviewTag.color, border: `1px solid ${reviewTag.color}66`, background: `${reviewTag.color}12`, borderRadius: 999, padding: "3px 7px", fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>
+                                                  {reviewTag.label}
+                                                </span>
+                                              )}
+                                              {flaggedForReview && !excluded && reviewResolution !== "kept" && (
+                                                <button onClick={() => keepSuspiciousSwimLength(s.id, l.index)} title="Confirm this flagged length is valid and keep it in analytics" style={lenBtnStyle("positive")}>Keep</button>
+                                              )}
                                               {eff.isOverridden && !excluded && (
                                                 <button onClick={() => resetSwimLengthOverrides(s.id, l.index)} title="Revert to original" style={lenBtnStyle("neutral")}>Revert</button>
                                               )}
@@ -8062,10 +8092,10 @@ function TrainingLog() {
                                 </table>
                               </div>
                               {s.lengths.some((l) => l.glitch && !l.userExcluded) && (
-                                <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 6 }}>⚠ rows may be sensor glitches (phantom lengths / implausible cadence) — they're still counted in your totals above. Review and Exclude any that are wrong.</div>
+                                <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 6 }}>⚠ sensor-quality warning. Use Keep or Exclude once checked; the Status tag changes from “Needs review” to “Reviewed · Kept/Removed” so unresolved laps are easy to find.</div>
                               )}
                               {s.lengths.some((l) => l.reviewFlag && !l.userExcluded && !l.glitch) && (
-                                <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 4 }}>◇ review-only = an unusually fast/low-stroke same-stroke length. It stays fully included in analytics and may simply be a real sprint. Exclude or reclassify only if the watch was wrong.</div>
+                                <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 4 }}>◇ unusual-length review. It stays included in analytics unless excluded. Use Keep or Exclude once checked; the Status tag records your decision.</div>
                               )}
                             </>
                           )}
