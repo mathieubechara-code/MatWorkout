@@ -2656,12 +2656,29 @@ function SwimmingTab({ isMobile, onExit }) {
         return !!(st && (st.pace100 != null || st.avgSwolf != null || st.avgDistPerStroke != null));
       });
   const radarLatestSession = radarEligibleSessions.length ? radarEligibleSessions[radarEligibleSessions.length - 1] : null;
+  // Distance for the exact current Radar context.
+  // Category is already applied by chronSessions. When Easy/Work/Speed is selected,
+  // deriveSwimSessionForEffort has already marked non-matching active lengths excluded.
+  // This final helper also applies the selected stroke, so e.g. Freestyle · Work means
+  // Freestyle Work metres only — never whole-session distance.
+  const radarContextDistance = (s) => {
+    if (!s || !Array.isArray(s.lengths) || s.poolLength == null || !Number.isFinite(s.poolLength) || s.poolLength <= 0) return null;
+    const qualifyingLengths = s.lengths
+      .map((raw) => ({ raw, eff: effectiveLength(raw) }))
+      .filter(({ raw, eff }) =>
+        eff.lengthType === "active" &&
+        !raw.userExcluded &&
+        (strokeFilter === "all" || eff.stroke === strokeFilter)
+      ).length;
+    return qualifyingLengths > 0 ? qualifyingLengths * s.poolLength : null;
+  };
+
   const radarMetricValue = (s, key) => {
     if (!s) return null;
     if (key === "pace") return strokeFilter === "all" ? s.pace100Overall : (s.strokeStats && s.strokeStats[strokeFilter] ? s.strokeStats[strokeFilter].pace100 : null);
     if (key === "swolf") return strokeFilter === "all" ? allStrokeMetric(s, "avgSwolf") : (s.strokeStats && s.strokeStats[strokeFilter] ? s.strokeStats[strokeFilter].avgSwolf : null);
     if (key === "dps") return strokeFilter === "all" ? allStrokeMetric(s, "avgDistPerStroke") : (s.strokeStats && s.strokeStats[strokeFilter] ? s.strokeStats[strokeFilter].avgDistPerStroke : null);
-    if (key === "distance") return s.distance;
+    if (key === "distance") return radarContextDistance(s);
     return null;
   };
   // Within-session pace consistency for the current Radar context.
@@ -2801,7 +2818,7 @@ function SwimmingTab({ isMobile, onExit }) {
       );
     }
 
-    // 4. Endurance — session distance only.
+    // 4. Endurance — distance in the exact selected Radar context (category + effort + stroke).
     const distanceVals = radarBaselineSessions.map((s) => radarMetricValue(s, "distance"));
     const distanceBase = radarMean(distanceVals), latestDistance = radarMetricValue(latest, "distance");
     if (latestDistance != null && distanceBase != null && distanceBase > 0) addAxis("endurance", latestDistance, distanceBase, 100 * (latestDistance / distanceBase), { latest: latestDistance, baseline: distanceBase });
@@ -2966,7 +2983,7 @@ function SwimmingTab({ isMobile, onExit }) {
         category = "positive";
         headline = "Normal speed over more work.";
         story = effortFilter === "all"
-          ? `You maintained normal speed while covering more distance than usual${shiftedSupporting.length > 1 ? `. Other dimensions changed${shiftedText}` : ""}.`
+          ? `You maintained normal speed while covering more qualifying distance than usual${shiftedSupporting.length > 1 ? `. Other dimensions changed${shiftedText}` : ""}.`
           : `You maintained normal speed while accumulating more ${SWIM_EFFORT_META[effortFilter].label.toLowerCase()} distance than usual${shiftedSupporting.length > 1 ? `. Other dimensions changed${shiftedText}` : ""}.`;
       } else if (effState === "below" || aerobicState === "below") {
         category = "warning";
@@ -4098,7 +4115,7 @@ function SwimmingTab({ isMobile, onExit }) {
                             pace: "Speed — latest comparable pace vs your previous 6-week baseline. Above 100 = faster than usual.",
                             efficiency: "Stroke Efficiency — combines same-pool SWOLF and distance per stroke vs your baseline. Above 100 = a more favorable combined stroke-economy signal.",
                             consistency: "Consistency — how stable your pace was across comparable active lengths in this session vs your previous 6 weeks. Above 100 = steadier pacing than usual; below 100 = more variable.",
-                            endurance: "Endurance — latest qualifying distance vs your previous 6-week average. Above 100 = more distance than usual; below 100 = less. More is not automatically better.",
+                            endurance: "Endurance — distance completed in the current stroke/effort/category context vs your previous 6-week average for the same context. Above 100 = more distance than usual; below 100 = less. More is not automatically better.",
                             aerobic: "Aerobic Efficiency — swimming speed relative to heart-rate cost vs your previous 6-week baseline. Above 100 = more speed for the cardiovascular cost. Shown only with sufficient real HR coverage.",
                           };
                           return (
