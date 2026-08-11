@@ -3424,6 +3424,20 @@ function TrainingLog() {
     try { localStorage.setItem("workout-section-v1", workoutSection); } catch {}
   }, [workoutSection]);
 
+  const enterMainTab = (id) => {
+    if (id === "workout") {
+      setWorkoutSection("dashboard");
+      try { localStorage.setItem("workout-section-v1", "dashboard"); } catch {}
+    }
+    if (id === "swim") {
+      // SwimmingTab remounts when entering Swim, so resetting its stored subsection here
+      // gives a fresh Dashboard entry. A browser refresh does not call this function and
+      // therefore still restores the user's current Swim subsection.
+      try { localStorage.setItem("swim-section-v1", "dashboard"); } catch {}
+    }
+    setTab(id);
+  };
+
   const [filter, setFilter] = useState("All");
   const [metric, setMetric] = useState("reps");
   const [range, setRange] = useState("all");
@@ -4344,12 +4358,14 @@ function TrainingLog() {
   const groupChartData = useMemo(() => {
     if (!filter.startsWith("group:")) return [];
     const group = filter.slice(6);
+    const included = chartExercises.filter((name) => muscleGroupMap[name] === group && !hiddenStatsExercises.has(name));
+    if (!included.length) return [];
     return rangedSessions
-      .filter((s) => chartExercises.some((name) => muscleGroupMap[name] === group && s.ex[name]))
+      .filter((s) => included.some((name) => s.ex[name]))
       .map((s) => {
         let val = 0, best1RM = null;
-        chartExercises.forEach((name) => {
-          if (muscleGroupMap[name] !== group || !s.ex[name]) return;
+        included.forEach((name) => {
+          if (!s.ex[name]) return;
           if (metric === "reps") { val += total(s.ex[name]); return; }
           if (metric === "1rm") { const rm = exercise1RM(s, name); if (rm != null && (best1RM == null || rm > best1RM)) best1RM = rm; return; }
           const v = exerciseVolume(s, name);
@@ -4357,7 +4373,7 @@ function TrainingLog() {
         });
         return { date: fmtDate(s.date), value: metric === "1rm" ? (best1RM == null ? null : Math.round(best1RM)) : Math.round(val) };
       });
-  }, [rangedSessions, filter, metric, chartExercises, muscleGroupMap]);
+  }, [rangedSessions, filter, metric, chartExercises, muscleGroupMap, hiddenStatsExercises]);
 
   // --- Weekly (aggregated) equivalents of the datasets above, for the Day/Week chart toggle ---
   // Sessions are bucketed into ISO weeks (Monday start, same convention as the consistency
@@ -4401,13 +4417,15 @@ function TrainingLog() {
   const weeklyGroupChartData = useMemo(() => {
     if (!filter.startsWith("group:")) return [];
     const group = filter.slice(6);
+    const included = chartExercises.filter((name) => muscleGroupMap[name] === group && !hiddenStatsExercises.has(name));
+    if (!included.length) return [];
     return weeklySessionGroups
-      .filter(({ sessions: weekSessions }) => weekSessions.some((s) => chartExercises.some((name) => muscleGroupMap[name] === group && s.ex[name])))
+      .filter(({ sessions: weekSessions }) => weekSessions.some((s) => included.some((name) => s.ex[name])))
       .map(({ weekStart, sessions: weekSessions }) => {
         let val = 0, best1RM = null;
         weekSessions.forEach((s) => {
-          chartExercises.forEach((name) => {
-            if (muscleGroupMap[name] !== group || !s.ex[name]) return;
+          included.forEach((name) => {
+            if (!s.ex[name]) return;
             if (metric === "reps") { val += total(s.ex[name]); return; }
             if (metric === "1rm") { const rm = exercise1RM(s, name); if (rm != null && (best1RM == null || rm > best1RM)) best1RM = rm; return; }
             const v = exerciseVolume(s, name);
@@ -4416,7 +4434,7 @@ function TrainingLog() {
         });
         return { date: "Wk of " + fmtDate(weekStart), value: metric === "1rm" ? (best1RM == null ? null : Math.round(best1RM)) : Math.round(val) };
       });
-  }, [weeklySessionGroups, filter, metric, chartExercises, muscleGroupMap]);
+  }, [weeklySessionGroups, filter, metric, chartExercises, muscleGroupMap, hiddenStatsExercises]);
 
   // Per-set breakdown doesn't aggregate cleanly across a week (different session/set counts),
   // so the weekly view for a single exercise collapses to just its weekly Total line.
@@ -5203,7 +5221,7 @@ function TrainingLog() {
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
           <div style={{ display: "flex", gap: 4, overflowX: "auto", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 18, padding: 4 }}>
             {visibleTabs.map(({ id, label, Icon }) => (
-              <button key={id} className="app-nav-pill" onClick={() => setTab(id)} style={{
+              <button key={id} className="app-nav-pill" onClick={() => enterMainTab(id)} style={{
                 display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", whiteSpace: "nowrap",
                 padding: "9px 14px", fontSize: 12.5, fontWeight: 700, color: tab === id ? "#000000" : "#8E8E93",
                 background: tab === id ? "#FF9F0A" : "transparent",
@@ -5231,7 +5249,7 @@ function TrainingLog() {
 
             <div style={{ display: "grid", gridTemplateColumns: athleteMode === "hybrid" || !athleteMode ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 12 }}>
               {athleteMode !== "swim" && (
-              <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 14 }}>
+              <div onClick={() => enterMainTab("workout")} style={{ cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Dumbbell size={13} color="#FF9F0A" />
                   <span style={{ fontSize: 10.5, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Workout streak</span>
@@ -5241,7 +5259,7 @@ function TrainingLog() {
               </div>
               )}
               {athleteMode !== "workout" && (
-              <div onClick={() => setTab("swim")} style={{ cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 14 }}>
+              <div onClick={() => enterMainTab("swim")} style={{ cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Waves size={13} color="#64D2FF" />
                   <span style={{ fontSize: 10.5, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Swim streak</span>
@@ -5723,7 +5741,7 @@ function TrainingLog() {
 
               {filter.startsWith("group:") && (
                 <div style={{ marginTop: 7, fontSize: 9.5, color: "#636366" }}>
-                  Group selected · tap an exercise to show / hide it from the chart.
+                  Group line · tap an exercise to include / exclude it from the group total.
                 </div>
               )}
             </div>
@@ -5756,14 +5774,9 @@ function TrainingLog() {
                     )}
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
-                  <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={10.5} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={10.5} tickFormatter={(v) => fmtNum(v, 2)} />
-                    <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 11 }} formatter={(v, name) => [`${fmtNum(v, 2)} ${yLabel}`, name]} />
-                    <Legend wrapperStyle={{ fontSize: 10.5, paddingTop: 8 }} />
-                    {chartExercises
-                      .filter((name) => muscleGroupMap[name] === filter.slice(6) && !hiddenStatsExercises.has(name))
-                      .map((name) => (
-                        <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={2.3} dot={{ r: 2.8 }} connectNulls />
-                      ))}
+                  <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={10.5} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={10.5} tickFormatter={(v) => fmtNum(v, 2)} />
+                    <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 11 }} formatter={(v) => [`${fmtNum(v, 2)} ${yLabel}`, filter.slice(6)]} />
+                    <Line type="monotone" dataKey="value" name={filter.slice(6)} stroke={GROUP_COLORS[filter.slice(6)]} strokeWidth={2.7} dot={{ r: 3.2 }} connectNulls />
                   </LineChart>
                 ) : timeView === "week" ? (
                   <LineChart data={weeklySingleData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
