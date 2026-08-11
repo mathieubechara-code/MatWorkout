@@ -3061,7 +3061,7 @@ function SwimmingTab({ isMobile, onExit }) {
   // Best pace is calculated directly from stroke-specific pace (the one with the most lengths),
   // shown as a small tag next to the PR so "1:32/100m" isn't ambiguous about which stroke it
   // was swum in — whole-session pace can otherwise mix strokes together silently.
-  const hasUnresolvedSwimQualityFlag = (s) => !!(s && Array.isArray(s.lengths) && s.lengths.some((l) => l.glitch && !l.userExcluded));
+  const hasUnresolvedSwimQualityFlag = (s) => !!(s && Array.isArray(s.lengths) && s.lengths.some((l) => l.glitch && !l.userExcluded && l.userReviewResolution !== "kept"));
 // reviewFlag is intentionally NOT included here: a personal-pattern review candidate is not
 // evidence of corrupted data and must not suppress a real sprint/PR.
 
@@ -7716,6 +7716,10 @@ function TrainingLog() {
             <div style={{ display: "grid", gap: 8 }}>
               {sortedSwimSessions.map((s) => {
                 const isOpen = expandedSwimDetailId === s.id;
+                const flaggedLengths = (s.lengths || []).filter((l) => l.glitch || l.reviewFlag);
+                const unresolvedFlaggedLengths = flaggedLengths.filter((l) => !l.userExcluded && l.userReviewResolution !== "kept");
+                const hasFlaggedLengths = flaggedLengths.length > 0;
+                const reviewReconciled = hasFlaggedLengths && unresolvedFlaggedLengths.length === 0;
                 return (
                   <div key={s.id} style={{ border: "1px solid #27272A", borderRadius: 16, overflow: "hidden" }}>
                     <div onClick={() => setExpandedSwimDetailId(isOpen ? null : s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", cursor: "pointer", background: "#000000", flexWrap: "wrap", gap: 8 }}>
@@ -7726,7 +7730,14 @@ function TrainingLog() {
                             {fmtDateFull(s.date)}
                             <span className="mono" style={{ fontSize: 9.5, color: s.isCssTest ? "#0A84FF" : "#64D2FF", border: `1px solid ${s.isCssTest ? "#0A84FF" : "#64D2FF"}55`, borderRadius: 5, padding: "1px 5px" }}>{swimCategoryLabelOf(s)}</span>
                             <span className="mono" style={{ fontSize: 9.5, color: s.poolLength != null ? "#8E8E93" : "#FF453A", border: `1px solid ${s.poolLength != null ? "#8E8E9355" : "#FF453A55"}`, borderRadius: 5, padding: "1px 5px" }}>{formatPoolLength(s.poolLength)}</span>
-                            {s.qualityNote && <AlertTriangle size={12} style={{ color: "#FF9F0A" }} title={s.qualityNote} />}
+                            {hasFlaggedLengths && (
+                              reviewReconciled ? (
+                                <span className="mono" title="All flagged lengths in this session have been reviewed" style={{ fontSize: 9.5, color: "#30D158", border: "1px solid #30D15866", background: "#30D15812", borderRadius: 999, padding: "2px 6px", fontWeight: 800 }}>✓ Reconciled</span>
+                              ) : (
+                                <span className="mono" title={`${unresolvedFlaggedLengths.length} flagged length${unresolvedFlaggedLengths.length === 1 ? "" : "s"} still need review`} style={{ fontSize: 9.5, color: "#FF9F0A", border: "1px solid #FF9F0A66", background: "#FF9F0A12", borderRadius: 999, padding: "2px 6px", fontWeight: 800 }}>Needs review · {unresolvedFlaggedLengths.length}</span>
+                              )
+                            )}
+                            {!hasFlaggedLengths && s.qualityNote && <AlertTriangle size={12} style={{ color: "#FF9F0A" }} title={s.qualityNote} />}
                           </div>
                           <div className="mono" style={{ fontSize: 11, color: "#636366" }}>{s.fileName}</div>
                         </div>
@@ -7739,8 +7750,11 @@ function TrainingLog() {
                     </div>
                     {isOpen && (
                       <div style={{ padding: "12px 14px", borderTop: "1px solid #27272A" }}>
-                        {s.qualityNote && (
+                        {s.qualityNote && !reviewReconciled && (
                           <div style={{ fontSize: 11.5, color: "#FF9F0A", background: "#FF9F0A14", border: "1px solid #FF9F0A33", borderRadius: 12, padding: "8px 10px", marginBottom: 10 }}>{s.qualityNote}</div>
+                        )}
+                        {reviewReconciled && (
+                          <div style={{ fontSize: 11.5, color: "#30D158", background: "#30D15810", border: "1px solid #30D15833", borderRadius: 12, padding: "8px 10px", marginBottom: 10 }}>✓ Review reconciled — all flagged lengths in this session have been checked and either kept or removed.</div>
                         )}
                         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10, marginBottom: 8, fontSize: 12 }}>
                           <div>
@@ -8015,7 +8029,7 @@ function TrainingLog() {
                                             </span>
                                           </td>
                                           <td style={{ padding: "5px 8px", color: eff.lengthType === "idle" ? "var(--text-dimmer, #636366)" : "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>
-                                            <span>{eff.lengthType}{l.glitch && !excluded ? " ⚠" : ""}{l.reviewFlag && !excluded && !l.glitch ? " ◇" : ""}{eff.isOverridden ? " ✎" : ""}</span>
+                                            <span>{eff.lengthType}{l.glitch && !excluded && l.userReviewResolution !== "kept" ? " ⚠" : ""}{l.reviewFlag && !excluded && !l.glitch && l.userReviewResolution !== "kept" ? " ◇" : ""}{eff.isOverridden ? " ✎" : ""}</span>
                                             {editingEffort && effort && <span className="mono" style={{ display: "inline-block", marginLeft: 5, fontSize: 9, color: SWIM_EFFORT_META[effort].color, border: `1px solid ${SWIM_EFFORT_META[effort].color}55`, borderRadius: 5, padding: "1px 4px" }}>{SWIM_EFFORT_META[effort].label}{validSwimEffort(l.userEffort) ? " · manual" : ""}</span>}
                                           </td>
                                           <td style={{ padding: "5px 8px", ...dataCellStyle }}>
@@ -8094,7 +8108,7 @@ function TrainingLog() {
                               {s.lengths.some((l) => l.glitch && !l.userExcluded) && (
                                 <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 6 }}>⚠ sensor-quality warning. Use Keep or Exclude once checked; the Status tag changes from “Needs review” to “Reviewed · Kept/Removed” so unresolved laps are easy to find.</div>
                               )}
-                              {s.lengths.some((l) => l.reviewFlag && !l.userExcluded && !l.glitch) && (
+                              {s.lengths.some((l) => l.reviewFlag && !l.userExcluded && !l.glitch && l.userReviewResolution !== "kept") && (
                                 <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 4 }}>◇ unusual-length review. It stays included in analytics unless excluded. Use Keep or Exclude once checked; the Status tag records your decision.</div>
                               )}
                             </>
