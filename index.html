@@ -2244,31 +2244,36 @@ function SwimmingTab({ isMobile, onExit }) {
   // per-stroke metrics).
   const seriesFor = (key) => trendDataView.map((d) => (d[key] == null ? null : d[key]));
 
-  // Degrades gracefully: with lots of history it compares the last 3 sessions against the
-  // 3 before that; with as few as 2 sessions total it falls back to latest-vs-previous, so a
-  // one-word status is available as soon as there's anything to compare.
+  // Trend status is deliberately "latest vs typical", not recent-window vs prior-window.
+  // Typical = mean of the prior comparable values in the currently displayed/filtered series;
+  // the latest point is excluded so it cannot move its own reference line.
   const computeVerdict = (series, direction, threshold = 0.025, labels = {}) => {
     const vals = series.filter((v) => v != null && Number.isFinite(v));
     if (vals.length < 2) return null;
-    const windowSize = Math.max(1, Math.min(3, Math.floor(vals.length / 2)));
-    const recent = vals.slice(-windowSize);
-    const prior = vals.slice(-windowSize * 2, -windowSize);
+    const latest = vals[vals.length - 1];
+    const prior = vals.slice(0, -1);
     if (!prior.length) return null;
-    const recentMed = medianOf(recent), priorMed = medianOf(prior);
-    if (priorMed == null || priorMed === 0) return null;
-    const change = (recentMed - priorMed) / priorMed;
+    const typical = prior.reduce((a, b) => a + b, 0) / prior.length;
+    if (typical == null || typical === 0) return null;
+    const change = (latest - typical) / typical;
     const pctAbs = Math.round(Math.abs(change) * 1000) / 10;
-    const vsTypical = `${pctAbs}% vs typical`;
-    if (Math.abs(change) < threshold) return { label: `${labels.steady || "Steady"} · ${vsTypical}`, color: "#8E8E93" };
+
+    if (Math.abs(change) < threshold) {
+      return { label: `${labels.steady || "Steady"} · ${pctAbs}% from typical`, color: "#8E8E93" };
+    }
     if (direction === "neutral") {
       return change > 0
-        ? { label: `${labels.up || "Higher"} · ${vsTypical}`, color: "#64D2FF" }
-        : { label: `${labels.down || "Lower"} · ${vsTypical}`, color: "#64D2FF" };
+        ? { label: `${labels.up || "Higher"} · ${pctAbs}% above typical`, color: "#64D2FF" }
+        : { label: `${labels.down || "Lower"} · ${pctAbs}% below typical`, color: "#64D2FF" };
     }
+
     const better = direction === "lower-better" ? change < 0 : change > 0;
+    const relation = better
+      ? (labels.betterDelta || "better than typical")
+      : (labels.worseDelta || "worse than typical");
     return better
-      ? { label: `${labels.better || "Improving"} · ${vsTypical}`, color: "#30D158" }
-      : { label: `${labels.worse || "Declining"} · ${vsTypical}`, color: "#FF453A" };
+      ? { label: `${labels.better || "Improving"} · ${pctAbs}% ${relation}`, color: "#30D158" }
+      : { label: `${labels.worse || "Declining"} · ${pctAbs}% ${relation}`, color: "#FF453A" };
   };
 
   const sparkPoints = (series) => series.map((v, i) => ({ i, v })).filter((p) => p.v != null);
@@ -2483,9 +2488,9 @@ function SwimmingTab({ isMobile, onExit }) {
   const metricCards = [
     {
       key: "pace",
-      title: "Pace" + (strokeFilter !== "all" ? ` (${SWIM_STROKE_LABELS[strokeFilter]})` : ""),
+      title: "Pace" + strokeTitleSuffix(strokeFilter === "all" ? null : strokeFilter),
       series: paceSeries,
-      verdict: computeVerdict(paceSeries, "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { worse: "Slower" }),
+      verdict: computeVerdict(paceSeries, "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower", betterDelta: "faster than typical", worseDelta: "slower than typical" }),
       value: fmtPace100(headlineOf(paceSeries, paceDataKey)),
       perStroke: true,
       lowerBetter: true,
@@ -2523,7 +2528,7 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "css",
       title: "Critical Swim Speed (CSS)",
       series: cssTrendData.map((d) => d.cssPace100),
-      verdict: computeVerdict(cssTrendData.map((d) => d.cssPace100), "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { worse: "Slower" }),
+      verdict: computeVerdict(cssTrendData.map((d) => d.cssPace100), "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower", betterDelta: "faster than typical", worseDelta: "slower than typical" }),
       value: cssTrendData.length ? fmtPace100(metricValueMode === "avg6" ? sixWeekAverageFromRows(cssTrendData, "cssPace100") : cssTrendData[cssTrendData.length - 1].cssPace100) : "—",
       lowerBetter: true,
       color: "#0A84FF",
@@ -2645,12 +2650,25 @@ function SwimmingTab({ isMobile, onExit }) {
     };
     const renderPersonalBands = (values, direction = "neutral") => {
       const vals = values.filter((v) => v != null && Number.isFinite(v));
-      const stats = personalBandStats(vals);
-      if (!stats) return null;
+      if (vals.length < 2) return null;
+      const baselineVals = vals.slice(0, -1); // latest point never defines its own "Typical"
+      const stats = personalBandStats(baselineVals);
+      if (!stats) {
+        const only = baselineVals[0];
+        return only == null ? null : (
+          <ReferenceLine
+            y={only}
+            stroke="#A7A7AC"
+            strokeWidth={1}
+            strokeDasharray="4 5"
+            label={{ value: "Typical", position: "insideTopLeft", fill: "#8E8E93", fontSize: 9 }}
+          />
+        );
+      }
       const span = stats.sd > 0 ? stats.sd : Math.max(Math.abs(stats.mean) * 0.025, 0.5);
       return (
         <>
-          {vals.length >= 3 && (
+          {baselineVals.length >= 3 && (
             <ReferenceArea
               y1={stats.mean - span}
               y2={stats.mean + span}
@@ -2731,8 +2749,9 @@ function SwimmingTab({ isMobile, onExit }) {
     }
 
     const dataKeyPrefix = key === "swolf" ? "swolf_" : key === "cadence" ? "cadence_" : "dps_";
+    const aggregateDataKey = key === "swolf" ? "swolf_all" : key === "cadence" ? "cadence_all" : "dps_all";
     const baseFormatter = key === "dps" ? (v) => (v != null ? fmtNum(v, 2) + "m" : "—") : (v) => fmtNum(v, key === "swolf" ? 0 : 1);
-    const strokesToShow = strokeFilter === "all" ? allStrokesSeen : [strokeFilter];
+    const strokesToShow = strokeFilter === "all" ? [] : [strokeFilter];
     // "Better" direction per metric, read from the shared METRIC_AXIS_DIRECTION registry (item
     // 6) rather than decided locally — lower SWOLF is better (flip, like pace), higher
     // distance-per-stroke is better (no flip), and cadence has no universal "better" direction
@@ -2763,9 +2782,13 @@ function SwimmingTab({ isMobile, onExit }) {
               <YAxis tick={{ fill: "#8E8E93", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} width={46} tickFormatter={(v) => fmtNum(v, 2)} reversed={METRIC_AXIS_DIRECTION[key] === "lower"} domain={["dataMin - 2", "dataMax + 2"]} />
               <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={tooltipFormatter} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              {strokesToShow.map((stroke) => (
-                <Line key={stroke} type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
-              ))}
+              {strokeFilter === "all" ? (
+                <Line type="monotone" dataKey={aggregateDataKey} name="All swim types" stroke="#F5F5F7" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
+              ) : (
+                strokesToShow.map((stroke) => (
+                  <Line key={stroke} type="monotone" dataKey={`${dataKeyPrefix}${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                ))
+              )}
             </LineChart>
           </ResponsiveContainer>
           {strokeCaption}
@@ -2781,8 +2804,11 @@ function SwimmingTab({ isMobile, onExit }) {
     strokesToShow.forEach((stroke) => {
       strokeStatsMap[stroke] = computeMeanStd(trendDataView.map((d) => d[`${dataKeyPrefix}${stroke}`]));
     });
+    const aggregateStats = strokeFilter === "all" ? computeMeanStd(trendDataView.map((d) => d[aggregateDataKey])) : null;
     const pairedCount = trendDataView.filter(
-      (d) => d.avgHR != null && strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null)
+      (d) => d.avgHR != null && (strokeFilter === "all"
+        ? d[aggregateDataKey] != null
+        : strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null))
     ).length;
 
     if (pairedCount < 2) {
@@ -2801,13 +2827,22 @@ function SwimmingTab({ isMobile, onExit }) {
       // the same pixel row regardless of the real numbers. That's a coincidence of a lone-point
       // domain, not a real relationship. Just show the values directly instead.
       const only = trendDataView.find(
-        (d) => d.avgHR != null && strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null)
+        (d) => d.avgHR != null && (strokeFilter === "all"
+          ? d[aggregateDataKey] != null
+          : strokesToShow.some((stroke) => d[`${dataKeyPrefix}${stroke}`] != null))
       ) || trendDataView[0];
       return (
         <div>
           {overlaySelector}
           <div style={{ display: "flex", gap: 28, flexWrap: "wrap", padding: "18px 4px 8px" }}>
-            {strokesToShow.map((stroke) => {
+            {strokeFilter === "all" ? (
+              only[aggregateDataKey] != null && (
+                <div>
+                  <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.06em" }}>All swim types</div>
+                  <div style={{ fontSize: 30, fontWeight: 700, color: "#F5F5F7" }}>{baseFormatter(only[aggregateDataKey])}</div>
+                </div>
+              )
+            ) : strokesToShow.map((stroke) => {
               const raw = only[`${dataKeyPrefix}${stroke}`];
               if (raw == null) return null;
               return (
@@ -2832,17 +2867,24 @@ function SwimmingTab({ isMobile, onExit }) {
 
     const normalizedData = trendDataView.map((d) => {
       const point = { ...d, hrZ: zScoreOf(d.avgHR, hrStats) };
-      strokesToShow.forEach((stroke) => {
-        const stats = strokeStatsMap[stroke];
-        let z = stats ? zScoreOf(d[`${dataKeyPrefix}${stroke}`], stats) : null;
+      if (strokeFilter === "all") {
+        let z = aggregateStats ? zScoreOf(d[aggregateDataKey], aggregateStats) : null;
         if (z != null && metricDirection === "lower-better") z = -z;
-        point[`z_${stroke}`] = z;
-      });
+        point.z_all = z;
+      } else {
+        strokesToShow.forEach((stroke) => {
+          const stats = strokeStatsMap[stroke];
+          let z = stats ? zScoreOf(d[`${dataKeyPrefix}${stroke}`], stats) : null;
+          if (z != null && metricDirection === "lower-better") z = -z;
+          point[`z_${stroke}`] = z;
+        });
+      }
       return point;
     });
     const labelToStroke = Object.fromEntries(strokesToShow.map((s) => [SWIM_STROKE_LABELS[s], s]));
     const zTooltipFormatter = (v, name, props) => {
       if (name === "Avg HR") return [props.payload.avgHR != null ? `${Math.round(props.payload.avgHR)} bpm` : "—", name];
+      if (name === "All swim types") return [baseFormatter(props.payload[aggregateDataKey]), name];
       const stroke = labelToStroke[name];
       const raw = stroke ? props.payload[`${dataKeyPrefix}${stroke}`] : v;
       return [baseFormatter(raw), name];
@@ -2868,7 +2910,9 @@ function SwimmingTab({ isMobile, onExit }) {
             <ReferenceLine y={0} stroke="#A7A7AC" strokeWidth={1} strokeDasharray="4 5" />
             <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
-            {strokesToShow.map((stroke) => (
+            {strokeFilter === "all" ? (
+              <Line type="monotone" dataKey="z_all" name="All swim types" stroke="#F5F5F7" strokeWidth={2.2} dot={{ r: 3 }} connectNulls />
+            ) : strokesToShow.map((stroke) => (
               <Line key={stroke} type="monotone" dataKey={`z_${stroke}`} name={SWIM_STROKE_LABELS[stroke]} stroke={SWIM_STROKE_COLORS[stroke]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
             ))}
             <Line type="monotone" dataKey="hrZ" name="Avg HR" stroke="#FF453A" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 3 }} connectNulls />
