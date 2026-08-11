@@ -1538,6 +1538,74 @@ function generateFrequencyInsight(chronSessions, todayStr) {
   };
 }
 
+// ---- 9. Flexible Compare metric interpretation ------------------------------------------------
+// Compare no longer hard-codes metric pairs. Any two metrics can be selected; each metric carries
+// its own threshold and direction semantics. Interpretation describes the two observed changes
+// without claiming causation (e.g. DPS + HR can suggest a useful relationship, not prove power).
+const compareMetricThreshold = (metric) => {
+  if (metric === "hr") return { kind: "absolute", value: INSIGHT_THRESHOLDS.hrMeaningfulBpm };
+  if (metric === "cadence") return { kind: "pct", value: INSIGHT_THRESHOLDS.cadenceMeaningfulPct };
+  if (metric === "dps") return { kind: "pct", value: INSIGHT_THRESHOLDS.dpsMeaningfulPct };
+  if (metric === "swolf") return { kind: "pct", value: INSIGHT_THRESHOLDS.swolfMeaningfulPct };
+  return { kind: "pct", value: INSIGHT_THRESHOLDS.paceMeaningfulPct };
+};
+const compareMetricChange = (metric, current, baseline) => {
+  if (current == null || baseline == null) return null;
+  const th = compareMetricThreshold(metric);
+  if (th.kind === "absolute") {
+    const delta = current - baseline;
+    return { direction: delta > th.value ? "up" : delta < -th.value ? "down" : "steady", magnitude: Math.abs(delta), unit: "bpm" };
+  }
+  const pct = pctChange(current, baseline);
+  if (pct == null) return null;
+  return { direction: pct > th.value ? "up" : pct < -th.value ? "down" : "steady", magnitude: Math.round(Math.abs(pct) * 1000) / 10, unit: "%" };
+};
+const compareMetricPhrase = (metric, change) => {
+  if (!change || change.direction === "steady") {
+    return metric === "pace" ? "pace stayed near baseline"
+      : metric === "dps" ? "distance per stroke stayed near baseline"
+      : metric === "cadence" ? "stroke rate stayed near baseline"
+      : metric === "swolf" ? "SWOLF stayed near baseline"
+      : "heart rate stayed near baseline";
+  }
+  const m = `${change.magnitude}${change.unit}`;
+  if (metric === "pace") return change.direction === "down" ? `pace was ${m} faster` : `pace was ${m} slower`;
+  if (metric === "dps") return change.direction === "up" ? `distance per stroke was ${m} higher` : `distance per stroke was ${m} lower`;
+  if (metric === "cadence") return change.direction === "up" ? `stroke rate was ${m} higher` : `stroke rate was ${m} lower`;
+  if (metric === "swolf") return change.direction === "down" ? `SWOLF was ${m} lower` : `SWOLF was ${m} higher`;
+  return change.direction === "up" ? `heart rate was ${m} higher` : `heart rate was ${m} lower`;
+};
+function generateFlexibleCompareTrendInterpretation(metricA, metricB, primaryPoints, secPoints, weeks) {
+  const paired = pairSeriesByDate(primaryPoints, secPoints);
+  const split = splitTrendWindows(paired.map((p) => ({ date: p.date, v: p.primary })), weeks);
+  if (!split) return null;
+  const recentDates = new Set(split.recent.map((p) => p.date));
+  const baselineDates = new Set(split.baseline.map((p) => p.date));
+  const recent = paired.filter((p) => recentDates.has(p.date));
+  const baseline = paired.filter((p) => baselineDates.has(p.date));
+  if (recent.length < 2 || baseline.length < 2) return null;
+  const a = compareMetricChange(metricA, medianOf(recent.map(p=>p.primary)), medianOf(baseline.map(p=>p.primary)));
+  const b = compareMetricChange(metricB, medianOf(recent.map(p=>p.secondary)), medianOf(baseline.map(p=>p.secondary)));
+  if (!a || !b) return null;
+  const bothSteady = a.direction === "steady" && b.direction === "steady";
+  return {
+    category: bothSteady ? "neutral" : "neutral",
+    headline: bothSteady ? "Both metrics are steady." : "Relationship changing.",
+    detail: `${compareMetricPhrase(metricA, a)}; ${compareMetricPhrase(metricB, b)}.`
+  };
+}
+function generateFlexibleCompareSessionInterpretation(metricA, metricB, selectedA, selectedB, baselineAVals, baselineBVals) {
+  if (selectedA == null || selectedB == null || baselineAVals.length < 2 || baselineBVals.length < 2) return null;
+  const a = compareMetricChange(metricA, selectedA, medianOf(baselineAVals));
+  const b = compareMetricChange(metricB, selectedB, medianOf(baselineBVals));
+  if (!a || !b) return null;
+  return {
+    category: "neutral",
+    headline: "Selected session vs your recent baseline.",
+    detail: `${compareMetricPhrase(metricA, a)}; ${compareMetricPhrase(metricB, b)}.`
+  };
+}
+
 // ---- 9. Compare chart trend interpretation -----------------------------------------------------
 // Turns the currently-displayed Compare chart (primary metric = pace or SWOLF, both
 // "lower is better"; secondary metric = cadence, distance/stroke, or HR) into one short,
@@ -1786,7 +1854,7 @@ function SwimmingTab({ isMobile, onExit }) {
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
   const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "none", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
-  const [compareMode, setCompareMode] = useState("cadence"); // "cadence" | "dps" — Pace+StrokeRate vs Pace+StrokeDistance overlay
+  const [compareMetrics, setCompareMetrics] = useState(["pace", "cadence"]); // exactly two independently selected Compare metrics
   const [selectedComparePoint, setSelectedComparePoint] = useState(null); // date string of a tapped Compare chart dot, or null for "overall trend" view
   const [showCompareInfo, setShowCompareInfo] = useState(false); // toggles the Compare chart's "what is this" info popover
   const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
@@ -2996,7 +3064,7 @@ function SwimmingTab({ isMobile, onExit }) {
             })}
           </div>
 
-          <React.Fragment key={`swim-section-${swimSection}-${strokeFilter}-${categoryFilter}-${effortFilter}`}>
+          <React.Fragment key={`swim-section-${swimSection}-${strokeFilter}-${categoryFilter}-${effortFilter}-${compareMetrics.join("-")}`}>
           {swimSection === "dashboard" && (
             <>
           {/* Insights — rule-based, deterministic interpretation of your swim data. No AI, no
@@ -3265,8 +3333,8 @@ function SwimmingTab({ isMobile, onExit }) {
           {swimSection === "compare" && (
             <>
           {renderFilterBar()}
-          {/* Compare — optional metric overlays (Pace+StrokeRate, Pace+StrokeDistance, Pace+HR,
-              SWOLF+HR). Additive to the Trends chart above, not a replacement. Reuses the same
+          {/* Compare — flexible two-metric picker. Any two supported metrics can share the chart.
+              Reuses the same
               z-score normalization approach as the Pace/HR overlay in Trends (see
               expandedChartFor) so two differently-scaled metrics can be read on one axis without
               one visually dominating the other. Respects the current stroke filter and Day/Week
@@ -3283,20 +3351,30 @@ function SwimmingTab({ isMobile, onExit }) {
                   <Info size={12} style={{ color: showCompareInfo ? "#FFFFFF" : "#8E8E93" }} />
                 </button>
               </div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {[["cadence", "Pace + Stroke Rate", "#64D2FF"], ["dps", "Pace + Stroke Distance", "#30D158"], ["hr", "Pace + HR", "#FF453A"], ["swolfhr", "SWOLF + HR", "#BF5AF2"]].map(([v, l, c]) => (
-                  <button key={v} onClick={() => setCompareMode(v)} className="pill compare-combo-pill" style={{
-                    cursor: "pointer", background: compareMode === v ? c : `${c}1a`,
-                    border: `1.5px solid ${compareMode === v ? c : c + "55"}`,
-                    color: compareMode === v ? "#000000" : c,
-                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
-                  }}>{l}</button>
-                ))}
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                {[["pace","Pace","#F5F5F7"],["dps","Distance / Stroke","#30D158"],["cadence","Stroke Rate","#64D2FF"],["swolf","SWOLF","#BF5AF2"],["hr","Avg HR","#FF453A"]].map(([v,l,c]) => {
+                  const selected = compareMetrics.includes(v);
+                  const order = compareMetrics.indexOf(v);
+                  return (
+                    <button key={v} onClick={() => {
+                      setSelectedComparePoint(null);
+                      setCompareMetrics((cur) => {
+                        if (cur.includes(v)) return cur.length > 1 ? cur.filter((x) => x !== v) : cur;
+                        return cur.length < 2 ? [...cur, v] : [cur[1], v];
+                      });
+                    }} className="pill compare-combo-pill" style={{
+                      cursor: "pointer", background: selected ? c : `${c}12`,
+                      border: `1.5px solid ${selected ? c : c + "44"}`,
+                      color: selected ? "#000000" : c,
+                      borderRadius: 10, padding: "4px 8px", fontSize: 10.5, fontWeight: 700,
+                    }}>{selected ? `${order + 1} · ` : ""}{l}</button>
+                  );
+                })}
               </div>
             </div>
             {showCompareInfo && (
               <div style={{ fontSize: 11, color: "#8E8E93", background: "#000000", border: "1px solid #27272A", borderRadius: 12, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }}>
-                {COMPARE_MODE_DESCRIPTIONS[compareMode]} Tap a dot below to focus on that session. Lines are normalized (σ) so two differently-scaled metrics can share one axis — real values are always in the tooltip, and the "better" direction is flipped so up always means improving.
+                Pick any two metrics. Tap a selected metric to remove it, or tap another metric to replace the oldest selection. Lines are normalized (σ) so differently-scaled metrics can share one axis; real values stay in the tooltip. Pace and SWOLF are flipped so upward means better, DPS and Stroke Rate keep their natural direction, and HR remains neutral (higher simply means higher cardiovascular response).
               </div>
             )}
             {/* Swim-type filter lives only once now, as the shared floating filter above both
@@ -3305,23 +3383,21 @@ function SwimmingTab({ isMobile, onExit }) {
                 down here. */}
             {(() => {
               const compareStroke = strokeFilter === "all" ? null : activeStroke;
-              const modeCfg = {
-                cadence:  { primary: "pace", secLabel: "Stroke rate", secFmt: (v) => `${fmtNum(v, 1)} spm`, secKey: strokeFilter === "all" ? "cadence_all" : `cadence_${compareStroke}`, secColor: "#64D2FF", wholeSession: false },
-                dps:      { primary: "pace", secLabel: "Distance/stroke", secFmt: (v) => `${fmtNum(v, 2)}m`, secKey: strokeFilter === "all" ? "dps_all" : `dps_${compareStroke}`, secColor: "#30D158", wholeSession: false },
-                hr:       { primary: "pace", secLabel: "Avg HR", secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR", secColor: "#FF453A", wholeSession: true },
-                swolfhr:  { primary: strokeFilter === "all" ? "swolf_all" : `swolf_${compareStroke}`, secLabel: "Avg HR", secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR", secColor: "#FF453A", wholeSession: true },
+              const metricCfg = (metric) => {
+                if (metric === "pace") return { id: metric, key: paceDataKey, label: "Pace", fmt: fmtPace100, color: "#F5F5F7", direction: "lower", wholeSession: false };
+                if (metric === "dps") return { id: metric, key: strokeFilter === "all" ? "dps_all" : `dps_${compareStroke}`, label: "Distance / Stroke", fmt: (v) => `${fmtNum(v, 2)}m`, color: "#30D158", direction: "higher", wholeSession: false };
+                if (metric === "cadence") return { id: metric, key: strokeFilter === "all" ? "cadence_all" : `cadence_${compareStroke}`, label: "Stroke Rate", fmt: (v) => `${fmtNum(v, 1)} spm`, color: "#64D2FF", direction: "higher", wholeSession: false };
+                if (metric === "swolf") return { id: metric, key: strokeFilter === "all" ? "swolf_all" : `swolf_${compareStroke}`, label: "SWOLF", fmt: (v) => `${Math.round(v)}`, color: "#BF5AF2", direction: "lower", wholeSession: false };
+                return { id: "hr", key: "avgHR", label: "Avg HR", fmt: (v) => `${Math.round(v)} bpm`, color: "#FF453A", direction: "neutral", wholeSession: true };
               };
-              const cfg = modeCfg[compareMode];
-              const primaryKey = cfg.primary === "pace" ? paceDataKey : cfg.primary;
-              const primaryLabel = cfg.primary === "pace" ? "Pace" : "SWOLF";
-              const primaryFmt = cfg.primary === "pace" ? fmtPace100 : (v) => Math.round(v);
-              const otherKey = cfg.secKey, otherLabel = cfg.secLabel, otherFmt = cfg.secFmt, otherColor = cfg.secColor;
-              // Compare uses metric colors, not stroke colors: otherwise Freestyle pace
-              // collides with cyan Stroke Rate (and Breaststroke pace can collide with orange metrics).
-              const comparePrimaryColor = "#F5F5F7";
+              const cfgA = metricCfg(compareMetrics[0]);
+              const cfgB = metricCfg(compareMetrics[1]);
+              const primaryKey = cfgA.key, primaryLabel = cfgA.label, primaryFmt = cfgA.fmt;
+              const otherKey = cfgB.key, otherLabel = cfgB.label, otherFmt = cfgB.fmt, otherColor = cfgB.color;
+              const comparePrimaryColor = cfgA.color;
               const strokeLabel = strokeFilter === "all" ? "All swim types" : SWIM_STROKE_LABELS[activeStroke];
 
-              if (cfg.wholeSession && !trendDataView.some((d) => d.avgHR != null)) {
+              if ((cfgA.wholeSession || cfgB.wholeSession) && !trendDataView.some((d) => d.avgHR != null)) {
                 return <div style={{ padding: "20px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5 }}>No heart rate data recorded yet.</div>;
               }
 
@@ -3330,10 +3406,8 @@ function SwimmingTab({ isMobile, onExit }) {
               const pairedCount = trendDataView.filter((d) => d[primaryKey] != null && d[otherKey] != null).length;
               const normalizedData = trendDataView.map((d) => ({
                 ...d,
-                // Pace and SWOLF are both "lower is better", so both get sign-flipped the same
-                // way the existing Pace/HR chart flips pace — "up" always means better here.
-                primaryZ: primaryStats ? (() => { const z = zScoreOf(d[primaryKey], primaryStats); return z == null ? null : -z; })() : null,
-                otherZ: otherStats ? zScoreOf(d[otherKey], otherStats) : null,
+                primaryZ: primaryStats ? (() => { const z = zScoreOf(d[primaryKey], primaryStats); return z == null ? null : (cfgA.direction === "lower" ? -z : z); })() : null,
+                otherZ: otherStats ? (() => { const z = zScoreOf(d[otherKey], otherStats); return z == null ? null : (cfgB.direction === "lower" ? -z : z); })() : null,
               }));
               const zTooltipFormatter = (v, name, props) => {
                 if (name === primaryLabel) return [props.payload[primaryKey] != null ? primaryFmt(props.payload[primaryKey]) : "—", name];
@@ -3346,7 +3420,8 @@ function SwimmingTab({ isMobile, onExit }) {
                   <div style={{ fontSize: 10.5, color: "#636366", marginBottom: 10, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                     <span>{strokeLabel}</span>
                     {strokeFilter === "all" && <span style={{ color: "#636366" }}>· all applicable swim types are aggregated</span>}
-                    {cfg.wholeSession && strokeFilter !== "all" && <span style={{ color: "#48484A" }}>· HR is whole-session, not stroke-specific</span>}
+                    {(cfgA.wholeSession || cfgB.wholeSession) && strokeFilter !== "all" && <span style={{ color: "#48484A" }}>· HR is whole-session, not stroke-specific</span>}
+                    {(cfgA.id === "dps" || cfgB.id === "dps" || cfgA.id === "swolf" || cfgB.id === "swolf") && <span style={{ color: "#48484A" }}>· DPS/SWOLF use same-pool comparisons</span>}
                   </div>
                   {pairedCount < 2 ? (
                     pairedCount === 0 ? (
@@ -3389,8 +3464,8 @@ function SwimmingTab({ isMobile, onExit }) {
                     const baselinePrimaryVals = pairedBaselineRows.map((d) => d[primaryKey]);
                     const baselineSecondaryVals = pairedBaselineRows.map((d) => d[otherKey]);
 
-                    const trendInterp = !selectedComparePoint ? generateCompareTrendInterpretation(compareMode, primaryPoints, secPoints, INSIGHT_THRESHOLDS.mediumTermWeeks) : null;
-                    const sessionInterp = selectedRow ? generateCompareSessionInterpretation(compareMode, strokeLabel, selectedPrimary, selectedSecondary, baselinePrimaryVals, baselineSecondaryVals, primaryFmt, otherFmt) : null;
+                    const trendInterp = !selectedComparePoint ? generateFlexibleCompareTrendInterpretation(cfgA.id, cfgB.id, primaryPoints, secPoints, INSIGHT_THRESHOLDS.mediumTermWeeks) : null;
+                    const sessionInterp = selectedRow ? generateFlexibleCompareSessionInterpretation(cfgA.id, cfgB.id, selectedPrimary, selectedSecondary, baselinePrimaryVals, baselineSecondaryVals) : null;
                     const interp = selectedComparePoint ? sessionInterp : trendInterp;
                     const cat = interp ? INSIGHT_CATEGORIES[interp.category] : null;
 
