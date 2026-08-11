@@ -3024,9 +3024,9 @@ function SwimmingTab({ isMobile, onExit }) {
               const primaryLabel = cfg.primary === "pace" ? "Pace" : "SWOLF";
               const primaryFmt = cfg.primary === "pace" ? fmtPace100 : (v) => Math.round(v);
               const otherKey = cfg.secKey, otherLabel = cfg.secLabel, otherFmt = cfg.secFmt, otherColor = cfg.secColor;
-              const comparePrimaryColor = strokeFilter === "all"
-                ? "#F5F5F7"
-                : (SWIM_STROKE_COLORS[strokeFilter] || "#64D2FF");
+              // Compare uses metric colors, not stroke colors: otherwise Freestyle pace
+              // collides with cyan Stroke Rate (and Breaststroke pace can collide with orange metrics).
+              const comparePrimaryColor = "#F5F5F7";
               const strokeLabel = strokeFilter === "all" ? "All swim types" : SWIM_STROKE_LABELS[activeStroke];
 
               if (cfg.wholeSession && !trendDataView.some((d) => d.avgHR != null)) {
