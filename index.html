@@ -2259,21 +2259,18 @@ function SwimmingTab({ isMobile, onExit }) {
     const pctAbs = Math.round(Math.abs(change) * 1000) / 10;
 
     if (Math.abs(change) < threshold) {
-      return { label: `${labels.steady || "Steady"} · ${pctAbs}% from typical`, color: "#8E8E93" };
+      return { label: `${labels.steady || "Steady"} · ${pctAbs}% vs typical`, color: "#8E8E93" };
     }
     if (direction === "neutral") {
       return change > 0
-        ? { label: `${labels.up || "Higher"} · ${pctAbs}% above typical`, color: "#64D2FF" }
-        : { label: `${labels.down || "Lower"} · ${pctAbs}% below typical`, color: "#64D2FF" };
+        ? { label: `${labels.up || "Higher"} · ${pctAbs}% vs typical`, color: "#64D2FF" }
+        : { label: `${labels.down || "Lower"} · ${pctAbs}% vs typical`, color: "#64D2FF" };
     }
 
     const better = direction === "lower-better" ? change < 0 : change > 0;
-    const relation = better
-      ? (labels.betterDelta || "better than typical")
-      : (labels.worseDelta || "worse than typical");
     return better
-      ? { label: `${labels.better || "Improving"} · ${pctAbs}% ${relation}`, color: "#30D158" }
-      : { label: `${labels.worse || "Declining"} · ${pctAbs}% ${relation}`, color: "#FF453A" };
+      ? { label: `${labels.better || "Improving"} · ${pctAbs}% vs typical`, color: "#30D158" }
+      : { label: `${labels.worse || "Declining"} · ${pctAbs}% vs typical`, color: "#FF453A" };
   };
 
   const sparkPoints = (series) => series.map((v, i) => ({ i, v })).filter((p) => p.v != null);
@@ -2490,7 +2487,7 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "pace",
       title: "Pace" + strokeTitleSuffix(strokeFilter === "all" ? null : strokeFilter),
       series: paceSeries,
-      verdict: computeVerdict(paceSeries, "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower", betterDelta: "faster than typical", worseDelta: "slower than typical" }),
+      verdict: computeVerdict(paceSeries, "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower" }),
       value: fmtPace100(headlineOf(paceSeries, paceDataKey)),
       perStroke: true,
       lowerBetter: true,
@@ -2528,7 +2525,7 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "css",
       title: "Critical Swim Speed (CSS)",
       series: cssTrendData.map((d) => d.cssPace100),
-      verdict: computeVerdict(cssTrendData.map((d) => d.cssPace100), "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower", betterDelta: "faster than typical", worseDelta: "slower than typical" }),
+      verdict: computeVerdict(cssTrendData.map((d) => d.cssPace100), "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower" }),
       value: cssTrendData.length ? fmtPace100(metricValueMode === "avg6" ? sixWeekAverageFromRows(cssTrendData, "cssPace100") : cssTrendData[cssTrendData.length - 1].cssPace100) : "—",
       lowerBetter: true,
       color: "#0A84FF",
