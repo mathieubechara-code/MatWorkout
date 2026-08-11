@@ -1578,98 +1578,154 @@ function compareStoryFromChanges(changes, scopeLabel = "Recent swimming") {
   if (!changes || !changes.length) return null;
   const byId = Object.fromEntries(changes.map((c) => [c.metricId, c]));
   const pace = byId.pace, dps = byId.dps, cadence = byId.cadence, swolf = byId.swolf, hr = byId.hr;
+
+  const changed = (c) => c && c.direction !== "steady";
+  const namesOfChanged = [dps, cadence, swolf, hr].filter(changed).map((c) => c.meta.label);
+  const changedText = namesOfChanged.length
+    ? ` (${namesOfChanged.slice(0,3).join(", ")}${namesOfChanged.length > 3 ? ", +" + (namesOfChanged.length - 3) + " more" : ""})`
+    : "";
+
   let category = "neutral";
   let headline = `${scopeLabel}: mixed signals.`;
   let story = "";
 
-  // Pace is the anchor when available; supporting metrics explain how/cost.
+  // --- PERFORMANCE ANCHOR: Pace -------------------------------------------------
   if (pace) {
+    // Faster
     if (pace.direction === "down") {
       category = "positive";
-      if (dps?.direction === "up" && cadence?.direction !== "up" && hr?.direction !== "up") {
-        headline = `${scopeLabel}: faster with a more effective stroke.`;
-        story = "You gained speed while covering more distance per stroke without needing clearly more turnover or cardiovascular cost.";
-      } else if (cadence?.direction === "up" && dps?.direction !== "up") {
+
+      // Strongest efficiency stories first.
+      if (dps?.direction === "up" && hr?.direction === "down") {
+        headline = `${scopeLabel}: faster with a stronger stroke and lower cardiovascular cost.`;
+        story = "Pace improved, distance per stroke increased, and average heart rate fell — a strong overall efficiency pattern.";
+      } else if (dps?.direction === "up" && hr?.direction === "steady") {
+        headline = `${scopeLabel}: faster with a stronger stroke at similar cardiovascular cost.`;
+        story = "Pace improved while distance per stroke increased, without a meaningful rise in average heart rate.";
+      } else if (swolf?.direction === "down" && dps?.direction === "up") {
+        headline = `${scopeLabel}: faster with better stroke economy.`;
+        story = "Pace improved, SWOLF decreased, and distance per stroke increased — several efficiency signals moved favorably together.";
+      } else if (swolf?.direction === "down" && hr?.direction === "down") {
+        headline = `${scopeLabel}: faster with better SWOLF and lower cardiovascular cost.`;
+        story = "Pace improved while SWOLF and average heart rate both moved favorably.";
+      } else if (dps?.direction === "up" && cadence?.direction !== "up") {
+        headline = `${scopeLabel}: faster with more distance per stroke.`;
+        story = "Pace improved while each Garmin-counted stroke covered more distance, without clearly relying on higher turnover.";
+      } else if (cadence?.direction === "up" && dps?.direction === "down") {
         headline = `${scopeLabel}: faster mainly through turnover.`;
-        story = "You gained speed by increasing stroke rate rather than by covering more distance per stroke.";
+        story = "You gained speed with a higher stroke rate while distance per stroke fell — the improvement looks turnover-driven.";
+      } else if (cadence?.direction === "up" && (!dps || dps.direction === "steady")) {
+        headline = `${scopeLabel}: faster through higher turnover.`;
+        story = "Pace improved while stroke rate increased; the selected metrics suggest turnover contributed to the extra speed.";
       } else if (hr?.direction === "down") {
         headline = `${scopeLabel}: faster at a lower cardiovascular cost.`;
-        story = "Pace improved while average heart rate fell — a strong efficiency signal for this context.";
+        story = "Pace improved while average heart rate fell — a favorable performance/cost relationship.";
       } else if (hr?.direction === "steady") {
         headline = `${scopeLabel}: faster at a similar cardiovascular cost.`;
         story = "Pace improved without a meaningful rise in average heart rate.";
       } else if (hr?.direction === "up") {
         headline = `${scopeLabel}: faster, but at a higher cardiovascular cost.`;
         story = "Performance improved, but the faster pace came with a higher heart-rate response.";
-      } else if (dps?.direction === "up") {
-        headline = `${scopeLabel}: faster with more distance per stroke.`;
-        story = "Pace improved while each Garmin-counted stroke covered more distance.";
+      } else if (swolf?.direction === "down") {
+        headline = `${scopeLabel}: faster with better SWOLF.`;
+        story = "Pace improved and SWOLF decreased — both moved favorably, but the selected metrics do not identify the mechanism.";
+      } else if (swolf?.direction === "up") {
+        headline = `${scopeLabel}: faster, but SWOLF worsened.`;
+        story = "Pace improved, but SWOLF moved unfavorably — speed increased without a matching SWOLF improvement.";
       } else if (dps?.direction === "down") {
         headline = `${scopeLabel}: faster with a shorter stroke.`;
-        story = cadence?.direction === "up"
-          ? "You gained speed with higher turnover while distance per stroke fell."
-          : "You gained speed even though distance per stroke fell; the selected metrics do not show a clear cause.";
+        story = "Pace improved even though distance per stroke fell; the selected metrics do not show one clear cause.";
       } else {
         headline = `${scopeLabel}: faster.`;
-        story = "Your selected supporting metrics do not point to one clear mechanism.";
+        story = changedText
+          ? `Pace improved while supporting metrics also changed${changedText}, but no single mechanism is clear.`
+          : "Pace improved while the selected supporting metrics stayed near baseline.";
       }
+
+    // Slower
     } else if (pace.direction === "up") {
       category = "warning";
+
       if (hr?.direction === "up") {
         headline = `${scopeLabel}: slower despite a higher cardiovascular cost.`;
-        story = "Pace fell while average heart rate rose — an unfavorable performance/cost relationship in this comparison.";
+        story = "Pace fell while average heart rate rose — an unfavorable performance/cost relationship.";
       } else if (cadence?.direction === "up") {
         headline = `${scopeLabel}: more turnover without more speed.`;
         story = "Stroke rate increased, but pace became slower.";
+      } else if (dps?.direction === "down" && swolf?.direction === "up") {
+        headline = `${scopeLabel}: slower with weaker stroke-economy signals.`;
+        story = "Pace slowed, distance per stroke decreased, and SWOLF worsened.";
       } else if (dps?.direction === "up") {
         headline = `${scopeLabel}: longer stroke, but speed was lost.`;
-        story = "Distance per stroke increased, but pace became slower — more glide/length alone did not translate into speed.";
+        story = "Distance per stroke increased, but pace became slower — more length/glide did not translate into speed.";
+      } else if (swolf?.direction === "up") {
+        headline = `${scopeLabel}: slower with worse SWOLF.`;
+        story = "Pace slowed and SWOLF increased — both moved unfavorably.";
+      } else if (swolf?.direction === "down") {
+        headline = `${scopeLabel}: slower, despite better SWOLF.`;
+        story = "SWOLF improved, but pace slowed — the efficiency indicator and actual speed disagreed.";
       } else if (dps?.direction === "down") {
         headline = `${scopeLabel}: slower with less distance per stroke.`;
         story = "Both speed and distance covered per stroke moved unfavorably.";
       } else {
         headline = `${scopeLabel}: slower.`;
-        story = "The selected supporting metrics do not identify one clear reason for the slower pace.";
+        story = changedText
+          ? `Pace slowed while supporting metrics changed${changedText}; the selected metrics do not identify one clear cause.`
+          : "Pace slowed while the selected supporting metrics stayed near baseline.";
       }
+
+    // Pace stable
     } else {
       const supporting = [dps, cadence, swolf, hr].filter(Boolean);
-      const changedSupporting = supporting.filter((c) => c.direction !== "steady");
-      const steadySupporting = supporting.filter((c) => c.direction === "steady");
-      const changedNames = changedSupporting.map((c) => c.meta.label);
+      const changedSupporting = supporting.filter(changed);
       const selectedNames = [pace, ...supporting].filter(Boolean).map((c) => c.meta.label);
 
-      if (hr?.direction === "down") {
+      if (!changedSupporting.length) {
+        headline = `${scopeLabel}: stable.`;
+        story = `Selected metrics (${selectedNames.join(", ")}) all stayed close to their recent baseline.`;
+      } else if (hr?.direction === "down") {
         category = "positive";
         headline = `${scopeLabel}: same pace at a lower cardiovascular cost.`;
+        story = `Pace stayed stable while average heart rate fell${changedText}.`;
       } else if (dps?.direction === "up" && cadence?.direction === "down") {
         category = "positive";
         headline = `${scopeLabel}: same speed with a longer, lower-turnover stroke.`;
+        story = `Pace stayed stable while distance per stroke increased and stroke rate decreased${changedText}.`;
+      } else if (swolf?.direction === "down") {
+        category = "positive";
+        headline = `${scopeLabel}: same speed with better SWOLF.`;
+        story = `Pace stayed stable while SWOLF improved${changedText}.`;
       } else if (cadence?.direction === "up") {
         headline = `${scopeLabel}: more turnover, same speed.`;
+        story = `Stroke rate increased without a meaningful pace improvement${changedText}.`;
       } else {
         headline = `${scopeLabel}: pace stayed stable.`;
+        story = `Your pace stayed close to normal. Supporting metrics changed${changedText}, but your overall speed remained stable.`;
       }
+    }
 
-      if (changedNames.length) {
-        story = `Your pace stayed close to normal. Supporting metrics changed (${changedNames.slice(0,3).join(", ")}${changedNames.length > 3 ? ", +" + (changedNames.length - 3) + " more" : ""}), but your overall speed remained stable.`;
-      } else {
-        story = `Selected metrics (${selectedNames.join(", ")}) all stayed close to their recent baseline.`;
-      }
-    }
-  } else if (swolf && dps) {
-    if (swolf.direction === "down" && dps.direction === "up") {
-      category = "positive";
-      headline = `${scopeLabel}: technique indicators moved favorably.`;
-      story = "SWOLF improved while distance per stroke increased, but pace is not selected so this is not enough to claim faster swimming.";
-    } else if (swolf.direction === "up" && dps.direction === "down") {
-      category = "warning";
-      headline = `${scopeLabel}: technique indicators moved unfavorably.`;
-      story = "SWOLF worsened while distance per stroke decreased.";
-    } else {
-      story = "The selected technique metrics moved in different directions, so there is no simple good/bad conclusion.";
-    }
+  // --- NO PACE SELECTED ----------------------------------------------------------
   } else {
-    story = "These selected metrics do not have an intrinsic good/bad direction on their own. Add Pace to judge whether the change helped performance.";
+    if (swolf && dps) {
+      if (swolf.direction === "down" && dps.direction === "up") {
+        category = "positive";
+        headline = `${scopeLabel}: technique indicators moved favorably.`;
+        story = "SWOLF improved while distance per stroke increased, but Pace is not selected so this is not enough to claim faster swimming.";
+      } else if (swolf.direction === "up" && dps.direction === "down") {
+        category = "warning";
+        headline = `${scopeLabel}: technique indicators moved unfavorably.`;
+        story = "SWOLF worsened while distance per stroke decreased.";
+      } else {
+        headline = `${scopeLabel}: mixed technique signals.`;
+        story = "SWOLF and distance per stroke moved in different directions. Add Pace to judge whether the pattern improved performance.";
+      }
+    } else if (hr && cadence && changed(hr) && changed(cadence)) {
+      headline = `${scopeLabel}: effort and turnover changed.`;
+      story = "Heart rate and stroke rate changed, but without Pace there is no defensible good/bad performance conclusion.";
+    } else {
+      headline = `${scopeLabel}: context only.`;
+      story = "These selected metrics do not have an intrinsic good/bad direction on their own. Add Pace to judge whether the change helped performance.";
+    }
   }
 
   const notes = changes.map((c) => c.phrase);
@@ -2733,16 +2789,15 @@ function SwimmingTab({ isMobile, onExit }) {
   const radarInterpretation = (() => {
     const visible = radarVisibleProfile || [];
     if (!visible.length) return null;
+
     const byKey = Object.fromEntries(visible.map((a) => [a.key, a.score]));
     const state = (v) => v > 105 ? "above" : v < 95 ? "below" : "normal";
-    const above = visible.filter((a) => state(a.score) === "above");
-    const below = visible.filter((a) => state(a.score) === "below");
-    const normal = visible.filter((a) => state(a.score) === "normal");
 
     const paceState = byKey.pace != null ? state(byKey.pace) : null;
     const effState = byKey.efficiency != null ? state(byKey.efficiency) : null;
     const enduranceState = byKey.endurance != null ? state(byKey.endurance) : null;
     const aerobicState = byKey.aerobic != null ? state(byKey.aerobic) : null;
+    const consistencyState = byKey.consistency != null ? state(byKey.consistency) : null;
 
     const shiftedSupporting = visible
       .filter((a) => a.key !== "pace" && state(a.score) !== "normal")
@@ -2754,80 +2809,113 @@ function SwimmingTab({ isMobile, onExit }) {
     let category = "neutral";
     let headline = "Profile stayed close to normal.";
     let story = shiftedSupporting.length
-      ? `Speed stayed close to normal. Supporting metrics changed${shiftedText}.`
+      ? `Speed stayed close to normal while supporting dimensions changed${shiftedText}.`
       : "The visible profile stayed close to your 6-week baseline.";
 
+    // Speed anchors the Radar story whenever available.
     if (paceState === "above") {
       category = "positive";
-      if (effState === "above" && aerobicState !== "below") {
-        headline = "Fast and efficient.";
-        story = aerobicState === "above"
-          ? "Speed, stroke efficiency and aerobic efficiency were all above your normal profile."
-          : "Speed and stroke efficiency were above your normal profile without an unusual aerobic cost.";
+
+      if (effState === "above" && aerobicState === "above") {
+        headline = "Fast, stroke-efficient, and aerobically efficient.";
+        story = "Speed, stroke efficiency and aerobic efficiency were all above your 6-week baseline — a strong overall efficiency pattern.";
+      } else if (effState === "above" && aerobicState !== "below") {
+        headline = "Fast and stroke-efficient.";
+        story = "Speed and stroke efficiency were above baseline without an unfavorable aerobic signal.";
+      } else if (aerobicState === "above" && effState !== "below") {
+        headline = "Fast at a favorable cardiovascular cost.";
+        story = "Speed and aerobic efficiency were both above baseline.";
       } else if (aerobicState === "below") {
         headline = "Fast, but costly.";
-        story = "Speed was above baseline, but aerobic efficiency was below normal — faster performance came with a less favorable cardiovascular relationship.";
+        story = "Speed was above baseline, but aerobic efficiency was below normal — stronger performance came with a less favorable cardiovascular relationship.";
       } else if (effState === "below") {
         headline = "Fast, but less economical.";
         story = "Speed was above baseline while stroke efficiency was below normal.";
       } else {
         headline = "Faster than normal.";
         story = shiftedSupporting.length
-          ? `Speed was above baseline. Supporting metrics also changed${shiftedText}.`
+          ? `Speed was above baseline while supporting dimensions also changed${shiftedText}.`
           : "Speed was above your 6-week baseline.";
       }
+
     } else if (paceState === "below") {
       category = "warning";
-      if (aerobicState === "below") {
+
+      if (effState === "below" && aerobicState === "below") {
+        headline = "Slower, less economical, and more costly.";
+        story = "Speed, stroke efficiency and aerobic efficiency were all below baseline.";
+      } else if (aerobicState === "below") {
         headline = "Slower and more costly.";
         story = "Speed and aerobic efficiency were both below baseline — an unfavorable performance/cost combination.";
+      } else if (effState === "below") {
+        headline = "Slower with poorer stroke economy.";
+        story = "Speed and stroke efficiency were both below baseline.";
       } else if (effState === "above") {
         headline = "Efficient strokes, but less speed.";
-        story = "Stroke efficiency was above normal, but speed was below baseline.";
+        story = "Stroke efficiency was above normal, but speed was below baseline — better stroke-economy signals did not translate into faster swimming.";
+      } else if (aerobicState === "above") {
+        headline = "Slower, despite a favorable aerobic relationship.";
+        story = "Aerobic efficiency was above baseline, but actual speed was below normal.";
       } else {
         headline = "Slower than normal.";
         story = shiftedSupporting.length
-          ? `Speed was below baseline. Supporting metrics also changed${shiftedText}.`
+          ? `Speed was below baseline while supporting dimensions also changed${shiftedText}.`
           : "Speed was below your 6-week baseline.";
       }
+
     } else if (paceState === "normal") {
-      if (effState === "above") {
+      if (effState === "above" && aerobicState === "above") {
+        category = "positive";
+        headline = "Normal speed with better overall efficiency.";
+        story = "Speed stayed normal while both stroke efficiency and aerobic efficiency were above baseline.";
+      } else if (effState === "above") {
         category = "positive";
         headline = "Normal speed with better stroke economy.";
-        story = `Speed stayed close to normal while stroke efficiency was above baseline${shiftedSupporting.length > 1 ? `. Other supporting metrics changed${shiftedText}` : ""}.`;
+        story = `Speed stayed close to normal while stroke efficiency was above baseline${shiftedSupporting.length > 1 ? `. Other dimensions changed${shiftedText}` : ""}.`;
       } else if (aerobicState === "above") {
         category = "positive";
         headline = "Normal speed at a better aerobic cost.";
-        story = `Speed stayed close to normal while aerobic efficiency was above baseline${shiftedSupporting.length > 1 ? `. Other supporting metrics changed${shiftedText}` : ""}.`;
+        story = `Speed stayed close to normal while aerobic efficiency was above baseline${shiftedSupporting.length > 1 ? `. Other dimensions changed${shiftedText}` : ""}.`;
       } else if (enduranceState === "above") {
         category = "positive";
         headline = "Normal speed over more work.";
         story = effortFilter === "all"
-          ? `Speed stayed close to normal while you covered more distance than usual${shiftedSupporting.length > 1 ? `. Supporting metrics changed${shiftedText}` : ""}.`
-          : `Speed stayed close to normal while you accumulated more ${SWIM_EFFORT_META[effortFilter].label.toLowerCase()} distance than usual${shiftedSupporting.length > 1 ? `. Supporting metrics changed${shiftedText}` : ""}.`;
+          ? `You maintained normal speed while covering more distance than usual${shiftedSupporting.length > 1 ? `. Other dimensions changed${shiftedText}` : ""}.`
+          : `You maintained normal speed while accumulating more ${SWIM_EFFORT_META[effortFilter].label.toLowerCase()} distance than usual${shiftedSupporting.length > 1 ? `. Other dimensions changed${shiftedText}` : ""}.`;
+      } else if (effState === "below" || aerobicState === "below") {
+        category = "warning";
+        headline = "Speed held, but efficiency weakened.";
+        story = `Speed stayed close to normal while supporting efficiency dimensions moved below baseline${shiftedText}.`;
       } else if (shiftedSupporting.length) {
         headline = "Speed stayed stable.";
-        story = `Speed stayed close to normal. Supporting metrics changed${shiftedText}, but overall speed remained stable.`;
+        story = `Speed stayed close to normal. Supporting dimensions changed${shiftedText}, but overall speed remained stable.`;
       }
-    } else if (above.length >= 2 && below.length === 0) {
-      category = "positive";
-      headline = "Several dimensions moved favorably.";
-      story = `${above.map((a)=>a.label).join(" and ")} were above your 6-week baseline.`;
-    } else if (below.length >= 2 && above.length === 0) {
-      category = "warning";
-      headline = "Several dimensions were below normal.";
-      story = `${below.map((a)=>a.label).join(" and ")} were below your 6-week baseline.`;
-    } else if (above.length || below.length) {
-      headline = "A mixed profile.";
-      story = `Some dimensions moved away from baseline${shiftedText}.`;
+    } else {
+      // No speed axis available: be explicit that Radar cannot make a performance conclusion.
+      if (effState === "above" && aerobicState === "above") {
+        category = "positive";
+        headline = "Efficiency dimensions were favorable.";
+        story = "Stroke efficiency and aerobic efficiency were above baseline, but Speed is not visible so this does not prove better performance.";
+      } else if (effState === "below" && aerobicState === "below") {
+        category = "warning";
+        headline = "Efficiency dimensions were below baseline.";
+        story = "Stroke efficiency and aerobic efficiency were both below normal.";
+      } else {
+        headline = "Mixed supporting profile.";
+        story = "Without the Speed axis, these dimensions provide context but not a complete good/bad performance conclusion.";
+      }
     }
 
     const chips = visible.map((a) => ({
-      key:a.key, label:a.label, color:a.color, score:a.score,
-      state:state(a.score),
-      verdict:state(a.score)==="above" ? "Above baseline" : state(a.score)==="below" ? "Below baseline" : "Near baseline"
+      key: a.key,
+      label: a.label,
+      color: a.color,
+      score: a.score,
+      state: state(a.score),
+      verdict: state(a.score) === "above" ? "Above baseline" : state(a.score) === "below" ? "Below baseline" : "Near baseline"
     }));
-    return {category, headline, story, chips};
+
+    return { category, headline, story, chips };
   })();
 
   const metricCards = [
