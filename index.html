@@ -1632,27 +1632,28 @@ function compareStoryFromChanges(changes, scopeLabel = "Recent swimming") {
         story = "The selected supporting metrics do not identify one clear reason for the slower pace.";
       }
     } else {
+      const shiftedSupporting = [dps, cadence, swolf, hr]
+        .filter((c) => c && c.direction !== "steady")
+        .map((c) => c.meta.label);
+      const metricText = shiftedSupporting.length
+        ? ` (${shiftedSupporting.slice(0, 3).join(", ")}${shiftedSupporting.length > 3 ? ", +" + (shiftedSupporting.length - 3) + " more" : ""})`
+        : "";
+
       if (hr?.direction === "down") {
         category = "positive";
         headline = `${scopeLabel}: same pace at a lower cardiovascular cost.`;
-        story = "Pace stayed stable while average heart rate decreased.";
       } else if (dps?.direction === "up" && cadence?.direction === "down") {
         category = "positive";
         headline = `${scopeLabel}: same speed with a longer, lower-turnover stroke.`;
-        story = "Pace stayed stable while distance per stroke increased and stroke rate decreased.";
       } else if (cadence?.direction === "up") {
         headline = `${scopeLabel}: more turnover, same speed.`;
-        story = "Stroke rate increased without a meaningful pace change.";
       } else {
         headline = `${scopeLabel}: pace stayed stable.`;
-        const shiftedSupporting = [dps, cadence, swolf, hr]
-          .filter((c) => c && c.direction !== "steady")
-          .map((c) => c.meta.label);
-        const metricText = shiftedSupporting.length
-          ? ` (${shiftedSupporting.slice(0, 3).join(", ")}${shiftedSupporting.length > 3 ? ", +" + (shiftedSupporting.length - 3) + " more" : ""})`
-          : "";
-        story = `Your pace stayed close to normal. Some supporting metrics changed${metricText}, but your overall speed remained stable.`;
       }
+
+      story = shiftedSupporting.length
+        ? `Your pace stayed close to normal. Some supporting metrics changed${metricText}, but your overall speed remained stable.`
+        : "Your pace and the selected supporting metrics stayed close to their normal levels.";
     }
   } else if (swolf && dps) {
     if (swolf.direction === "down" && dps.direction === "up") {
@@ -2778,28 +2779,30 @@ function SwimmingTab({ isMobile, onExit }) {
         story = "Speed was below your 6-week baseline.";
       }
     } else if (paceState === "normal") {
+      const shiftedAxes = visible
+        .filter((a) => a.key !== "pace" && state(a.score) !== "normal")
+        .map((a) => a.label);
+      const shiftedText = shiftedAxes.length
+        ? ` (${shiftedAxes.slice(0, 3).join(", ")}${shiftedAxes.length > 3 ? ", +" + (shiftedAxes.length - 3) + " more" : ""})`
+        : "";
+
       if (effState === "above") {
         category = "positive";
         headline = "Normal speed with better stroke economy.";
-        story = "Speed stayed typical while stroke efficiency was above baseline.";
+        story = `Your speed stayed close to normal. Some supporting metrics changed${shiftedText}, while stroke efficiency was above baseline.`;
       } else if (aerobicState === "above") {
         category = "positive";
         headline = "Normal speed at a better aerobic cost.";
-        story = "Speed stayed typical while aerobic efficiency was above baseline.";
+        story = `Your speed stayed close to normal. Some supporting metrics changed${shiftedText}, while aerobic efficiency was above baseline.`;
       } else if (enduranceState === "above") {
         category = "positive";
         headline = "Normal speed over more work.";
         story = effortFilter === "all"
-          ? "You covered more distance than normal while keeping speed close to baseline."
-          : `You accumulated more ${SWIM_EFFORT_META[effortFilter].label.toLowerCase()} distance than normal while keeping speed close to baseline.`;
-      } else {
-        const shiftedAxes = visible
-          .filter((a) => a.key !== "pace" && state(a.score) !== "normal")
-          .map((a) => a.label);
-        if (shiftedAxes.length) {
-          headline = "Speed stayed stable.";
-          story = `Your speed stayed close to normal. Some supporting metrics changed (${shiftedAxes.slice(0, 3).join(", ")}${shiftedAxes.length > 3 ? ", +" + (shiftedAxes.length - 3) + " more" : ""}), but your overall speed remained stable.`;
-        }
+          ? `Your speed stayed close to normal. Some supporting metrics changed${shiftedText}; you also covered more distance than normal.`
+          : `Your speed stayed close to normal. Some supporting metrics changed${shiftedText}; you also accumulated more ${SWIM_EFFORT_META[effortFilter].label.toLowerCase()} distance than normal.`;
+      } else if (shiftedAxes.length) {
+        headline = "Speed stayed stable.";
+        story = `Your speed stayed close to normal. Some supporting metrics changed${shiftedText}, but your overall speed remained stable.`;
       }
     } else if (above.length >= 2 && below.length === 0) {
       category = "positive";
@@ -3852,17 +3855,17 @@ function SwimmingTab({ isMobile, onExit }) {
                           borderRadius: 999, padding: "2px 6px", whiteSpace: "nowrap"
                         }}>{radarProfileStrokeLabel}</span>
                       </div>
-                      <span style={{ fontSize: 9.5, color: darkMode ? "#8E8E93" : "#636366", fontWeight: 700, whiteSpace: "nowrap" }}>Current vs 6-week baseline</span>
+                      <span style={{ fontSize: 9.5, color: uiTheme === "day" ? "#636366" : "#8E8E93", fontWeight: 700, whiteSpace: "nowrap" }}>Current vs 6-week baseline</span>
                     </div>
                     <div className="profile-readout-text">
                       <div style={{
                         fontSize: isMobile ? 16 : 16.5,
-                        color: radarInterpretation.category === "positive" ? "#30D158" : radarInterpretation.category === "warning" ? "#FF9F0A" : "#F5F5F7",
+                        color: radarInterpretation.category === "positive" ? "#30D158" : radarInterpretation.category === "warning" ? "#FF9F0A" : (uiTheme === "day" ? "#1C1C1E" : "#F5F5F7"),
                         lineHeight: 1.3, fontWeight: 800, letterSpacing: "-0.01em", marginBottom: 5
                       }}>{radarInterpretation.headline}</div>
                       <div style={{
                         fontSize: isMobile ? 12.5 : 13,
-                        color: darkMode ? "#D1D1D6" : "#3A3A3C",
+                        color: uiTheme === "day" ? "#3A3A3C" : "#D1D1D6",
                         lineHeight: 1.45,
                         marginBottom: 8,
                         fontWeight: 520
