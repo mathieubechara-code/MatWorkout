@@ -1134,7 +1134,7 @@ function generatePersonalBestInsight(strokeLabel, paceSeries, swolfSeries) {
     return {
       id: "pb-pace", category: "achievement", priority: 1, confidence: "high",
       title: `New ${strokeLabel} pace best`,
-      message: `Your latest ${strokeLabel.toLowerCase()} pace of ${fmtPace100(paceBest.value)} is the fastest in your available comparable history.`,
+      message: `That's your quickest ${strokeLabel.toLowerCase()} swim in the history we can compare.`,
       metrics: [{ label: "Pace", value: fmtPace100(paceBest.value) }],
     };
   }
@@ -1143,7 +1143,7 @@ function generatePersonalBestInsight(strokeLabel, paceSeries, swolfSeries) {
     return {
       id: "pb-swolf", category: "achievement", priority: 1, confidence: "high",
       title: "New efficiency best",
-      message: `This is your lowest comparable SWOLF for ${strokeLabel.toLowerCase()} — ${Math.round(swolfBest.value)}, better than the other same-pool observations in the available history.`,
+      message: `That's your best same-pool SWOLF for ${strokeLabel.toLowerCase()} so far.`,
       metrics: [{ label: "SWOLF", value: Math.round(swolfBest.value) }],
     };
   }
@@ -1181,15 +1181,15 @@ function generateImprovementInsight(strokeLabel, paceSeries, swolfSeries, dpsSer
       id: "improve-pace", category: "positive", priority: 2,
       confidence: paceSeries.length >= 6 ? "high" : "medium",
       title: "You're getting faster",
-      message: `Your ${strokeLabel.toLowerCase()} pace improved ${pctAbs}% ${basisPhrase}.${extra}`,
+      message: `Your recent ${strokeLabel.toLowerCase()} swims are moving in the right direction.${extra}`,
       metrics: [{ label: "Pace", value: `${pctAbs}% faster` }],
     };
   }
   return {
     id: "decline-pace", category: "warning", priority: 2,
     confidence: paceSeries.length >= 6 ? "high" : "medium",
-    title: "Pace has slipped recently",
-    message: `Your ${strokeLabel.toLowerCase()} pace is ${pctAbs}% slower ${basisPhrase}. Worth watching, but it does not by itself indicate a problem.`,
+    title: "A slower patch",
+    message: `Your recent ${strokeLabel.toLowerCase()} swims have been a little slower than your earlier ones. One patch doesn't define the trend — we'll keep watching it.`,
     metrics: [{ label: "Pace", value: `${pctAbs}% slower` }],
   };
 }
@@ -1208,16 +1208,16 @@ function generateLatestSessionInsight(strokeLabel, paceSeries) {
   if (pct < 0) {
     return {
       id: "latest-strong", category: "positive", priority: 3, confidence: paceSeries.length >= 5 ? "medium" : "low",
-      title: "Strong latest session",
-      message: `Your latest ${strokeLabel.toLowerCase()} pace was ${pctAbs}% faster than the median of your previous ${baselineRecent.length} comparable sessions.`,
-      metrics: [{ label: "Pace", value: `${pctAbs}% faster than recent baseline` }],
+      title: "Strong latest swim",
+      message: `You were clearly quicker than you've been recently.`,
+      metrics: [{ label: "Pace", value: `${pctAbs}% faster · vs previous ${baselineRecent.length}` }],
     };
   }
   return {
     id: "latest-weak", category: "warning", priority: 3, confidence: paceSeries.length >= 5 ? "medium" : "low",
-    title: "Slower than your recent average",
-    message: `Your latest ${strokeLabel.toLowerCase()} pace was ${pctAbs}% slower than the median of your previous ${baselineRecent.length} comparable sessions. One session is not a trend.`,
-    metrics: [{ label: "Pace", value: `${pctAbs}% slower than recent baseline` }],
+    title: "An easier day",
+    message: `Your latest swim was slower than your recent pace. That's one session, not a trend.`,
+    metrics: [{ label: "Pace", value: `${pctAbs}% slower · vs previous ${baselineRecent.length}` }],
   };
 }
 
@@ -1536,9 +1536,9 @@ function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel
   if (paceSeries.length < 2) {
     return [{
       id: "baseline", category: "insufficient", priority: 99, confidence: "n/a",
-      title: "Build your baseline",
-      message: `Only ${paceSeries.length} comparable ${strokeLabel.toLowerCase()} session${paceSeries.length === 1 ? "" : "s"} is available. At least two are needed before direction can be described.`,
-      metrics: [],
+      title: "Just getting started",
+      message: `Keep swimming — we need another ${strokeLabel.toLowerCase()} session before there's enough history to show a direction.`,
+      metrics: [{ label: "Swims logged", value: paceSeries.length }],
     }];
   }
 
@@ -1569,16 +1569,16 @@ function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel
       }
       return [{
         id: "stable-profile", category: "neutral", priority: 50, confidence: paceSeries.length >= 6 ? "high" : "medium",
-        title: "Stable profile",
-        message: `You have ${paceSeries.length} comparable ${strokeLabel.toLowerCase()} sessions. No current pace or efficiency signal has crossed the app's meaningful-change thresholds.${detail}`,
-        metrics: [{ label: "Comparable sessions", value: paceSeries.length }],
+        title: "Holding steady",
+        message: `Your recent swims are staying pretty consistent. Nothing is moving strongly up or down yet — keep swimming and we'll watch for the trend.`,
+        metrics: [{ label: "Swims", value: paceSeries.length }, { label: "Pace", value: "stable" }],
       }];
     }
     return [{
       id: "baseline", category: "insufficient", priority: 99, confidence: "n/a",
-      title: "Building your baseline",
-      message: `You have ${paceSeries.length} comparable ${strokeLabel.toLowerCase()} sessions. That is enough to start plotting direction, but still light history for stronger interpretation.`,
-      metrics: [{ label: "Comparable sessions", value: paceSeries.length }],
+      title: "Building your picture",
+      message: `A direction is starting to form, but a few more swims will make it easier to trust.`,
+      metrics: [{ label: "Swims", value: paceSeries.length }],
     }];
   }
   return top;
