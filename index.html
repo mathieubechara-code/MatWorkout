@@ -564,7 +564,7 @@ const SWIM_STROKE_LABELS = { freestyle: "Freestyle", backstroke: "Backstroke", b
 // chart, not an explanation of the underlying math.
 const COMPARE_MODE_DESCRIPTIONS = {
   cadence: "Speed vs turnover — see whether you're getting faster by increasing stroke rate.",
-  dps: "Speed vs efficiency — see whether you're getting faster by covering more distance per stroke.",
+  dps: "Speed vs efficiency — same-pool sessions only, so turns and push-offs don't distort distance per stroke.",
   hr: "Speed vs effort — see whether you're getting faster without your heart rate climbing.",
   swolfhr: "Efficiency vs effort — see whether your stroke efficiency is improving without more cardiovascular strain.",
 };
@@ -778,6 +778,21 @@ function deriveSwimSessionForEffort(session, effort, assignments) {
 const poolLengthsMatch = (a, b) => (
   a != null && b != null && Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 0.05
 );
+
+// Canonical swim cadence for analytics. Garmin FIT length messages expose both total_strokes
+// and avg_swimming_cadence. Deriving cadence from total_strokes / elapsed time guarantees that
+// Stroke Rate and Distance/Stroke use the exact same watch counting convention on every device
+// (e.g. Fenix / Instinct), and still works if a device omits its precomputed cadence field.
+// The imported FIT cadence is kept as a fallback/diagnostic only.
+const canonicalSwimCadence = (l) => {
+  if (!l) return null;
+  if (l.totalStrokes != null && Number.isFinite(l.totalStrokes) && l.totalStrokes > 0 &&
+      l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0) {
+    return (l.totalStrokes / l.elapsedSec) * 60;
+  }
+  const fallback = l.fitAvgCadence != null ? l.fitAvgCadence : l.avgCadence;
+  return fallback != null && Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+};
 const formatPoolLength = (meters) => {
   if (meters == null || !Number.isFinite(meters) || meters <= 0) return "Pool length required";
   if (Math.abs(meters - 25) < 0.05) return "25m";
@@ -826,7 +841,8 @@ function computeSwimSessionMetrics(lengths, poolLength) {
     if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = { swolfs: [], cadences: [], distPerStroke: [], timeSec: 0, lengthCount: 0 };
     const swolf = l.elapsedSec != null && l.totalStrokes != null ? Math.round(l.elapsedSec + l.totalStrokes) : null;
     if (swolf != null) strokeGroups[l.stroke].swolfs.push(swolf);
-    if (l.avgCadence > 0) strokeGroups[l.stroke].cadences.push(l.avgCadence);
+    const cadence = canonicalSwimCadence(l);
+    if (cadence != null && cadence > 0) strokeGroups[l.stroke].cadences.push(cadence);
     if (l.totalStrokes > 0 && poolLength) strokeGroups[l.stroke].distPerStroke.push(poolLength / l.totalStrokes);
     strokeGroups[l.stroke].timeSec += l.elapsedSec;
     strokeGroups[l.stroke].lengthCount += 1;
@@ -896,12 +912,15 @@ function processSwimFit(parsed, fileName) {
     const stroke = SWIM_STROKE_NAMES[l.f7] || "unknown";
     const lengthType = l.f12 === 1 ? "active" : l.f12 === 0 ? "idle" : "unknown";
     const totalStrokes = l.f5 != null ? l.f5 : 0;
-    const avgCadence = l.f9 != null ? l.f9 : 0;
+    const fitAvgCadence = l.f9 != null ? l.f9 : null;
     const elapsedSec = l.f3 != null ? l.f3 / 1000 : (l.f4 != null ? l.f4 / 1000 : 0);
+    const avgCadence = totalStrokes > 0 && elapsedSec > 0
+      ? (totalStrokes / elapsedSec) * 60
+      : (fitAvgCadence != null ? fitAvgCadence : 0);
     const startTimeRaw = l.f2 != null ? l.f2 : l.f253; // raw FIT timestamp, for matching against record messages below
     const startTime = fitTimestampToDate(startTimeRaw);
     const calories = l.f11 != null ? l.f11 : null;
-    return { stroke, lengthType, totalStrokes, avgCadence, elapsedSec, startTime, startTimeRaw, calories };
+    return { stroke, lengthType, totalStrokes, avgCadence, fitAvgCadence, elapsedSec, startTime, startTimeRaw, calories };
   });
 
   // Per-length HR: average of record-message heart-rate readings whose timestamp falls
@@ -934,8 +953,19 @@ function processSwimFit(parsed, fileName) {
         }
         // else: 0/0 with a normal/long duration -> plausible real length.
       } else {
+        const canonicalCadence = canonicalSwimCadence(len);
         const maxC = SWIM_MAX_PLAUSIBLE_CADENCE[len.stroke] || 130;
-        if (len.avgCadence > maxC) glitch = `implausible cadence (${len.avgCadence} spm > ${maxC} plausible max for ${SWIM_STROKE_LABELS[len.stroke]})`;
+        if (canonicalCadence != null && canonicalCadence > maxC) {
+          glitch = `implausible cadence (${canonicalCadence.toFixed(1)} spm > ${maxC} plausible max for ${SWIM_STROKE_LABELS[len.stroke]})`;
+        } else if (len.fitAvgCadence != null && canonicalCadence != null && canonicalCadence > 0) {
+          const cadenceDiffPct = Math.abs(len.fitAvgCadence - canonicalCadence) / canonicalCadence;
+          // Do not alter/exclude the length. This only surfaces a possible firmware/device
+          // convention discrepancy if Garmin's own cadence is materially different from
+          // total_strokes / elapsed_time.
+          if (cadenceDiffPct > 0.20 && Math.abs(len.fitAvgCadence - canonicalCadence) > 4) {
+            glitch = `cadence fields disagree (FIT ${len.fitAvgCadence} spm vs ${canonicalCadence.toFixed(1)} spm derived from stroke count/time)`;
+          }
+        }
       }
     }
     const swolf = len.lengthType === "active" ? Math.round(len.elapsedSec + len.totalStrokes) : null;
@@ -2039,7 +2069,7 @@ function SwimmingTab({ isMobile, onExit }) {
     pace100: s.pace100Overall,
     swolf_all: poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgSwolf") : null,
     cadence_all: allStrokeMetric(s, "avgCadence"),
-    dps_all: allStrokeMetric(s, "avgDistPerStroke"),
+    dps_all: poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgDistPerStroke") : null,
     avgHR: s.avgHR,
     peakHR: s.peakHR,
     energy100: s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null,
@@ -2065,7 +2095,7 @@ function SwimmingTab({ isMobile, onExit }) {
         date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall,
         swolf_all: poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgSwolf") : null,
         cadence_all: allStrokeMetric(s, "avgCadence"),
-        dps_all: allStrokeMetric(s, "avgDistPerStroke"),
+        dps_all: poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgDistPerStroke") : null,
         avgHR: s.avgHR, peakHR: s.peakHR, energy100,
       };
       allStrokesSeen.forEach((stroke) => {
@@ -2073,7 +2103,7 @@ function SwimmingTab({ isMobile, onExit }) {
         point[`pace100_${stroke}`] = st ? st.pace100 : null;
         point[`swolf_${stroke}`] = st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgSwolf : null;
         point[`cadence_${stroke}`] = st ? st.avgCadence : null;
-        point[`dps_${stroke}`] = st ? st.avgDistPerStroke : null;
+        point[`dps_${stroke}`] = st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgDistPerStroke : null;
       });
       return point;
     });
@@ -2099,7 +2129,7 @@ function SwimmingTab({ isMobile, onExit }) {
       const energy100Vals = weekSessions.map((s) => (s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null)).filter((v) => v != null);
       const swolfAllVals = weekSessions.map((s) => poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgSwolf") : null).filter((v) => v != null);
       const cadenceAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgCadence")).filter((v) => v != null);
-      const dpsAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgDistPerStroke")).filter((v) => v != null);
+      const dpsAllVals = weekSessions.map((s) => poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgDistPerStroke") : null).filter((v) => v != null);
       const point = {
         date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals),
         swolf_all: avg(swolfAllVals), cadence_all: avg(cadenceAllVals), dps_all: avg(dpsAllVals),
@@ -2114,7 +2144,7 @@ function SwimmingTab({ isMobile, onExit }) {
         const pace100StrokeVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].pace100 : null)).filter((v) => v != null);
         const swolfVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? s.strokeStats[stroke].avgSwolf : null)).filter((v) => v != null);
         const cadenceVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgCadence : null)).filter((v) => v != null);
-        const dpsVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgDistPerStroke : null)).filter((v) => v != null);
+        const dpsVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? s.strokeStats[stroke].avgDistPerStroke : null)).filter((v) => v != null);
         point[`pace100_${stroke}`] = pace100StrokeVals.length ? avg(pace100StrokeVals) : null;
         point[`swolf_${stroke}`] = swolfVals.length ? avg(swolfVals) : null;
         point[`cadence_${stroke}`] = cadenceVals.length ? avg(cadenceVals) : null;
@@ -2514,7 +2544,7 @@ function SwimmingTab({ isMobile, onExit }) {
     },
     {
       key: "dps",
-      title: "Distance/stroke" + strokeTitleSuffix(activeStroke),
+      title: "Distance/stroke" + strokeTitleSuffix(activeStroke) + " · same pool",
       series: dpsSeries,
       verdict: computeVerdict(dpsSeries, "higher-better", INSIGHT_THRESHOLDS.dpsMeaningfulPct, { worse: "Lower" }),
       value: headlineOf(dpsSeries, strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`) != null ? `${headlineOf(dpsSeries, strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`).toFixed(2)}m` : "—",
@@ -3606,7 +3636,7 @@ function SwimmingTab({ isMobile, onExit }) {
                         {radarVisibleProfile.map((axis) => {
                           const descriptions = {
                             pace: "Speed — compares the latest pace with your previous 6-week pace baseline. Higher than 100 means faster than your normal baseline.",
-                            efficiency: "Stroke Efficiency — blends SWOLF (lower is better) with distance per stroke (higher is better), each relative to your own baseline.",
+                            efficiency: "Stroke Efficiency — blends same-pool SWOLF (lower is better) with same-pool distance per stroke (higher is better), each relative to your own baseline.",
                             consistency: "Consistency — measures how typical today's pace was compared with your normal training variability. Around 100 means it stayed within your usual range.",
                             endurance: "Endurance — compares the latest session distance with your average qualifying session distance over the previous 6 weeks.",
                             aerobic: "Aerobic Efficiency — compares pace per heartbeat with your baseline. It appears only when real heart-rate coverage is sufficient; higher than 100 means better efficiency than baseline.",
