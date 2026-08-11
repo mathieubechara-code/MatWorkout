@@ -640,7 +640,9 @@ const swimMedianLocal = (values) => {
 // Once enough personal same-stroke data exists, clearly faster/slower lengths can become
 // Speed/Easy; nearby rest and session position are used only as supporting context.
 function buildSwimEffortAssignments(sessions) {
-  const chron = [...(sessions || [])].sort((a,b) => (a.date < b.date ? -1 : 1));
+  const chron = [...(sessions || [])].sort((a,b) =>
+    `${a?.date || ""}|${a?.startTime || ""}|${a?.id || ""}`.localeCompare(`${b?.date || ""}|${b?.startTime || ""}|${b?.id || ""}`)
+  );
   const byStrokePool = {};
   const byStroke = {};
   const push = (obj, key, v) => { if (!obj[key]) obj[key] = []; obj[key].push(v); };
@@ -659,9 +661,9 @@ function buildSwimEffortAssignments(sessions) {
   chron.forEach((s) => {
     const allEff = (s.lengths || []).map((raw) => ({ raw, eff: effectiveLength(raw) }));
     const active = allEff.filter(({ raw, eff }) => eff.lengthType === "active" && !raw.userExcluded && eff.pace100 != null && Number.isFinite(eff.pace100) && eff.pace100 > 0);
-    const sessionAllPaces = active.map(({ eff }) => eff.pace100);
+    const cleanForReference = active.filter(({ raw }) => !raw.glitch);
     const sessionByStroke = {};
-    active.forEach(({ eff }) => push(sessionByStroke, eff.stroke, eff.pace100));
+    cleanForReference.forEach(({ eff }) => push(sessionByStroke, eff.stroke, eff.pace100));
     assignments[s.id] = {};
 
     active.forEach(({ raw, eff }, activePos) => {
@@ -759,6 +761,7 @@ function deriveSwimSessionForEffort(session, effort, assignments) {
     lengths: filteredLengths,
     distance: metrics.distance,
     distanceCorrection: null,
+    sourceDistanceCorrection: session.distanceCorrection || session.sourceDistanceCorrection || null,
     swimTimeSec: metrics.swimTimeSec,
     restTimeSec: metrics.restTimeSec,
     pace100Overall: metrics.pace100Overall,
@@ -881,10 +884,12 @@ function applyPersonalSwimOutlierFlags(lengths) {
 
   return lengths.map((raw) => {
     const personalFlag = flagged.get(raw.index);
-    // Preserve parser-level/device-field warnings if already present; otherwise add this
-    // personal-pattern review flag. The person still decides whether to exclude/reclassify it.
-    if (!personalFlag || raw.glitch) return raw;
-    return { ...raw, glitch: personalFlag };
+    const oldPersonalFlag = typeof raw.glitch === "string" && raw.glitch.startsWith("possible misdetected/transition length:");
+    const parserFlag = oldPersonalFlag ? null : raw.glitch;
+    if (parserFlag) return raw; // parser/device warning has priority
+    if (personalFlag) return { ...raw, glitch: personalFlag };
+    if (oldPersonalFlag) return { ...raw, glitch: null }; // correction changed context; clear stale personal flag
+    return raw;
   });
 }
 
@@ -1625,14 +1630,15 @@ function generateHeartRateInsight(overallPaceSeries, hrSeries, weeks, strokeFilt
 // ---- 8. Training frequency / "time to swim" ----------------------------------------------------
 function generateFrequencyInsight(chronSessions, todayStr) {
   if (chronSessions.length < 3) return null;
-  const recent = chronSessions.slice(-8);
+  const uniqueDays = Array.from(new Set(chronSessions.map((s) => s.date))).sort();
+  const recent = uniqueDays.slice(-8);
   const gaps = [];
-  for (let i = 1; i < recent.length; i++) gaps.push(dayDiff(recent[i - 1].date, recent[i].date));
+  for (let i = 1; i < recent.length; i++) gaps.push(dayDiff(recent[i - 1], recent[i]));
   if (gaps.length < 2) return null;
   const sortedGaps = [...gaps].sort((a, b) => a - b);
   const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
   if (medianGap <= 0) return null;
-  const daysSinceLast = dayDiff(chronSessions[chronSessions.length - 1].date, todayStr);
+  const daysSinceLast = dayDiff(uniqueDays[uniqueDays.length - 1], todayStr);
   if (daysSinceLast < medianGap * INSIGHT_THRESHOLDS.frequencyGapMultiplier || daysSinceLast < 3) return null;
   const perWeek = Math.max(1, Math.round((7 / medianGap) * 10) / 10);
   return {
@@ -1679,7 +1685,7 @@ function summarizeCompareMetricChange(metricId, recentVals, baselineVals) {
   else phrase = direction === "up" ? `Avg HR increased ${magnitude}${unit}` : `Avg HR decreased ${magnitude}${unit}`;
   return { metricId, meta, recent, baseline, direction, magnitude, phrase };
 }
-function compareStoryFromChanges(changes, scopeLabel = "Recent swimming") {
+function compareStoryFromChanges(changes, scopeLabel = "Recent swimming", allStrokesMode = false) {
   if (!changes || !changes.length) return null;
   const byId = Object.fromEntries(changes.map((c) => [c.metricId, c]));
   const pace = byId.pace, dps = byId.dps, cadence = byId.cadence, swolf = byId.swolf, hr = byId.hr;
@@ -1693,6 +1699,29 @@ function compareStoryFromChanges(changes, scopeLabel = "Recent swimming") {
   let category = "neutral";
   let headline = `${scopeLabel}: mixed signals.`;
   let story = "";
+
+  // In All-strokes mode, changes in stroke mix can move whole-session pace, SWOLF,
+  // cadence and DPS even when each individual stroke is unchanged. Keep the chart useful,
+  // but do not infer a stroke mechanism from mixed-stroke aggregates.
+  if (allStrokesMode) {
+    const selectedNames = changes.map((c) => c.meta.label);
+    const changedNames = changes.filter((c) => c.direction !== "steady").map((c) => c.meta.label);
+    if (pace?.direction === "down") {
+      category = "positive";
+      headline = `${scopeLabel}: whole-session pace was faster.`;
+    } else if (pace?.direction === "up") {
+      category = "warning";
+      headline = `${scopeLabel}: whole-session pace was slower.`;
+    } else if (pace) {
+      headline = `${scopeLabel}: whole-session pace stayed stable.`;
+    } else {
+      headline = `${scopeLabel}: mixed-stroke context.`;
+    }
+    story = changedNames.length
+      ? `Selected metrics changed (${changedNames.slice(0,3).join(", ")}${changedNames.length > 3 ? ", +" + (changedNames.length - 3) + " more" : ""}). Because All strokes combines different swim types, use a single-stroke filter before calling this a technique or efficiency change.`
+      : `Selected metrics (${selectedNames.join(", ")}) stayed close to baseline. All-strokes values remain descriptive because stroke mix can affect them.`;
+    return { category, headline, story, notes: changes.map((c) => c.phrase) };
+  }
 
   // --- PERFORMANCE ANCHOR: Pace -------------------------------------------------
   if (pace) {
@@ -1837,7 +1866,7 @@ function compareStoryFromChanges(changes, scopeLabel = "Recent swimming") {
   return { category, headline, story, notes };
 }
 
-function buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView) {
+function buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView, allStrokesMode = false) {
   if (!selectedCfgs?.length || !trendDataView || trendDataView.length < 4) return null;
   const usableDates = trendDataView.filter((d) => selectedCfgs.every((cfg) => d[cfg.key] != null));
   if (usableDates.length < 4) return null;
@@ -1848,28 +1877,28 @@ function buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView) {
   const changes = selectedCfgs.map((cfg) => summarizeCompareMetricChange(
     cfg.id, recentRows.map((d) => d[cfg.key]), baselineRows.map((d) => d[cfg.key])
   )).filter(Boolean);
-  const story = compareStoryFromChanges(changes, "Recent swimming");
+  const story = compareStoryFromChanges(changes, "Recent swimming", allStrokesMode);
   if (!story) return null;
   return { ...story, baselineCount: baselineRows.length, recentCount: recentRows.length, mode: "trend" };
 }
 
-function buildMultiMetricSessionInterpretation(selectedCfgs, trendDataView, selectedDate) {
-  if (!selectedDate || !selectedCfgs?.length) return null;
-  const selected = trendDataView.find((d) => d.date === selectedDate);
-  if (!selected) return null;
+function buildMultiMetricSessionInterpretation(selectedCfgs, trendDataView, selectedKey, allStrokesMode = false) {
+  if (!selectedKey || !selectedCfgs?.length) return null;
+  const selectedIndex = trendDataView.findIndex((d) => d.analysisKey === selectedKey);
+  if (selectedIndex < 0) return null;
+  const selected = trendDataView[selectedIndex];
   if (!selectedCfgs.every((cfg) => selected[cfg.key] != null)) return null;
   const priorRows = trendDataView
-    .filter((d) => d.date < selectedDate && selectedCfgs.every((cfg) => d[cfg.key] != null))
+    .slice(0, selectedIndex)
+    .filter((d) => selectedCfgs.every((cfg) => d[cfg.key] != null))
     .slice(-6);
   if (priorRows.length < 2) return null;
   const changes = selectedCfgs.map((cfg) => summarizeCompareMetricChange(
-    cfg.id,
-    selected[cfg.key] != null ? [selected[cfg.key]] : [],
-    priorRows.map((d) => d[cfg.key])
+    cfg.id, [selected[cfg.key]], priorRows.map((d) => d[cfg.key])
   )).filter(Boolean);
-  const story = compareStoryFromChanges(changes, fmtDate(selectedDate));
+  const story = compareStoryFromChanges(changes, fmtDate(selected.date), allStrokesMode);
   if (!story) return null;
-  return { ...story, baselineCount: priorRows.length, recentCount: 1, mode: "session", selectedDate };
+  return { ...story, baselineCount: priorRows.length, recentCount: 1, mode: "session", selectedDate: selected.date, selectedKey };
 }
 
 // ---- 9. Flexible Compare metric interpretation ------------------------------------------------
@@ -2193,7 +2222,7 @@ function SwimmingTab({ isMobile, onExit }) {
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "none", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
   const [compareMetrics, setCompareMetrics] = useState(["pace", "cadence"]); // freely selectable Compare metrics
   const [compareHelpOpen, setCompareHelpOpen] = useState(false);
-  const [selectedComparePoint, setSelectedComparePoint] = useState(null); // date string of a tapped Compare chart dot, or null for "overall trend" view
+  const [selectedComparePoint, setSelectedComparePoint] = useState(null); // unique analysisKey of a tapped Compare session, or null for overall trend
   const [showCompareInfo, setShowCompareInfo] = useState(false); // toggles the Compare chart's "what is this" info popover
   const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
   const [distanceDraft, setDistanceDraft] = useState("");
@@ -2289,7 +2318,8 @@ function SwimmingTab({ isMobile, onExit }) {
   const applyLengthEdit = async (sessionId, lengthIndex, updater) => {
     const next = (sessions || []).map((s) => {
       if (s.id !== sessionId) return s;
-      const lengths = s.lengths.map((l) => (l.index === lengthIndex ? updater(l) : l));
+      const editedLengths = s.lengths.map((l) => (l.index === lengthIndex ? updater(l) : l));
+      const lengths = applyPersonalSwimOutlierFlags(editedLengths);
       const metrics = computeSwimSessionMetrics(lengths, s.poolLength);
       return {
         ...s,
@@ -2345,9 +2375,7 @@ function SwimmingTab({ isMobile, onExit }) {
     });
   };
 
-  // Computes CSS from whichever two reps were picked, using their actual distances/times
-  // (not a hardcoded 200/400) — so it works whether the reps were exactly 200m/400m or just
-  // close to it. Stored under the same cssTest.{t200,t400} shape the rest of the app expects.
+  // Standard CSS rep-picker: accept only a ~200m and ~400m effort (within one pool length).
   const applyCssRepPick = async (sessionId) => {
     const pick = cssRepPick[sessionId];
     const session = (sessions || []).find((s) => s.id === sessionId);
@@ -2356,9 +2384,23 @@ function SwimmingTab({ isMobile, onExit }) {
     if (!repA || !repB) return;
     const [shortRep, longRep] = repA.distance <= repB.distance ? [repA, repB] : [repB, repA];
     if (longRep.distance === shortRep.distance || longRep.timeSec <= shortRep.timeSec) return;
+    const tol = session.poolLength || 25;
+    const is200 = Math.abs(shortRep.distance - 200) <= tol;
+    const is400 = Math.abs(longRep.distance - 400) <= tol;
+    if (!is200 || !is400) {
+      alert(`CSS requires a ~200m rep and a ~400m rep (within one pool length). Selected: ${Math.round(shortRep.distance)}m + ${Math.round(longRep.distance)}m.`);
+      return;
+    }
     const cssSpeed = (longRep.distance - shortRep.distance) / (longRep.timeSec - shortRep.timeSec);
     const pace100 = cssSpeed > 0 ? 100 / cssSpeed : null;
-    const next = (sessions || []).map((s) => (s.id === sessionId ? { ...s, isCssTest: true, cssTest: { t200: shortRep.timeSec, t400: longRep.timeSec, cssSpeed, pace100 } } : s));
+    const next = (sessions || []).map((s) => (s.id === sessionId ? {
+      ...s, isCssTest: true,
+      cssTest: {
+        t200: shortRep.timeSec, t400: longRep.timeSec,
+        d200: shortRep.distance, d400: longRep.distance,
+        cssSpeed, pace100, method: "two-distance-200-400"
+      }
+    } : s));
     await persist(next);
     setCssRepPick((prev) => { const cp = { ...prev }; delete cp[sessionId]; return cp; });
   };
@@ -2403,6 +2445,9 @@ function SwimmingTab({ isMobile, onExit }) {
   // field. Whatever already marks a session as a CSS test (the Reps/sets picker below, or
   // upload-time in History & Log) is the single source of truth for this label everywhere.
   const categoryLabelOf = (s) => (s.isCssTest ? "CSS Test" : "Workout");
+  const swimSessionAnalysisKey = (s) => `${s?.date || ""}|${s?.startTime || ""}|${s?.id || ""}`;
+  const compareSwimSessionsChronologically = (a, b) => swimSessionAnalysisKey(a).localeCompare(swimSessionAnalysisKey(b));
+
   const categoryValueOf = (s) => (s.isCssTest ? "csstest" : "workout");
 
   // Auto effort detection always sees the complete swim history; changing a slicer must not
@@ -2413,17 +2458,17 @@ function SwimmingTab({ isMobile, onExit }) {
   // 1) existing session category filter, then 2) optional Easy/Work/Speed length view.
   // Effort=All returns the original sessions untouched, so V79 behavior is exactly preserved.
   const chronSessions = useMemo(() => {
-    const chron = sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
+    const chron = sessions ? [...sessions].sort(compareSwimSessionsChronologically) : [];
     const categoryChron = categoryFilter === "all" ? chron : chron.filter((s) => categoryValueOf(s) === categoryFilter);
     if (effortFilter === "all") return categoryChron;
     return categoryChron.map((s) => deriveSwimSessionForEffort(s, effortFilter, effortAssignments)).filter(Boolean);
   }, [sessions, categoryFilter, effortFilter, effortAssignments]);
-  const sortedSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => (a.date < b.date ? 1 : -1)) : []), [sessions]);
+  const sortedSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => compareSwimSessionsChronologically(b, a)) : []), [sessions]);
 
   // Dashboard is intentionally filter-neutral. Analysis filters belong to Trend / Compare /
   // Radar and remain remembered there, but must never leak into the overview/Insights.
   const dashboardChronSessions = useMemo(
-    () => sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : [],
+    () => sessions ? [...sessions].sort(compareSwimSessionsChronologically) : [],
     [sessions]
   );
 
@@ -2508,17 +2553,20 @@ function SwimmingTab({ isMobile, onExit }) {
     return null;
   }, [dashboardChronSessions]);
 
-  const dashboardTrendData = useMemo(() => dashboardChronSessions.map((s) => ({
-    date: s.date,
-    label: fmtDate(s.date),
-    pace100: s.pace100Overall,
-    swolf_all: poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgSwolf") : null,
-    cadence_all: allStrokeMetric(s, "avgCadence"),
-    dps_all: poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgDistPerStroke") : null,
-    avgHR: swimHrContext(s).avgHR,
-    peakHR: s.peakHR,
-    energy100: s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null,
-  })), [dashboardChronSessions, dashboardSwolfReferencePool]);
+  const dashboardTrendData = useMemo(() => dashboardChronSessions.map((s) => {
+    const correctionLimited = !!(s.distanceCorrection || s.sourceDistanceCorrection);
+    return {
+      date: s.date,
+      label: fmtDate(s.date),
+      pace100: s.sourceDistanceCorrection ? null : s.pace100Overall,
+      swolf_all: !correctionLimited && poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgSwolf") : null,
+      cadence_all: !correctionLimited ? allStrokeMetric(s, "avgCadence") : null,
+      dps_all: !correctionLimited && poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgDistPerStroke") : null,
+      avgHR: swimHrContext(s).avgHR,
+      peakHR: s.peakHR,
+      energy100: !s.sourceDistanceCorrection && s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null,
+    };
+  }), [dashboardChronSessions, dashboardSwolfReferencePool]);
 
   const swolfReferencePools = useMemo(() => {
     const refs = { all: null };
@@ -2535,21 +2583,33 @@ function SwimmingTab({ isMobile, onExit }) {
   // Trend series, oldest -> newest, one point per session.
   const trendData = useMemo(() => {
     return chronSessions.map((s) => {
-      const energy100 = s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null;
+      const correctionLimited = !!(s.distanceCorrection || s.sourceDistanceCorrection);
+      const wholeSessionCorrectionValid = !!s.distanceCorrection && !s.sourceDistanceCorrection && effortFilter === "all";
+      const energy100 = !s.sourceDistanceCorrection && s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null;
       const point = {
-        date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall,
+        date: s.date,
+        analysisKey: swimSessionAnalysisKey(s),
+        sessionId: s.id,
+        label: fmtDate(s.date),
+        pace100: correctionLimited && !wholeSessionCorrectionValid ? null : s.pace100Overall,
         swolf_all: poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgSwolf") : null,
         cadence_all: allStrokeMetric(s, "avgCadence"),
         dps_all: poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgDistPerStroke") : null,
         avgHR: swimHrContext(s).avgHR, peakHR: s.peakHR, energy100,
       };
+      if (correctionLimited) {
+        point.swolf_all = null;
+        point.cadence_all = null;
+        point.dps_all = null;
+      }
       allStrokesSeen.forEach((stroke) => {
         const st = s.strokeStats && s.strokeStats[stroke];
-        point[`pace100_${stroke}`] = st ? st.pace100 : null;
-        point[`swolf_${stroke}`] = st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgSwolf : null;
-        point[`cadence_${stroke}`] = st ? st.avgCadence : null;
-        point[`dps_${stroke}`] = st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgDistPerStroke : null;
-        point[`hr_${stroke}`] = swimHrContext(s, stroke).avgHR;
+        const contextReliable = !correctionLimited;
+        point[`pace100_${stroke}`] = contextReliable && st ? st.pace100 : null;
+        point[`swolf_${stroke}`] = contextReliable && st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgSwolf : null;
+        point[`cadence_${stroke}`] = contextReliable && st ? st.avgCadence : null;
+        point[`dps_${stroke}`] = contextReliable && st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgDistPerStroke : null;
+        point[`hr_${stroke}`] = contextReliable ? swimHrContext(s, stroke).avgHR : null;
       });
       return point;
     });
@@ -2573,6 +2633,21 @@ function SwimmingTab({ isMobile, onExit }) {
       let hrWeighted = 0, hrSec = 0;
       weekSessions.forEach((s) => {
         if (requirePool != null && !poolLengthsMatch(s.poolLength, requirePool)) return;
+        const correctionLimited = !!(s.distanceCorrection || s.sourceDistanceCorrection);
+        if (correctionLimited) {
+          // Only the original whole-session correction can contribute to pooled overall pace.
+          // It cannot safely contribute stroke-specific or technique ratios.
+          if (!stroke && requirePool == null && s.distanceCorrection && !s.sourceDistanceCorrection && s.distance > 0 && s.swimTimeSec > 0) {
+            timeSec += s.swimTimeSec;
+            distance += s.distance;
+            const hr = swimHrContext(s);
+            if (hr.avgHR != null && hr.coveredSec > 0) {
+              hrWeighted += hr.avgHR * hr.coveredSec;
+              hrSec += hr.coveredSec;
+            }
+          }
+          return;
+        }
         (s.lengths || []).forEach((raw) => {
           const eff = effectiveLength(raw);
           if (eff.lengthType !== "active" || raw.userExcluded || (stroke && eff.stroke !== stroke)) return;
@@ -2641,7 +2716,7 @@ function SwimmingTab({ isMobile, onExit }) {
   const trendDataView = swimTimeView === "week" ? weeklyTrendData : trendData;
 
   const cssTrendData = useMemo(() => {
-    const chron = sessions ? [...sessions].filter((s) => s.isCssTest && s.cssTest).sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
+    const chron = sessions ? [...sessions].filter((s) => s.isCssTest && s.cssTest).sort(compareSwimSessionsChronologically) : [];
     return chron.map((s) => ({ date: s.date, label: fmtDate(s.date), cssPace100: s.cssTest.pace100, cssSpeed: s.cssTest.cssSpeed }));
   }, [sessions]);
 
@@ -2687,36 +2762,46 @@ function SwimmingTab({ isMobile, onExit }) {
   }, [sessions, sortedSessions, allStrokesSeen, todayStr]);
 
   // ---- Swim PR card -------------------------------------------------------------------
-  // Best pace also records that session's dominant stroke (the one with the most lengths),
+  // Best pace is calculated directly from stroke-specific pace (the one with the most lengths),
   // shown as a small tag next to the PR so "1:32/100m" isn't ambiguous about which stroke it
   // was swum in — whole-session pace can otherwise mix strokes together silently.
+  const hasUnresolvedSwimQualityFlag = (s) => !!(s && Array.isArray(s.lengths) && s.lengths.some((l) => l.glitch && !l.userExcluded));
+
+  // Swim pace PR must be stroke-specific. A mixed whole-session average can move merely
+  // because the stroke mix changed, so it must never be labelled as a Freestyle/Breaststroke PR.
   const bestPacePR = useMemo(() => {
     if (!sessions) return null;
     let best = null;
     sessions.forEach((s) => {
-      if (s.pace100Overall == null) return;
-      if (!best || s.pace100Overall < best.value) {
-        const stats = s.strokeStats || {};
-        let domStroke = null, domCount = -1;
-        Object.keys(stats).forEach((k) => { if (stats[k].count > domCount) { domStroke = k; domCount = stats[k].count; } });
-        best = { value: s.pace100Overall, date: s.date, stroke: domStroke };
-      }
+      if (s.distanceCorrection || s.sourceDistanceCorrection || hasUnresolvedSwimQualityFlag(s)) return;
+      Object.entries(s.strokeStats || {}).forEach(([stroke, st]) => {
+        if (!TECHNIQUE_SWIM_STROKES.has(stroke) || !st || st.pace100 == null || !Number.isFinite(st.pace100)) return;
+        if (!best || st.pace100 < best.value) best = { value: st.pace100, date: s.date, stroke };
+      });
     });
     return best;
   }, [sessions]);
 
   // Only compared within the same pool length as the most recent session, since SWOLF isn't
   // meaningfully comparable across different pool lengths.
+  // SWOLF PR is only meaningful within one stroke AND one pool length.
+  // For the compact dashboard card, evaluate each standard stroke in the pool length of its
+  // most recent comparable session, then surface the strongest valid PR candidate.
   const bestSwolfPR = useMemo(() => {
     if (!sessions || sessions.length === 0) return null;
-    const refPoolLength = sortedSessions[0] ? sortedSessions[0].poolLength : null;
     let best = null;
-    sessions.forEach((s) => {
-      if (s.poolLength !== refPoolLength) return;
-      const vals = Object.values(s.strokeStats || {}).map((st) => st.avgSwolf).filter((v) => v != null);
-      if (!vals.length) return;
-      const sessionMin = Math.min(...vals);
-      if (!best || sessionMin < best.value) best = { value: sessionMin, date: s.date };
+    TECHNIQUE_SWIM_STROKES.forEach((stroke) => {
+      const comparable = sortedSessions.filter((s) =>
+        !s.distanceCorrection && !s.sourceDistanceCorrection && !hasUnresolvedSwimQualityFlag(s) &&
+        s.poolLength != null &&
+        s.strokeStats && s.strokeStats[stroke] && s.strokeStats[stroke].avgSwolf != null
+      );
+      if (!comparable.length) return;
+      const refPool = comparable[0].poolLength;
+      comparable.filter((s) => poolLengthsMatch(s.poolLength, refPool)).forEach((s) => {
+        const v = s.strokeStats[stroke].avgSwolf;
+        if (!best || v < best.value) best = { value:v, date:s.date, stroke, poolLength:refPool };
+      });
     });
     return best;
   }, [sessions, sortedSessions]);
@@ -2725,7 +2810,7 @@ function SwimmingTab({ isMobile, onExit }) {
     if (!sessions) return null;
     let best = null;
     sessions.forEach((s) => {
-      if (s.distance == null) return;
+      if (s.distance == null || hasUnresolvedSwimQualityFlag(s)) return;
       if (!best || s.distance > best.value) best = { value: s.distance, date: s.date };
     });
     return best;
@@ -2838,6 +2923,7 @@ function SwimmingTab({ isMobile, onExit }) {
   const radarEligibleSessions = strokeFilter === "all"
     ? chronSessions
     : chronSessions.filter((s) => {
+        if (s.distanceCorrection || s.sourceDistanceCorrection) return false;
         const st = s && s.strokeStats ? s.strokeStats[strokeFilter] : null;
         return !!(st && (st.pace100 != null || st.avgSwolf != null || st.avgDistPerStroke != null));
       });
@@ -2849,6 +2935,13 @@ function SwimmingTab({ isMobile, onExit }) {
   // Freestyle Work metres only — never whole-session distance.
   const radarContextDistance = (s) => {
     if (!s || !Array.isArray(s.lengths) || s.poolLength == null || !Number.isFinite(s.poolLength) || s.poolLength <= 0) return null;
+    const correctionLimited = s.distanceCorrection || s.sourceDistanceCorrection;
+    if (correctionLimited) {
+      // A total-distance override contains no information about which stroke/effort the
+      // missing/extra metres belonged to. It is valid only on the original whole-session view.
+      if (s.distanceCorrection && !s.sourceDistanceCorrection && strokeFilter === "all" && effortFilter === "all") return s.distance;
+      return null;
+    }
     const qualifyingLengths = s.lengths
       .map((raw) => ({ raw, eff: effectiveLength(raw) }))
       .filter(({ raw, eff }) =>
@@ -2950,7 +3043,7 @@ function SwimmingTab({ isMobile, onExit }) {
     const cutoff = new Date(`${radarLatestSession.date}T00:00:00`);
     cutoff.setDate(cutoff.getDate() - 42);
     const cutoffStr = toISODate(cutoff);
-    return radarEligibleSessions.slice(0, -1).filter((s) => s.date >= cutoffStr && s.date < radarLatestSession.date);
+    return radarEligibleSessions.slice(0, -1).filter((s) => s.date >= cutoffStr && s.date <= radarLatestSession.date);
   })();
 
   const radarAxisMeta = {
@@ -2965,21 +3058,55 @@ function SwimmingTab({ isMobile, onExit }) {
     const latest = radarLatestSession;
     if (!latest) return [];
     const profile = [];
+    const latestHasTotalDistanceCorrection = !!(latest.distanceCorrection || latest.sourceDistanceCorrection);
     const addAxis = (key, rawMetric, baselineRaw, score, detail) => {
       if (rawMetric == null || baselineRaw == null || score == null || !Number.isFinite(score)) return;
       profile.push({ key, label: radarAxisMeta[key].label, color: radarAxisMeta[key].color, rawMetric, baselineRaw, score, displayValue: Math.max(70, Math.min(130, score)), detail });
     };
 
-    // 1. Speed — pace is lower-is-better.
-    const paceBaseline = radarBaselineSessions.map((s) => radarMetricValue(s, "pace"));
-    const paceBase = radarMean(paceBaseline);
-    const latestPace = radarMetricValue(latest, "pace");
-    if (radarBaselineSessions.length >= 2 && latestPace != null && paceBase != null && latestPace > 0) addAxis("pace", latestPace, paceBase, 100 * (paceBase / latestPace), { latest: latestPace, baseline: paceBase });
+    // 1. Speed — single stroke uses direct pace ratio. All strokes normalizes each standard
+    // stroke against its own baseline first, then weights by latest-session stroke distance.
+    // This prevents a change in freestyle/breaststroke mix from masquerading as speed progress.
+    let latestPace = radarMetricValue(latest, "pace");
+    if (strokeFilter === "all" && latest.distanceCorrection && !latest.sourceDistanceCorrection && effortFilter === "all") {
+      const basePaces = radarBaselineSessions
+        .filter((s) => !s.distanceCorrection && !s.sourceDistanceCorrection)
+        .map((s) => s.pace100Overall)
+        .filter((v) => v != null && Number.isFinite(v) && v > 0);
+      if (basePaces.length >= 2 && latest.pace100Overall > 0) {
+        const basePace = radarMean(basePaces);
+        addAxis("pace", latest.pace100Overall, basePace, 100 * (basePace / latest.pace100Overall), {
+          latest: latest.pace100Overall, baseline: basePace, correctedWholeSession: true, baselineCount: basePaces.length
+        });
+      }
+    } else if (strokeFilter === "all") {
+      const speedComponents = Object.entries(latest.strokeStats || [])
+        .filter(([stroke, st]) => TECHNIQUE_SWIM_STROKES.has(stroke) && st && st.pace100 > 0 && st.count > 0)
+        .map(([stroke, st]) => {
+          const base = radarBaselineSessions
+            .map((s) => s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].pace100 : null)
+            .filter((v) => v != null && Number.isFinite(v) && v > 0);
+          if (base.length < 2) return null;
+          const basePace = radarMean(base);
+          return { stroke, score: 100 * (basePace / st.pace100), weight: st.count, latestPace: st.pace100, basePace, baselineCount: base.length };
+        }).filter(Boolean);
+      if (speedComponents.length) {
+        const w = speedComponents.reduce((a,c)=>a+c.weight,0);
+        const score = speedComponents.reduce((a,c)=>a+c.score*c.weight,0)/w;
+        addAxis("pace", score, 100, score, { components: speedComponents, compositionNormalized: true });
+      }
+    } else {
+      const paceBaseline = radarBaselineSessions.map((s) => radarMetricValue(s, "pace")).filter((v)=>v!=null);
+      const paceBase = radarMean(paceBaseline);
+      if (paceBaseline.length >= 2 && latestPace != null && paceBase != null && latestPace > 0) {
+        addAxis("pace", latestPace, paceBase, 100 * (paceBase / latestPace), { latest: latestPace, baseline: paceBase });
+      }
+    }
 
     // 2. Stroke Efficiency — same-pool, and never compares SWOLF directly across stroke types.
     // Each component is converted to a favorable ratio around baseline=100:
     // lower SWOLF => >100, higher DPS => >100. Their geometric mean gives one balanced score.
-    if (strokeFilter === "all") {
+    if (!latestHasTotalDistanceCorrection && strokeFilter === "all") {
       const latestStrokeEntries = Object.entries(latest.strokeStats || {})
         .filter(([stroke, st]) => TECHNIQUE_SWIM_STROKES.has(stroke) && st && st.avgSwolf != null && st.avgDistPerStroke != null && st.count > 0);
       const components = [];
@@ -3000,7 +3127,7 @@ function SwimmingTab({ isMobile, onExit }) {
         const score = components.reduce((a,c)=>a+c.score*c.weight,0)/weight;
         addAxis("efficiency", score, 100, score, { components });
       }
-    } else {
+    } else if (!latestHasTotalDistanceCorrection) {
       const efficiencyBaseline = radarBaselineSessions
         .filter((s) => poolLengthsMatch(s.poolLength, latest.poolLength))
         .map((s) => ({ swolf: radarMetricValue(s, "swolf"), dps: radarMetricValue(s, "dps") }))
@@ -3017,33 +3144,54 @@ function SwimmingTab({ isMobile, onExit }) {
       }
     }
 
-    // 3. Consistency — within-session pace stability, relative to the previous 6-week baseline.
-    // Each session gets a pace coefficient of variation (CV = SD / mean) across comparable
-    // active lengths. Lower CV means steadier pacing. Score >100 = more consistent than usual.
-    const consistencyBaseline = radarBaselineSessions
-      .filter((s) => poolLengthsMatch(s.poolLength, latest.poolLength))
-      .map((s) => radarSessionPaceVariability(s))
-      .filter((x) => x && x.cv != null && Number.isFinite(x.cv));
-    const latestConsistency = radarSessionPaceVariability(latest);
-    const baselineCv = radarMean(consistencyBaseline.map((x) => x.cv));
-    if (latestConsistency && consistencyBaseline.length >= 2 && baselineCv != null) {
-      let consistencyScore;
-      if (baselineCv === 0) consistencyScore = latestConsistency.cv === 0 ? 100 : 0;
-      else consistencyScore = 100 * (baselineCv / Math.max(latestConsistency.cv, 0.000001));
-      // Cap extreme ratios for chart readability without changing direction or interpretation.
-      consistencyScore = Math.max(0, Math.min(200, consistencyScore));
-      addAxis(
-        "consistency",
-        latestConsistency.cv,
-        baselineCv,
-        consistencyScore,
-        {
-          latestCv: latestConsistency.cv,
+    // 3. Consistency — within-session pace stability.
+    // Single stroke compares that stroke's CV with its same-pool 6-week baseline.
+    // All strokes normalizes each stroke separately before combining scores, so changing
+    // the freestyle/breaststroke mix cannot create a fake consistency change.
+    if (!latestHasTotalDistanceCorrection && strokeFilter === "all") {
+      const latestVar = radarSessionPaceVariability(latest);
+      const components = (latestVar?.groups || []).map((g) => {
+        const baseCvs = radarBaselineSessions
+          .filter((s) => poolLengthsMatch(s.poolLength, latest.poolLength) && !s.distanceCorrection && !s.sourceDistanceCorrection)
+          .map((s) => radarSessionPaceVariability(s))
+          .map((v) => v?.groups?.find((bg) => bg.stroke === g.stroke)?.cv)
+          .filter((v) => v != null && Number.isFinite(v));
+        if (baseCvs.length < 2 || !(g.cv >= 0)) return null;
+        const baseCv = radarMean(baseCvs);
+        let score = baseCv === 0 ? (g.cv === 0 ? 100 : 0) : 100 * (baseCv / Math.max(g.cv, 0.000001));
+        score = Math.max(0, Math.min(200, score));
+        return { stroke:g.stroke, score, weight:g.count, latestCv:g.cv, baselineCv:baseCv, baselineCount:baseCvs.length };
+      }).filter(Boolean);
+      if (components.length) {
+        const weight = components.reduce((a,c)=>a+c.weight,0);
+        const score = components.reduce((a,c)=>a+c.score*c.weight,0)/weight;
+        addAxis("consistency", score, 100, score, { components, compositionNormalized:true });
+      }
+    } else if (!latestHasTotalDistanceCorrection) {
+      const consistencyBaseline = radarBaselineSessions
+        .filter((s) => poolLengthsMatch(s.poolLength, latest.poolLength) && !s.distanceCorrection && !s.sourceDistanceCorrection)
+        .map((s) => radarSessionPaceVariability(s))
+        .filter((x) => x && x.cv != null && Number.isFinite(x.cv));
+      const latestConsistency = radarSessionPaceVariability(latest);
+      const baselineCv = radarMean(consistencyBaseline.map((x) => x.cv));
+      if (latestConsistency && consistencyBaseline.length >= 2 && baselineCv != null) {
+        let consistencyScore;
+        if (baselineCv === 0) consistencyScore = latestConsistency.cv === 0 ? 100 : 0;
+        else consistencyScore = 100 * (baselineCv / Math.max(latestConsistency.cv, 0.000001));
+        consistencyScore = Math.max(0, Math.min(200, consistencyScore));
+        addAxis(
+          "consistency",
+          latestConsistency.cv,
           baselineCv,
-          latestLengthCount: latestConsistency.count,
-          baselineSessionCount: consistencyBaseline.length
-        }
-      );
+          consistencyScore,
+          {
+            latestCv: latestConsistency.cv,
+            baselineCv,
+            latestLengthCount: latestConsistency.count,
+            baselineSessionCount: consistencyBaseline.length
+          }
+        );
+      }
     }
 
     // 4. Endurance — distance in the exact selected Radar context (category + effort + stroke).
@@ -3051,40 +3199,50 @@ function SwimmingTab({ isMobile, onExit }) {
     const distanceBase = radarMean(distanceVals), latestDistance = radarMetricValue(latest, "distance");
     if (radarBaselineSessions.length >= 2 && latestDistance != null && distanceBase != null && distanceBase > 0) addAxis("endurance", latestDistance, distanceBase, 100 * (latestDistance / distanceBase), { latest: latestDistance, baseline: distanceBase });
 
-    // 5. Aerobic Efficiency — speed produced per unit of cardiovascular response.
-    // Pace is seconds/100m, so swimming speed is proportional to 1/pace.
-    // Therefore efficiency is proportional to speed/HR = 1/(pace * HR).
-    // Higher score is favorable: faster at the same HR, same pace at lower HR, or both.
-    // HR must cover >=70% of the relevant active lengths. For a stroke-filtered Radar,
-    // HR is calculated from that stroke's own active lengths rather than the whole session.
-    const aerobicBaseline = radarBaselineSessions.filter((s) => {
-      const hrCtx = radarHrContext(s);
-      return hrCtx.coverage >= 0.70 && radarMetricValue(s, "pace") != null && hrCtx.avgHR != null && hrCtx.avgHR > 0;
-    });
-    const latestHrCtx = radarHrContext(latest);
-    const aerobicVals = aerobicBaseline.map((s) => {
-      const p = radarMetricValue(s, "pace");
-      const h = radarHrContext(s).avgHR;
-      return p != null && p > 0 && h != null && h > 0 ? 1 / (p * h) : null;
-    }).filter((v) => v != null && Number.isFinite(v) && v > 0);
-    const latestAerobicEfficiency = latestPace != null && latestPace > 0 && latestHrCtx.avgHR != null && latestHrCtx.avgHR > 0
-      ? 1 / (latestPace * latestHrCtx.avgHR)
-      : null;
-    const aerobicBase = radarMean(aerobicVals);
-    if (aerobicBaseline.length >= 2 && latestHrCtx.coverage >= 0.70 && latestAerobicEfficiency != null && aerobicBase != null && aerobicBase > 0) {
-      addAxis(
-        "aerobic",
-        latestAerobicEfficiency,
-        aerobicBase,
-        100 * (latestAerobicEfficiency / aerobicBase),
-        {
-          latest: latestAerobicEfficiency,
-          baseline: aerobicBase,
-          latestAvgHR: latestHrCtx.avgHR,
-          latestHrCoverage: latestHrCtx.coverage,
-          baselineCount: aerobicBaseline.length
-        }
-      );
+    // 5. Aerobic Efficiency — speed produced per cardiovascular cost.
+    // Single stroke: 1/(pace*HR) vs baseline. All strokes: normalize each stroke separately
+    // and combine scores, preventing stroke-composition changes from creating fake efficiency.
+    if (!latestHasTotalDistanceCorrection && strokeFilter === "all") {
+      const aerobicComponents = Object.entries(latest.strokeStats || [])
+        .filter(([stroke, st]) => TECHNIQUE_SWIM_STROKES.has(stroke) && st && st.pace100 > 0 && st.count > 0)
+        .map(([stroke, st]) => {
+          const latestHr = swimHrContext(latest, stroke);
+          if (latestHr.coverage < 0.70 || !(latestHr.avgHR > 0)) return null;
+          const latestEff = 1 / (st.pace100 * latestHr.avgHR);
+          const bases = radarBaselineSessions.map((s) => {
+            const bst = s.strokeStats && s.strokeStats[stroke];
+            const bhr = swimHrContext(s, stroke);
+            return bst && bst.pace100 > 0 && bhr.coverage >= 0.70 && bhr.avgHR > 0
+              ? 1 / (bst.pace100 * bhr.avgHR) : null;
+          }).filter((v)=>v!=null && Number.isFinite(v) && v>0);
+          if (bases.length < 2) return null;
+          const baseEff = radarMean(bases);
+          return { stroke, score: 100*(latestEff/baseEff), weight: st.count, latestEff, baseEff, latestAvgHR: latestHr.avgHR, baselineCount: bases.length };
+        }).filter(Boolean);
+      if (aerobicComponents.length) {
+        const w=aerobicComponents.reduce((a,c)=>a+c.weight,0);
+        const score=aerobicComponents.reduce((a,c)=>a+c.score*c.weight,0)/w;
+        addAxis("aerobic", score, 100, score, { components:aerobicComponents, compositionNormalized:true });
+      }
+    } else if (!latestHasTotalDistanceCorrection) {
+      const aerobicBaseline = radarBaselineSessions.filter((s) => {
+        const hrCtx = radarHrContext(s);
+        return hrCtx.coverage >= 0.70 && radarMetricValue(s, "pace") != null && hrCtx.avgHR != null && hrCtx.avgHR > 0;
+      });
+      const latestHrCtx = radarHrContext(latest);
+      const aerobicVals = aerobicBaseline.map((s) => {
+        const p = radarMetricValue(s, "pace"), h = radarHrContext(s).avgHR;
+        return p != null && p > 0 && h != null && h > 0 ? 1/(p*h) : null;
+      }).filter((v)=>v!=null && Number.isFinite(v) && v>0);
+      const latestAerobicEfficiency = latestPace != null && latestPace > 0 && latestHrCtx.avgHR > 0
+        ? 1/(latestPace*latestHrCtx.avgHR) : null;
+      const aerobicBase = radarMean(aerobicVals);
+      if (aerobicBaseline.length >= 2 && latestHrCtx.coverage >= 0.70 && latestAerobicEfficiency != null && aerobicBase > 0) {
+        addAxis("aerobic", latestAerobicEfficiency, aerobicBase, 100*(latestAerobicEfficiency/aerobicBase), {
+          latest:latestAerobicEfficiency, baseline:aerobicBase, latestAvgHR:latestHrCtx.avgHR,
+          latestHrCoverage:latestHrCtx.coverage, baselineCount:aerobicBaseline.length
+        });
+      }
     }
     return profile;
   })();
@@ -4101,8 +4259,8 @@ function SwimmingTab({ isMobile, onExit }) {
                 return out;
               });
               if (!trendDataView.some((d) => selectedCfgs.some((cfg) => d[cfg.key] != null))) return <div style={{ padding: "26px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5 }}>No comparable data for these metrics and filters.</div>;
-              const trendCompareInterpretation = buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView);
-              const sessionCompareInterpretation = selectedComparePoint ? buildMultiMetricSessionInterpretation(selectedCfgs, trendDataView, selectedComparePoint) : null;
+              const trendCompareInterpretation = buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView, strokeFilter === "all");
+              const sessionCompareInterpretation = selectedComparePoint ? buildMultiMetricSessionInterpretation(selectedCfgs, trendDataView, selectedComparePoint, strokeFilter === "all") : null;
               const compareInterpretation = selectedComparePoint ? sessionCompareInterpretation : trendCompareInterpretation;
               const interpTheme = compareInterpretation ? (
                 compareInterpretation.category === "positive"
@@ -4121,7 +4279,9 @@ function SwimmingTab({ isMobile, onExit }) {
                   </div>
                   {selectedComparePoint && (
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, margin: "8px 0 4px" }}>
-                      <div style={{ color: "#F5F5F7", fontSize: 11.5, fontWeight: 800 }}>Selected session · {fmtDate(selectedComparePoint)}</div>
+                      <div style={{ color: "#F5F5F7", fontSize: 11.5, fontWeight: 800 }}>
+                        Selected session · {fmtDate((trendDataView.find((d) => d.analysisKey === selectedComparePoint) || {}).date)}
+                      </div>
                       <button onClick={() => setSelectedComparePoint(null)} style={{ cursor: "pointer", border: "1px solid #3A3A3C", background: "transparent", color: "#8E8E93", borderRadius: 9, padding: "3px 7px", fontSize: 9.5 }}>View overall trend</button>
                     </div>
                   )}
@@ -4166,9 +4326,9 @@ function SwimmingTab({ isMobile, onExit }) {
                       margin={{ top: 12, right: 12, left: -8, bottom: 4 }}
                       onClick={(e) => {
                         if (!e || !e.activePayload || !e.activePayload.length) return;
-                        const clickedDate = e.activePayload[0].payload.date;
-                        if (!clickedDate) return;
-                        setSelectedComparePoint((prev) => prev === clickedDate ? null : clickedDate);
+                        const clickedKey = e.activePayload[0].payload.analysisKey;
+                        if (!clickedKey) return;
+                        setSelectedComparePoint((prev) => prev === clickedKey ? null : clickedKey);
                       }}
                     >
                       <CartesianGrid stroke="#2C2C2E" strokeDasharray="3 5" vertical={false} />
@@ -4345,11 +4505,15 @@ function SwimmingTab({ isMobile, onExit }) {
                       <div style={{ padding: "0 12px 11px", display: "grid", gap: 8 }}>
                         {radarVisibleProfile.map((axis) => {
                           const descriptions = {
-                            pace: "Speed — latest comparable pace vs your previous 6-week baseline. Above 100 = faster than usual.",
+                            pace: strokeFilter === "all"
+                              ? "Speed — compares each stroke with its own previous 6-week pace baseline, then combines them. Above 100 = faster than usual without being distorted by stroke mix."
+                              : "Speed — this stroke's average pace vs its previous 6-week baseline. Above 100 = faster than usual.",
                             efficiency: "Stroke Efficiency — combines same-pool SWOLF and distance per stroke against each stroke's own baseline. Above 100 = a more favorable combined stroke-economy signal.",
-                            consistency: "Consistency — how evenly you held pace within each selected stroke vs same-pool sessions from your previous 6 weeks. Above 100 = steadier than usual; below 100 = more variable.",
+                            consistency: "Consistency — how evenly you held pace within each stroke vs same-pool sessions from your previous 6 weeks. In All strokes, each stroke is normalized separately before being combined. Above 100 = steadier than usual; below 100 = more variable.",
                             endurance: "Endurance — distance completed in the current stroke/effort/category context vs your previous 6-week average for the same context. Above 100 = more distance than usual; below 100 = less. More is not automatically better.",
-                            aerobic: "Aerobic Efficiency — swimming speed relative to heart-rate cost vs your previous 6-week baseline. Above 100 = more speed for the cardiovascular cost. Shown only with sufficient real HR coverage.",
+                            aerobic: strokeFilter === "all"
+                              ? "Aerobic Efficiency — compares speed/HR within each stroke against its own baseline, then combines them. Above 100 = more speed for the cardiovascular cost."
+                              : "Aerobic Efficiency — this stroke's speed relative to heart-rate cost vs its previous 6-week baseline. Above 100 = more speed for the cardiovascular cost. Shown only with sufficient real HR coverage.",
                           };
                           return (
                             <div key={axis.key} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "start" }}>
@@ -4640,9 +4804,32 @@ function TrainingLog() {
     if (!repA || !repB) return;
     const [shortRep, longRep] = repA.distance <= repB.distance ? [repA, repB] : [repB, repA];
     if (longRep.distance === shortRep.distance || longRep.timeSec <= shortRep.timeSec) return;
+
+    // Standard CSS test requires a 200 m and a 400 m effort. Allow one pool-length
+    // tolerance for reconstructed Garmin reps, but do not silently call arbitrary distances CSS.
+    const tol = session.poolLength || 25;
+    const is200 = Math.abs(shortRep.distance - 200) <= tol;
+    const is400 = Math.abs(longRep.distance - 400) <= tol;
+    if (!is200 || !is400) {
+      alert(`CSS requires a ~200m rep and a ~400m rep (within one pool length). Selected: ${Math.round(shortRep.distance)}m + ${Math.round(longRep.distance)}m.`);
+      return;
+    }
+
     const cssSpeed = (longRep.distance - shortRep.distance) / (longRep.timeSec - shortRep.timeSec);
     const pace100 = cssSpeed > 0 ? 100 / cssSpeed : null;
-    await persistSwim((swimSessions || []).map((s) => s.id === sessionId ? { ...s, isCssTest: true, cssTest: { t200: shortRep.timeSec, t400: longRep.timeSec, cssSpeed, pace100 } } : s));
+    await persistSwim((swimSessions || []).map((s) => s.id === sessionId ? {
+      ...s,
+      isCssTest: true,
+      cssTest: {
+        t200: shortRep.timeSec,
+        t400: longRep.timeSec,
+        d200: shortRep.distance,
+        d400: longRep.distance,
+        cssSpeed,
+        pace100,
+        method: "two-distance-200-400"
+      }
+    } : s));
     setSwimCssRepPick((prev) => { const cp = { ...prev }; delete cp[sessionId]; return cp; });
   };
   const clearSwimCssPick = (sessionId) => setSwimCssRepPick((prev) => ({ ...prev, [sessionId]: {} }));
@@ -4673,7 +4860,9 @@ function TrainingLog() {
 
   const finalizeSwimUpload = async (parsedSessions, markCss) => {
     if (!markCss) {
-      const next = [...(swimSessions || []), ...parsedSessions].sort((a, b) => (a.date < b.date ? 1 : -1));
+      const next = [...(swimSessions || []), ...parsedSessions].sort((a, b) =>
+        `${b?.date || ""}|${b?.startTime || ""}|${b?.id || ""}`.localeCompare(`${a?.date || ""}|${a?.startTime || ""}|${a?.id || ""}`)
+      );
       await persistSwim(next);
       return true;
     }
@@ -4759,7 +4948,9 @@ function TrainingLog() {
       }
       return session; // left blank/invalid — saved as a normal (non-CSS-test) session
     });
-    const next = [...(swimSessions || []), ...finished].sort((a, b) => (a.date < b.date ? 1 : -1));
+    const next = [...(swimSessions || []), ...finished].sort((a, b) =>
+      `${b?.date || ""}|${b?.startTime || ""}|${b?.id || ""}`.localeCompare(`${a?.date || ""}|${a?.startTime || ""}|${a?.id || ""}`)
+    );
     await persistSwim(next);
     setPendingCssUpload(null);
     setSwimUploadMsg(`Saved ${finished.length} swim session${finished.length > 1 ? "s" : ""}.`);
@@ -7180,7 +7371,7 @@ function TrainingLog() {
                             <button onClick={() => correctSwimDistance(s.id)} style={{ cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 6, padding: "5px 10px", fontWeight: 700, fontSize: 11 }}>Save</button>
                             <button onClick={() => setSwimEditingDistanceFor(null)} style={{ cursor: "pointer", background: "transparent", color: "#8E8E93", border: "1px solid #2C2C2E", borderRadius: 6, padding: "5px 10px", fontWeight: 600, fontSize: 11 }}>Cancel</button>
                             {s.distanceCorrection && <button onClick={() => { resetSwimDistanceCorrection(s.id); setSwimEditingDistanceFor(null); }} style={{ cursor: "pointer", background: "transparent", color: "#FF453A", border: "1px solid #FF453A55", borderRadius: 6, padding: "5px 10px", fontWeight: 600, fontSize: 11 }}>Reset to FIT value</button>}
-                            <div style={{ fontSize: 10, color: "#48484A", width: "100%" }}>Pace, PRs, and all charts recalculate from the corrected distance — swim time stays as recorded.</div>
+                            <div style={{ fontSize: 10, color: "#48484A", width: "100%" }}>Whole-session distance and pace use the correction. Stroke/effort-specific analytics are withheld because a total-distance correction cannot identify which lengths or strokes were missing.</div>
                           </div>
                         )}
 
