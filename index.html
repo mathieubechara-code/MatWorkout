@@ -788,6 +788,7 @@ function deriveSwimSessionForEffort(session, effort, assignments) {
     swimTimeSec: metrics.swimTimeSec,
     restTimeSec: metrics.restTimeSec,
     pace100Overall: metrics.pace100Overall,
+    paceTimeCoverage: metrics.paceTimeCoverage,
     strokeStats: metrics.strokeStats,
     reps: metrics.reps,
     totalActiveLengths: metrics.totalActiveLengths,
@@ -875,6 +876,8 @@ const normalizeSwimLengthPacesForPool = (lengths, poolLength) => {
 const refreshSwimIntrinsicQualityFlags = (lengths) => {
   if (!Array.isArray(lengths)) return [];
   const autoPrefixes = [
+    "missing time data (",
+    "missing stroke data (",
     "phantom length (",
     "implausible cadence (",
     "cadence fields disagree ("
@@ -891,7 +894,18 @@ const refreshSwimIntrinsicQualityFlags = (lengths) => {
     const canonicalCadence = canonicalSwimCadence(eff);
     const fitCadence = eff.fitAvgCadence != null && Number.isFinite(eff.fitAvgCadence) ? eff.fitAvgCadence : null;
 
-    if ((eff.totalStrokes || 0) === 0 && (canonicalCadence || 0) === 0 && eff.elapsedSec < 5) {
+    if (
+      eff.elapsedSec == null ||
+      !Number.isFinite(eff.elapsedSec) ||
+      eff.elapsedSec <= 0
+    ) {
+      intrinsic = `missing time data (active length has no valid elapsed time)`;
+    } else if (
+      TECHNIQUE_SWIM_STROKES.has(eff.stroke) &&
+      (!(eff.totalStrokes > 0) || !Number.isFinite(eff.totalStrokes))
+    ) {
+      intrinsic = `missing stroke data (active ${SWIM_STROKE_LABELS[eff.stroke] || eff.stroke} length has no valid Garmin stroke count)`;
+    } else if ((eff.totalStrokes || 0) === 0 && (canonicalCadence || 0) === 0 && eff.elapsedSec < 5) {
       intrinsic = `phantom length (0 strokes, 0 cadence, ${eff.elapsedSec.toFixed(1)}s — too short to be a real length)`;
     } else {
       const maxC = SWIM_MAX_PLAUSIBLE_CADENCE[eff.stroke] || 130;
@@ -990,23 +1004,27 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
 function computeSwimSessionMetrics(lengths, poolLength) {
   const eff = lengths.map(effectiveLength);
   const validActive = eff.filter((l) => l.lengthType === "active" && !l.userExcluded);
+  const timedActive = validActive.filter((l) => l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0);
   const idleLengths = eff.filter((l) => l.lengthType === "idle" && !l.userExcluded);
 
   const distance = poolLength != null ? Math.round(validActive.length * poolLength * 100) / 100 : null;
-  const swimTimeSec = validActive.reduce((a, l) => a + (l.elapsedSec || 0), 0);
-  const restTimeSec = idleLengths.reduce((a, l) => a + (l.elapsedSec || 0), 0);
-  const pace100Overall = swimTimeSec > 0 && distance ? (swimTimeSec / distance) * 100 : null;
+  const swimTimeSec = timedActive.reduce((a, l) => a + l.elapsedSec, 0);
+  const restTimeSec = idleLengths.reduce((a, l) => a + (Number.isFinite(l.elapsedSec) && l.elapsedSec > 0 ? l.elapsedSec : 0), 0);
+  const paceTimeCoverage = validActive.length > 0 ? timedActive.length / validActive.length : 0;
+  // Never manufacture pace by pairing full distance with partial timing.
+  const pace100Overall = paceTimeCoverage === 1 && swimTimeSec > 0 && distance ? (swimTimeSec / distance) * 100 : null;
 
   const strokeGroups = {};
   validActive.forEach((l) => {
     if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = {
-      swolfs: [], timeSec: 0, lengthCount: 0,
+      swolfs: [], timeSec: 0, lengthCount: 0, timedLengthCount: 0,
       countedStrokeTotal: 0, countedStrokeTimeSec: 0, countedStrokeLengths: 0
     };
     const g = strokeGroups[l.stroke];
-    const elapsed = l.elapsedSec != null && Number.isFinite(l.elapsedSec) ? l.elapsedSec : 0;
+    const elapsed = l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0 ? l.elapsedSec : 0;
     g.timeSec += elapsed;
     g.lengthCount += 1;
+    if (elapsed > 0) g.timedLengthCount += 1;
 
     if (TECHNIQUE_SWIM_STROKES.has(l.stroke)) {
       if (l.elapsedSec != null && l.totalStrokes != null && Number.isFinite(l.totalStrokes) && l.totalStrokes > 0) {
@@ -1041,7 +1059,10 @@ function computeSwimSessionMetrics(lengths, poolLength) {
       avgDistPerStroke: g.countedStrokeTotal > 0 && countedDistance
         ? countedDistance / g.countedStrokeTotal
         : null,
-      pace100: g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null,
+      paceTimeCoverage: g.lengthCount > 0 ? g.timedLengthCount / g.lengthCount : 0,
+      pace100: g.timedLengthCount === g.lengthCount && g.timeSec > 0 && strokeDistance
+        ? (g.timeSec / strokeDistance) * 100
+        : null,
     };
   });
 
@@ -1052,9 +1073,12 @@ function computeSwimSessionMetrics(lengths, poolLength) {
   eff.forEach((l) => {
     if (l.userExcluded) return;
     if (l.lengthType === "active") {
-      if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timeSec: 0, strokeSet: new Set() };
+      if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timedLengthCount: 0, timeSec: 0, strokeSet: new Set() };
       currentRep.lengthCount += 1;
-      currentRep.timeSec += l.elapsedSec || 0;
+      if (l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0) {
+        currentRep.timeSec += l.elapsedSec;
+        currentRep.timedLengthCount += 1;
+      }
       currentRep.strokeSet.add(l.stroke);
     } else if (l.lengthType === "idle") {
       if (currentRep) { reps.push(currentRep); currentRep = null; }
@@ -1063,7 +1087,9 @@ function computeSwimSessionMetrics(lengths, poolLength) {
   if (currentRep) reps.push(currentRep);
   const repSummaries = poolLength ? reps.map((r) => {
     const repDistance = r.lengthCount * poolLength;
-    const pace100 = r.timeSec > 0 && repDistance > 0 ? (r.timeSec / repDistance) * 100 : null;
+    const pace100 = r.timedLengthCount === r.lengthCount && r.timeSec > 0 && repDistance > 0
+      ? (r.timeSec / repDistance) * 100
+      : null;
     return { lengthCount: r.lengthCount, distance: repDistance, timeSec: r.timeSec, pace100, stroke: r.strokeSet.size === 1 ? Array.from(r.strokeSet)[0] : "mixed" };
   }) : [];
 
@@ -1077,7 +1103,7 @@ function computeSwimSessionMetrics(lengths, poolLength) {
   if (excludedCount > 0) parts.push(`${excludedCount} length${excludedCount === 1 ? "" : "s"} excluded by you`);
   const qualityNote = parts.length ? parts.join("; ") + "." : null;
 
-  return { distance, swimTimeSec, restTimeSec, pace100Overall, strokeStats, reps: repSummaries, totalActiveLengths, validActiveLengths: validActive.length, excludedCount, qualityNote };
+  return { distance, swimTimeSec, restTimeSec, pace100Overall, paceTimeCoverage, strokeStats, reps: repSummaries, totalActiveLengths, validActiveLengths: validActive.length, excludedCount, qualityNote };
 }
 
 // Turns raw parsed FIT messages into a fully-computed swim session object, applying the
@@ -1328,6 +1354,7 @@ function backfillSwimSessions(list) {
         lengths: flaggedLengths,
         distance: preservedDistance,
         pace100Overall: preservedPace,
+        paceTimeCoverage: metrics.paceTimeCoverage,
         swimTimeSec: metrics.swimTimeSec,
         restTimeSec: metrics.restTimeSec,
         strokeStats: metrics.strokeStats,
@@ -2564,6 +2591,7 @@ function SwimmingTab({ isMobile, onExit }) {
         swimTimeSec: metrics.swimTimeSec,
         restTimeSec: metrics.restTimeSec,
         pace100Overall: metrics.pace100Overall,
+        paceTimeCoverage: metrics.paceTimeCoverage,
         strokeStats: metrics.strokeStats,
         reps: metrics.reps,
         totalActiveLengths: metrics.totalActiveLengths,
@@ -5113,6 +5141,7 @@ function TrainingLog() {
         swimTimeSec: metrics.swimTimeSec,
         restTimeSec: metrics.restTimeSec,
         pace100Overall: metrics.pace100Overall,
+        paceTimeCoverage: metrics.paceTimeCoverage,
         strokeStats: metrics.strokeStats,
         reps: metrics.reps,
         totalActiveLengths: metrics.totalActiveLengths,
