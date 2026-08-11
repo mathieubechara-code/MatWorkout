@@ -1538,6 +1538,93 @@ function generateFrequencyInsight(chronSessions, todayStr) {
   };
 }
 
+// Multi-metric Compare interpretation. This summarizes directional patterns only; it never
+// claims causation. The comparison is recent median vs earlier median across paired/available
+// sessions within the current filtered context.
+const compareMetricMeta = {
+  pace:    { label: "Pace", color: "#F5F5F7", thresholdKind: "pct", threshold: INSIGHT_THRESHOLDS.paceMeaningfulPct, favorable: "down" },
+  dps:     { label: "Distance / Stroke", color: "#30D158", thresholdKind: "pct", threshold: INSIGHT_THRESHOLDS.dpsMeaningfulPct, favorable: null },
+  cadence: { label: "Stroke Rate", color: "#64D2FF", thresholdKind: "pct", threshold: INSIGHT_THRESHOLDS.cadenceMeaningfulPct, favorable: null },
+  swolf:   { label: "SWOLF", color: "#BF5AF2", thresholdKind: "pct", threshold: INSIGHT_THRESHOLDS.swolfMeaningfulPct, favorable: "down" },
+  hr:      { label: "Avg HR", color: "#FF453A", thresholdKind: "absolute", threshold: INSIGHT_THRESHOLDS.hrMeaningfulBpm, favorable: null },
+};
+function summarizeCompareMetricChange(metricId, recentVals, baselineVals) {
+  const meta = compareMetricMeta[metricId];
+  const recent = medianOf((recentVals || []).filter((v) => v != null && Number.isFinite(v)));
+  const baseline = medianOf((baselineVals || []).filter((v) => v != null && Number.isFinite(v)));
+  if (!meta || recent == null || baseline == null) return null;
+  let delta, magnitude, direction;
+  if (meta.thresholdKind === "absolute") {
+    delta = recent - baseline;
+    magnitude = Math.round(Math.abs(delta) * 10) / 10;
+    direction = Math.abs(delta) <= meta.threshold ? "steady" : delta > 0 ? "up" : "down";
+  } else {
+    delta = baseline !== 0 ? (recent - baseline) / baseline : null;
+    if (delta == null) return null;
+    magnitude = Math.round(Math.abs(delta) * 1000) / 10;
+    direction = Math.abs(delta) <= meta.threshold ? "steady" : delta > 0 ? "up" : "down";
+  }
+  const unit = meta.thresholdKind === "absolute" ? " bpm" : "%";
+  let phrase;
+  if (direction === "steady") phrase = `${meta.label} stayed near its recent baseline`;
+  else if (metricId === "pace") phrase = direction === "down" ? `Pace became ${magnitude}% faster` : `Pace became ${magnitude}% slower`;
+  else if (metricId === "swolf") phrase = direction === "down" ? `SWOLF decreased ${magnitude}%` : `SWOLF increased ${magnitude}%`;
+  else if (metricId === "dps") phrase = direction === "up" ? `Distance / Stroke increased ${magnitude}%` : `Distance / Stroke decreased ${magnitude}%`;
+  else if (metricId === "cadence") phrase = direction === "up" ? `Stroke Rate increased ${magnitude}%` : `Stroke Rate decreased ${magnitude}%`;
+  else phrase = direction === "up" ? `Avg HR increased ${magnitude}${unit}` : `Avg HR decreased ${magnitude}${unit}`;
+  return { metricId, meta, recent, baseline, direction, magnitude, phrase };
+}
+function buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView) {
+  if (!selectedCfgs || !selectedCfgs.length || !trendDataView || trendDataView.length < 4) return null;
+  const usableDates = trendDataView.filter((d) => selectedCfgs.some((cfg) => d[cfg.key] != null));
+  if (usableDates.length < 4) return null;
+  const splitAt = Math.max(2, Math.floor(usableDates.length / 2));
+  const baselineRows = usableDates.slice(0, splitAt);
+  const recentRows = usableDates.slice(splitAt);
+  if (recentRows.length < 2) return null;
+  const changes = selectedCfgs.map((cfg) => summarizeCompareMetricChange(
+    cfg.id,
+    recentRows.map((d) => d[cfg.key]),
+    baselineRows.map((d) => d[cfg.key])
+  )).filter(Boolean);
+  if (!changes.length) return null;
+
+  const byId = Object.fromEntries(changes.map((c) => [c.metricId, c]));
+  const pace = byId.pace, dps = byId.dps, cadence = byId.cadence, swolf = byId.swolf, hr = byId.hr;
+
+  let category = "neutral", headline = "Mixed performance signals.";
+  const notes = changes.map((c) => c.phrase);
+
+  if (pace && pace.direction === "down") {
+    category = "positive";
+    if (dps && dps.direction === "up" && (!hr || hr.direction !== "up")) headline = "Faster with stronger stroke effectiveness.";
+    else if (cadence && cadence.direction === "up" && (!dps || dps.direction !== "up")) headline = "Faster mainly through higher turnover.";
+    else if (hr && hr.direction === "steady") headline = "Faster at a similar cardiovascular cost.";
+    else if (hr && hr.direction === "down") headline = "Faster with a lower cardiovascular response.";
+    else headline = "Recent swimming is faster.";
+  } else if (pace && pace.direction === "up") {
+    category = "warning";
+    if (hr && hr.direction === "up") headline = "Slower despite a higher cardiovascular response.";
+    else if (dps && dps.direction === "up") headline = "Longer strokes, but not faster.";
+    else headline = "Recent swimming is slower.";
+  } else if (pace && pace.direction === "steady") {
+    if (dps && dps.direction === "up" && cadence && cadence.direction === "down") {
+      category = "positive"; headline = "Same pace with a longer, lower-turnover stroke.";
+    } else if (hr && hr.direction === "down") {
+      category = "positive"; headline = "Similar pace at a lower cardiovascular response.";
+    } else {
+      headline = "Pace is stable while supporting metrics are shifting.";
+    }
+  } else if (swolf && swolf.direction === "down" && dps && dps.direction === "up") {
+    category = "positive"; headline = "Technique indicators are moving favorably.";
+  }
+
+  const caution = selectedCfgs.length > 2
+    ? "This summarizes the selected metrics together; it describes association, not cause."
+    : "This describes how the selected metrics moved together; it does not prove cause.";
+  return { category, headline, notes, caution, baselineCount: baselineRows.length, recentCount: recentRows.length };
+}
+
 // ---- 9. Flexible Compare metric interpretation ------------------------------------------------
 // Compare no longer hard-codes metric pairs. Any two metrics can be selected; each metric carries
 // its own threshold and direction semantics. Interpretation describes the two observed changes
@@ -3355,7 +3442,6 @@ function SwimmingTab({ isMobile, onExit }) {
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
                 {[["pace","Pace","#F5F5F7"],["dps","Distance / Stroke","#30D158"],["cadence","Stroke Rate","#64D2FF"],["swolf","SWOLF","#BF5AF2"],["hr","Avg HR","#FF453A"]].map(([v,l,c]) => {
                   const selected = compareMetrics.includes(v);
-                  const order = compareMetrics.indexOf(v);
                   return (
                     <button key={v} onClick={() => {
                       setSelectedComparePoint(null);
@@ -3372,16 +3458,54 @@ function SwimmingTab({ isMobile, onExit }) {
                   );
                 })}
               </div>
-              <button onClick={() => setCompareHelpOpen((v) => !v)} style={{ marginTop: 8, padding: 0, border: 0, background: "transparent", cursor: "pointer", color: "#8E8E93", fontSize: 10.5, fontWeight: 700, textDecoration: "underline" }}>What do these metrics mean?</button>
-              {compareHelpOpen && <div style={{ marginTop: 8, padding: "10px 11px", border: "1px solid #2C2C2E", borderRadius: 12, background: "#141416", fontSize: 10.5, lineHeight: 1.45 }}>
-                <div style={{ color: "#8E8E93", marginBottom: 7 }}>σ = distance from <b style={{color:"#F5F5F7"}}>your own typical level</b>. Farther from 0σ means more unusual for you — not automatically better.</div>
+              <button onClick={() => setCompareHelpOpen((v) => !v)} style={{
+                marginTop: 8, padding: "5px 9px", border: "1px solid #64D2FF66",
+                background: compareHelpOpen ? "#64D2FF" : "#64D2FF18",
+                cursor: "pointer", color: compareHelpOpen ? "#000000" : "#64D2FF",
+                borderRadius: 9, fontSize: 10.5, fontWeight: 800,
+                display: "inline-flex", alignItems: "center", gap: 5
+              }}>
+                <Info size={11} /> What do these metrics mean?
+              </button>
+              {compareHelpOpen && <div style={{ marginTop: 8, padding: "11px 12px", border: "1px solid #2C2C2E", borderRadius: 12, background: "#141416", fontSize: 10.5, lineHeight: 1.5 }}>
+                <div style={{ color: "#AEAEB2", marginBottom: 9 }}>
+                  <b style={{color:"#F5F5F7"}}>How σ works:</b> 0σ is your own typical level for the current stroke/category/effort context. +1σ means the value is about one standard deviation above your normal level; −1σ means about one standard deviation below. <b style={{color:"#FF9F0A"}}>Higher on the chart does not always mean better.</b>
+                </div>
                 {[
-                  ["Pace","#F5F5F7","Lower time is faster. Flipped here: above 0σ = faster; below = slower."],
-                  ["Distance / Stroke","#30D158","Metres per Garmin-counted stroke. Above 0σ = more distance per stroke. Higher alone does not prove better technique."],
-                  ["Stroke Rate","#64D2FF","Garmin-counted strokes per minute (spm). Above 0σ = higher turnover. Neither direction is automatically better."],
-                  ["SWOLF","#BF5AF2","Length time + stroke count. Compare like-for-like pool conditions. Flipped here: above 0σ = lower SWOLF."],
-                  ["Avg HR","#FF453A","Average session heart rate. Above 0σ = higher HR. Neither direction is automatically better; interpret with pace/workload."]
-                ].map(([name,color,desc]) => <div key={name} style={{marginTop:6}}><b style={{color}}>{name}</b><span style={{color:"#AEAEB2"}}> — {desc}</span></div>)}
+                  ["pace","Pace","#F5F5F7",
+                    "What it measures: time needed to swim 100 m.",
+                    "+σ on this chart: faster than your typical pace.",
+                    "−σ on this chart: slower than your typical pace.",
+                    "Direction: higher on the chart is favorable because pace is intentionally flipped."],
+                  ["dps","Distance / Stroke","#30D158",
+                    "What it measures: metres covered per Garmin-counted stroke.",
+                    "+σ: more distance covered per stroke than typical.",
+                    "−σ: less distance covered per stroke than typical.",
+                    "Direction: neither is automatically good. More DPS is useful only when read with pace, stroke rate and effort; it can also come from more glide."],
+                  ["cadence","Stroke Rate","#64D2FF",
+                    "What it measures: Garmin-counted strokes per minute (spm).",
+                    "+σ: higher turnover than typical.",
+                    "−σ: lower turnover than typical.",
+                    "Direction: neither is automatically good. Higher turnover may create speed; lower turnover may reflect a longer stroke."],
+                  ["swolf","SWOLF","#BF5AF2",
+                    "What it measures: pool-length time plus stroke count.",
+                    "+σ on this chart: lower SWOLF than typical.",
+                    "−σ on this chart: higher SWOLF than typical.",
+                    "Direction: higher on this chart is generally favorable for like-for-like pool length/context because SWOLF is intentionally flipped."],
+                  ["hr","Avg HR","#FF453A",
+                    "What it measures: average heart rate for the session.",
+                    "+σ: higher cardiovascular response than typical.",
+                    "−σ: lower cardiovascular response than typical.",
+                    "Direction: neither is automatically good. HR becomes useful when paired with pace/workload — e.g. faster pace at similar or lower HR is stronger efficiency evidence."]
+                ].filter(([id]) => compareMetrics.includes(id)).map(([id,name,color,a,b,c,d]) => (
+                  <div key={id} style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #27272A" }}>
+                    <div style={{ color, fontWeight: 800, marginBottom: 3 }}>{name}</div>
+                    <div style={{ color: "#AEAEB2" }}>{a}</div>
+                    <div style={{ color: "#AEAEB2" }}>{b}</div>
+                    <div style={{ color: "#AEAEB2" }}>{c}</div>
+                    <div style={{ color: "#8E8E93", marginTop: 2 }}>{d}</div>
+                  </div>
+                ))}
               </div>}
             </div>
             {showCompareInfo && (
@@ -3415,6 +3539,14 @@ function SwimmingTab({ isMobile, onExit }) {
                 return out;
               });
               if (!trendDataView.some((d) => selectedCfgs.some((cfg) => d[cfg.key] != null))) return <div style={{ padding: "26px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5 }}>No comparable data for these metrics and filters.</div>;
+              const compareInterpretation = buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView);
+              const interpTheme = compareInterpretation ? (
+                compareInterpretation.category === "positive"
+                  ? { color: "#30D158", bg: "#30D15812", border: "#30D15855" }
+                  : compareInterpretation.category === "warning"
+                    ? { color: "#FF9F0A", bg: "#FF9F0A12", border: "#FF9F0A55" }
+                    : { color: "#64D2FF", bg: "#64D2FF10", border: "#64D2FF44" }
+              ) : null;
               return (
                 <div>
                   <div style={{ fontSize: 10.5, color: "#636366", marginBottom: 10, display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -3423,6 +3555,36 @@ function SwimmingTab({ isMobile, onExit }) {
                     {selectedCfgs.some((cfg) => cfg.wholeSession) && strokeFilter !== "all" && <span>· HR is whole-session</span>}
                     {selectedCfgs.some((cfg) => cfg.id === "dps" || cfg.id === "swolf") && <span>· DPS/SWOLF use same-pool comparisons</span>}
                   </div>
+                  {compareInterpretation ? (
+                    <div style={{
+                      margin: "10px 0 12px", padding: "11px 12px",
+                      border: `1px solid ${interpTheme.border}`, borderRadius: 13,
+                      background: interpTheme.bg
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                        <TrendingUp size={13} style={{ color: interpTheme.color }} />
+                        <div style={{ color: interpTheme.color, fontSize: 12.5, fontWeight: 800 }}>{compareInterpretation.headline}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
+                        {compareInterpretation.notes.map((note, i) => {
+                          const cfg = selectedCfgs[i];
+                          return <span key={note} style={{
+                            color: cfg ? cfg.color : "#AEAEB2", fontSize: 10,
+                            border: `1px solid ${cfg ? cfg.color + "44" : "#3A3A3C"}`,
+                            borderRadius: 7, padding: "3px 6px", background: cfg ? cfg.color + "0D" : "transparent"
+                          }}>{note}</span>;
+                        })}
+                      </div>
+                      <div style={{ color: "#8E8E93", fontSize: 9.5, lineHeight: 1.4 }}>
+                        Comparing the recent {compareInterpretation.recentCount} comparable sessions with the earlier {compareInterpretation.baselineCount}. {compareInterpretation.caution}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ margin: "10px 0 12px", padding: "10px 11px", border: "1px solid #2C2C2E", borderRadius: 12, color: "#636366", fontSize: 10.5 }}>
+                      Keep logging comparable sessions — the interpretation will appear once there is enough history to compare recent and earlier patterns.
+                    </div>
+                  )}
+
                   <ResponsiveContainer width="100%" height={310}>
                     <LineChart data={normalizedData} margin={{ top: 12, right: 12, left: -8, bottom: 4 }}>
                       <CartesianGrid stroke="#2C2C2E" strokeDasharray="3 5" vertical={false} />
