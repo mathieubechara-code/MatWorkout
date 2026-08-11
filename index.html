@@ -3453,6 +3453,7 @@ function TrainingLog() {
   const [targetDraft, setTargetDraft] = useState({ startDate: "", weeks: "12" });
   const [selectedHeatDate, setSelectedHeatDate] = useState(null);
   const [chartFocus, setChartFocus] = useState(null);
+  const [hiddenStatsExercises, setHiddenStatsExercises] = useState(() => new Set());
   const [showLibrary, setShowLibrary] = useState(false);
   // Which exercises show up in the PR card. null = show all (default); array = only these.
   const [prSelection, setPrSelection] = useState(null);
@@ -3471,6 +3472,7 @@ function TrainingLog() {
   const [weightLog, setWeightLog] = useState([]);
   const [weightLogDate, setWeightLogDate] = useState(() => toISODate(new Date()));
   const [weightLogKg, setWeightLogKg] = useState("");
+  const [showWeightLogEntry, setShowWeightLogEntry] = useState(false);
   const fileInputRef = useRef(null);
 
   // ---- History & Log: Workout / Swim toggle -------------------------------------------
@@ -3961,6 +3963,7 @@ function TrainingLog() {
     const next = [...(weightLog || []).filter((e) => e.date !== weightLogDate), entry];
     await persistWeightLog(next);
     setWeightLogKg("");
+    setShowWeightLogEntry(false);
   };
   const deleteStandaloneWeight = async (id) => {
     await persistWeightLog((weightLog || []).filter((e) => e.id !== id));
@@ -4866,7 +4869,20 @@ function TrainingLog() {
   const setColor = (i) => ["#FF9F0A", "#FF453A", "#64D2FF", "#30D158"][i % 4];
   const yLabel = metric === "reps" ? "reps" : metric === "1rm" ? "1RM" : "kg";
 
-  const changeFilter = (f) => { setFilter(f); setChartFocus(null); };
+  const changeFilter = (f) => {
+    setFilter(f);
+    setChartFocus(null);
+    setHiddenStatsExercises(new Set());
+  };
+  const toggleStatsExercise = (name) => {
+    setHiddenStatsExercises((cur) => {
+      const next = new Set(cur);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+    setChartFocus(null);
+  };
+  const visibleStatsExercises = chartExercises.filter((name) => !hiddenStatsExercises.has(name));
 
   const toggleCompare = (id) => {
     setSelectedCompare((sc) => {
@@ -5251,18 +5267,52 @@ function TrainingLog() {
                     <div className="mono" style={{ fontSize: 10.5, color: "#8E8E93", marginTop: 4 }}>{Math.abs(weightToGo).toFixed(1)} kg {weightToGo >= 0 ? "to gain" : "to lose"} to reach {targetWeight}kg</div>
                   )}
                 </div>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 7,
-                  background: weightExpanded ? "#FF9F0A18" : "#1C1C1E", border: `1px solid ${weightExpanded ? "#FF9F0A55" : "#27272A"}`, flexShrink: 0,
-                }}>
-                  <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: weightExpanded ? "#FF9F0A" : "#8E8E93" }}>{weightExpanded ? "Collapse" : "Expand"}</span>
-                  <ChevronDown size={12} style={{ color: weightExpanded ? "#FF9F0A" : "#8E8E93", transform: weightExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowWeightLogEntry((v) => !v); }}
+                    title="Add weight"
+                    aria-label="Add weight"
+                    style={{
+                      width: 31, height: 31, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", borderRadius: 10, background: showWeightLogEntry ? "#64D2FF" : "#1C1C1E",
+                      color: showWeightLogEntry ? "#000000" : "#64D2FF",
+                      border: `1px solid ${showWeightLogEntry ? "#64D2FF" : "#64D2FF55"}`,
+                      fontSize: 20, lineHeight: 1, fontWeight: 500, padding: 0
+                    }}
+                  >+</button>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 4, padding: "5px 9px", borderRadius: 8,
+                    background: weightExpanded ? "#FF9F0A18" : "#1C1C1E", border: `1px solid ${weightExpanded ? "#FF9F0A55" : "#27272A"}`,
+                  }}>
+                    <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: weightExpanded ? "#FF9F0A" : "#8E8E93" }}>{weightExpanded ? "Close" : "Trend"}</span>
+                    <ChevronDown size={11} style={{ color: weightExpanded ? "#FF9F0A" : "#8E8E93", transform: weightExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                  </div>
                 </div>
               </div>
 
               {weightProgressPct != null && (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ background: "#27272A", borderRadius: 4, height: 7, overflow: "hidden" }}><div style={{ width: weightProgressPct + "%", height: "100%", background: "#FF9F0A" }} /></div>
+                </div>
+              )}
+
+              {showWeightLogEntry && (
+                <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 11, paddingTop: 10, borderTop: "1px solid #27272A" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr auto" : "150px 130px auto", gap: 7, alignItems: "center" }}>
+                    <input type="date" value={weightLogDate} onChange={(e) => setWeightLogDate(e.target.value)} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 9, padding: "7px 8px", color: "#F2F2F7", fontSize: 10.5 }} />
+                    <input type="number" step="0.1" min="1" value={weightLogKg} onChange={(e) => setWeightLogKg(e.target.value)} placeholder="kg" className="mono" style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 9, padding: "7px 8px", color: "#F2F2F7", fontSize: 10.5 }} />
+                    <button onClick={saveStandaloneWeight} disabled={!weightLogDate || !Number.isFinite(parseFloat(weightLogKg)) || parseFloat(weightLogKg) <= 0} style={{ cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 9, padding: "8px 10px", fontSize: 10.5, fontWeight: 800 }}>Save</button>
+                  </div>
+                  {(weightLog || []).length > 0 && (
+                    <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {[...(weightLog || [])].sort((a,b) => b.date.localeCompare(a.date)).slice(0,3).map((e) => (
+                        <span key={e.id} className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, color: "#8E8E93", border: "1px solid #27272A", borderRadius: 8, padding: "4px 6px" }}>
+                          {fmtDate(e.date)} · {fmtNum(e.kg,1)}kg
+                          <Trash2 size={9} color="#FF453A" style={{ cursor: "pointer" }} onClick={() => deleteStandaloneWeight(e.id)} />
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -5563,34 +5613,6 @@ function TrainingLog() {
               </div>
             </div>
 
-            <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, padding: 16, marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontSize: 11, color: "#8E8E93", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Weight log</div>
-                  <div style={{ fontSize: 10.5, color: "#636366", marginTop: 2 }}>Log bodyweight even on rest days.</div>
-                </div>
-                <div className="mono" style={{ fontSize: 18, color: "#64D2FF", fontWeight: 800 }}>{latestBw != null ? `${fmtNum(latestBw,1)}kg` : "—"}</div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr auto" : "150px 140px auto", gap: 7, alignItems: "center", marginBottom: 10 }}>
-                <input type="date" value={weightLogDate} onChange={(e) => setWeightLogDate(e.target.value)} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 9, padding: "7px 8px", color: "#F2F2F7", fontSize: 11 }} />
-                <input type="number" step="0.1" min="1" value={weightLogKg} onChange={(e) => setWeightLogKg(e.target.value)} placeholder="Weight kg" className="mono" style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 9, padding: "7px 8px", color: "#F2F2F7", fontSize: 11 }} />
-                <button onClick={saveStandaloneWeight} disabled={!weightLogDate || !Number.isFinite(parseFloat(weightLogKg)) || parseFloat(weightLogKg) <= 0} style={{ cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 9, padding: "8px 10px", fontSize: 11, fontWeight: 800 }}>Save</button>
-              </div>
-              {(weightLog || []).length > 0 && (
-                <div style={{ display: "grid", gap: 5 }}>
-                  {[...(weightLog || [])].sort((a,b) => b.date.localeCompare(a.date)).slice(0,4).map((e) => (
-                    <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: "1px solid #27272A", paddingTop: 6 }}>
-                      <span className="mono" style={{ fontSize: 10.5, color: "#8E8E93" }}>{fmtDateFull(e.date)}</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span className="mono" style={{ fontSize: 11.5, color: "#D1D1D6", fontWeight: 700 }}>{fmtNum(e.kg,1)}kg</span>
-                        <Trash2 size={12} color="#FF453A" style={{ cursor: "pointer" }} onClick={() => deleteStandaloneWeight(e.id)} />
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 4 }}>Volume by muscle group — latest session ({latest ? fmtDate(latest.date) : ""})</div>
               <div style={{ fontSize: 11, color: "#636366", marginBottom: 12 }}>
@@ -5617,60 +5639,97 @@ function TrainingLog() {
 
             {workoutSection === "stats" && (
             <>
-            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-              <button className="pill" onClick={() => changeFilter("All")} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700, border: filter === "All" ? "1px solid #FFFFFF" : "1px solid #27272A", background: filter === "All" ? "#FFFFFF1a" : "#1C1C1E", color: filter === "All" ? "#FFFFFF" : "#8E8E93", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" }}>All</button>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", gap: 4, background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 999, padding: 3 }}>
-                  {["reps", "volume", "1rm"].map((m) => (<button key={m} onClick={() => setMetric(m)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: metric === m ? "#FF9F0A" : "transparent", color: metric === m ? "#000000" : "#8E8E93" }}>{m === "reps" ? "Reps" : m === "volume" ? "Volume (kg)" : "1RM (kg)"}</button>))}
+            <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 18, padding: isMobile ? 10 : 12, marginBottom: 12 }}>
+              <div className="workout-stats-controls" style={{ display: "flex", alignItems: "center", gap: 6, overflowX: "auto", paddingBottom: 2 }}>
+                <button onClick={() => changeFilter("All")} style={{
+                  flexShrink: 0, cursor: "pointer", height: 32, padding: "0 11px", borderRadius: 10,
+                  fontSize: 10.5, fontWeight: 750, border: filter === "All" ? "1px solid #F2F2F7" : "1px solid #2C2C2E",
+                  background: filter === "All" ? "#F2F2F7" : "transparent", color: filter === "All" ? "#000000" : "#8E8E93"
+                }}>All</button>
+
+                <div style={{ flexShrink: 0, display: "flex", gap: 2, background: "#000000", border: "1px solid #27272A", borderRadius: 10, padding: 2 }}>
+                  {["reps", "volume", "1rm"].map((m) => (
+                    <button key={m} onClick={() => setMetric(m)} style={{
+                      cursor: "pointer", height: 26, padding: "0 9px", borderRadius: 8, fontSize: 10.5, fontWeight: 700,
+                      border: "none", background: metric === m ? "#FF9F0A" : "transparent", color: metric === m ? "#000000" : "#8E8E93"
+                    }}>{m === "reps" ? "Reps" : m === "volume" ? "Volume" : "1RM"}</button>
+                  ))}
                 </div>
-                <div style={{ display: "flex", gap: 4, background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 999, padding: 3 }}>
-                  {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (<button key={v} onClick={() => setTimeView(v)} style={{ cursor: "pointer", padding: "6px 13px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: timeView === v ? "#FF9F0A" : "transparent", color: timeView === v ? "#000000" : "#8E8E93" }}>{l}</button>))}
+
+                <div style={{ flexShrink: 0, display: "flex", gap: 2, background: "#000000", border: "1px solid #27272A", borderRadius: 10, padding: 2 }}>
+                  {[["day", "Day"], ["week", "Week"]].map(([v,l]) => (
+                    <button key={v} onClick={() => setTimeView(v)} style={{
+                      cursor: "pointer", height: 26, padding: "0 9px", borderRadius: 8, fontSize: 10.5, fontWeight: 700,
+                      border: "none", background: timeView === v ? "#FF9F0A" : "transparent", color: timeView === v ? "#000000" : "#8E8E93"
+                    }}>{l}</button>
+                  ))}
                 </div>
-                <div style={{ display: "flex", gap: 4, background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 999, padding: 3 }}>
-                  {[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([v, l]) => (<button key={v} onClick={() => setRange(v)} style={{ cursor: "pointer", padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, border: "none", background: range === v ? "#FF9F0A" : "transparent", color: range === v ? "#000000" : "#8E8E93" }}>{l}</button>))}
+
+                <div style={{ flexShrink: 0, display: "flex", gap: 2, background: "#000000", border: "1px solid #27272A", borderRadius: 10, padding: 2, marginLeft: "auto" }}>
+                  {[["30","30d"],["90","90d"],["all","All"]].map(([v,l]) => (
+                    <button key={v} onClick={() => setRange(v)} style={{
+                      cursor: "pointer", height: 26, padding: "0 8px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+                      border: "none", background: range === v ? "#FF9F0A" : "transparent", color: range === v ? "#000000" : "#8E8E93"
+                    }}>{l}</button>
+                  ))}
                 </div>
               </div>
-            </div>
 
-            <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
-              {GROUPS.map((g) => {
-                const groupValue = "group:" + g;
-                const groupActive = filter === groupValue || activeGroup === g;
-                const gColor = GROUP_COLORS[g];
-                const groupExercises = chartExercises.filter((n) => muscleGroupMap[n] === g);
-                return (
-                  <div key={g} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5 }}>
-                    <button className="pill" onClick={() => changeFilter(groupValue)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, border: `1px solid ${gColor}`, background: groupActive ? `${gColor}2a` : "transparent", color: gColor, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif", minWidth: 46, textAlign: "center" }}>{g}</button>
-                    {groupExercises.map((name) => {
-                      const active = filter === name;
-                      const color = colorsMap[name];
-                      return (
-                        <button key={name} className="pill" onClick={() => changeFilter(name)} style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, border: active ? `1px solid ${color}` : "1px solid #27272A", background: active ? `${color}1a` : "#1C1C1E", color: active ? color : "#8E8E93", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" }}>{name}</button>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
+              <div style={{ height: 1, background: "#27272A", margin: "10px 0 9px" }} />
 
-            {filter === "All" && metric === "reps" && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 16 }}>
-                {chartExercises.map((name) => {
-                  const d = deltaFor(name);
-                  const latestTotal = latest && latest.ex[name] ? total(latest.ex[name]) : null;
+              <div style={{ display: "grid", gap: 8 }}>
+                {GROUPS.map((g) => {
+                  const groupValue = "group:" + g;
+                  const groupActive = filter === groupValue;
+                  const gColor = GROUP_COLORS[g];
+                  const groupExercises = chartExercises.filter((n) => muscleGroupMap[n] === g);
+                  if (!groupExercises.length) return null;
                   return (
-                    <div key={name} style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 16, padding: "12px 14px" }}>
-                      <div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4, fontWeight: 600 }}>{name}</div>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}><span className="disp" style={{ fontSize: 32, fontWeight: 700, color: colorsMap[name] }}>{latestTotal ?? "—"}</span><span className="mono" style={{ fontSize: 11, color: "#636366" }}>reps</span></div>
-                      {d !== null && (<div style={{ fontSize: 11, color: d >= 0 ? "#30D158" : "#FF453A", marginTop: 2, display: "flex", alignItems: "center", gap: 3 }}><TrendingUp size={11} /> {d >= 0 ? "+" : ""}{d} since {fmtDate(first.date)}</div>)}
+                    <div key={g} style={{
+                      display: "grid", gridTemplateColumns: isMobile ? "72px 1fr" : "92px 1fr",
+                      alignItems: "start", gap: 7, padding: "6px 0"
+                    }}>
+                      <button onClick={() => changeFilter(groupValue)} style={{
+                        cursor: "pointer", minHeight: 29, borderRadius: 9, padding: "5px 7px",
+                        fontSize: 10.5, fontWeight: 800, textAlign: "left",
+                        border: `1px solid ${groupActive ? gColor : gColor + "66"}`,
+                        background: groupActive ? `${gColor}24` : "transparent", color: gColor
+                      }}>{g}</button>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                        {groupExercises.map((name) => {
+                          const hidden = groupActive && hiddenStatsExercises.has(name);
+                          const singleActive = filter === name;
+                          const color = colorsMap[name];
+                          return (
+                            <button key={name}
+                              onClick={() => groupActive ? toggleStatsExercise(name) : changeFilter(name)}
+                              title={groupActive ? (hidden ? "Show in group chart" : "Hide from group chart") : `View ${name}`}
+                              style={{
+                                cursor: "pointer", minHeight: 29, padding: "5px 8px", borderRadius: 9,
+                                fontSize: 10.3, fontWeight: 650, lineHeight: 1.15,
+                                border: `1px solid ${singleActive || (groupActive && !hidden) ? color + "99" : "#2C2C2E"}`,
+                                background: singleActive ? `${color}24` : groupActive && !hidden ? `${color}12` : "transparent",
+                                color: hidden ? "#48484A" : singleActive || groupActive ? color : "#8E8E93",
+                                opacity: hidden ? 0.65 : 1
+                              }}
+                            >{name}{groupActive && <span style={{ marginLeft: 4, fontSize: 9 }}>{hidden ? "○" : "✓"}</span>}</button>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            )}
+
+              {filter.startsWith("group:") && (
+                <div style={{ marginTop: 7, fontSize: 9.5, color: "#636366" }}>
+                  Group selected · tap an exercise to show / hide it from the chart.
+                </div>
+              )}
+            </div>
 
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, padding: "18px 14px 8px", marginBottom: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 2, paddingLeft: 8 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#D1D1D6", marginBottom: 2, paddingLeft: 4 }}>
                 {(() => {
                   const agg = metric === "1rm" ? "Peak" : "Total";
                   return filter === "All"
@@ -5682,14 +5741,14 @@ function TrainingLog() {
                     : `${filter} — ${yLabel} per set across sessions`;
                 })()}
               </div>
-              {metric === "volume" && (<div style={{ fontSize: 11, color: "#636366", marginBottom: 6, paddingLeft: 8 }}>Volume = total reps × (bodyweight × exercise ratio + any added external weight) for that session. Ratios reflect how much of your bodyweight each exercise actually moves — see the exercise reference.</div>)}
-              {metric === "1rm" && (<div style={{ fontSize: 11, color: "#636366", marginBottom: 6, paddingLeft: 8 }}>Estimated 1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), taken from the single best set of the session — reflects intensity rather than total work done.</div>)}
+              {metric === "volume" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Volume = total reps × (bodyweight × exercise ratio + any added external weight) for that session. Ratios reflect how much of your bodyweight each exercise actually moves — see the exercise reference.</div>)}
+              {metric === "1rm" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Estimated 1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), taken from the single best set of the session — reflects intensity rather than total work done.</div>)}
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
                   <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
                     <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
-                    {chartExercises.map((name) => (
+                    {visibleStatsExercises.map((name) => (
                       <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={chartFocus === name ? 3 : 2.2} strokeOpacity={chartFocus && chartFocus !== name ? 0.18 : 1} dot={{ r: 3, fillOpacity: chartFocus && chartFocus !== name ? 0.18 : 1 }} connectNulls />
                     ))}
                     {metric === "volume" && (
@@ -5697,9 +5756,14 @@ function TrainingLog() {
                     )}
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
-                  <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
-                    <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v) => [`${fmtNum(v, 2)} ${yLabel}`, filter.slice(6)]} />
-                    <Line type="monotone" dataKey="value" stroke={GROUP_COLORS[filter.slice(6)]} strokeWidth={2.6} dot={{ r: 3.5 }} connectNulls />
+                  <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={10.5} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={10.5} tickFormatter={(v) => fmtNum(v, 2)} />
+                    <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 11 }} formatter={(v, name) => [`${fmtNum(v, 2)} ${yLabel}`, name]} />
+                    <Legend wrapperStyle={{ fontSize: 10.5, paddingTop: 8 }} />
+                    {chartExercises
+                      .filter((name) => muscleGroupMap[name] === filter.slice(6) && !hiddenStatsExercises.has(name))
+                      .map((name) => (
+                        <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={2.3} dot={{ r: 2.8 }} connectNulls />
+                      ))}
                   </LineChart>
                 ) : timeView === "week" ? (
                   <LineChart data={weeklySingleData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
