@@ -623,6 +623,42 @@ function effectiveLength(l) {
 // overrides are currently set) and recomputes everything downstream from scratch — called
 // both at initial FIT import (with no overrides yet) and after every length edit, so the
 // numbers on screen never go stale (Part 1F).
+const poolLengthsMatch = (a, b) => (
+  a != null && b != null && Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 0.05
+);
+const formatPoolLength = (meters) => {
+  if (meters == null || !Number.isFinite(meters) || meters <= 0) return "Pool length required";
+  if (Math.abs(meters - 25) < 0.05) return "25m";
+  if (Math.abs(meters - 50) < 0.05) return "50m";
+  if (Math.abs(meters - 22.86) < 0.05) return "25yd";
+  return `${Math.round(meters * 100) / 100}m`;
+};
+const withSwimPoolLength = (session, meters, source = "manual") => {
+  if (!session || !Number.isFinite(meters) || meters <= 0) return session;
+  const lengths = (session.lengths || []).map((l) => {
+    if (l.lengthType !== "active") return l;
+    return { ...l, pace100: l.elapsedSec > 0 ? (l.elapsedSec / meters) * 100 : null };
+  });
+  const metrics = computeSwimSessionMetrics(lengths, meters);
+  return {
+    ...session,
+    poolLength: Math.round(meters * 100) / 100,
+    poolLengthSource: source,
+    lengths,
+    distance: metrics.distance,
+    distanceCorrection: null,
+    swimTimeSec: metrics.swimTimeSec,
+    restTimeSec: metrics.restTimeSec,
+    pace100Overall: metrics.pace100Overall,
+    strokeStats: metrics.strokeStats,
+    reps: metrics.reps,
+    totalActiveLengths: metrics.totalActiveLengths,
+    validActiveLengths: metrics.validActiveLengths,
+    excludedCount: metrics.excludedCount,
+    qualityNote: metrics.qualityNote,
+  };
+};
+
 function computeSwimSessionMetrics(lengths, poolLength) {
   const eff = lengths.map(effectiveLength);
   const validActive = eff.filter((l) => l.lengthType === "active" && !l.userExcluded);
@@ -698,7 +734,8 @@ function processSwimFit(parsed, fileName) {
   if (!lengthMsgs || lengthMsgs.length === 0) throw new Error("No per-length swim data found in this file (is it a pool-swim activity?).");
   const sessionRec = sessionMsgs && sessionMsgs[0] ? sessionMsgs[0] : {};
 
-  const poolLength = sessionRec.f44 != null ? sessionRec.f44 / 100 : null; // meters
+  const detectedPoolLength = sessionRec.f44 != null ? sessionRec.f44 / 100 : null; // FIT stores meters
+  const poolLength = detectedPoolLength != null && Number.isFinite(detectedPoolLength) && detectedPoolLength > 0 ? detectedPoolLength : null;
   const sessionCalories = sessionRec.f11 != null ? sessionRec.f11 : null;
   const reportedDistanceRaw = sessionRec.f9 != null ? sessionRec.f9 / 100 : null; // informational only, cross-checked below
   const sessionStart = fitTimestampToDate(sessionRec.f2 != null ? sessionRec.f2 : sessionRec.f253);
@@ -786,6 +823,7 @@ function processSwimFit(parsed, fileName) {
     date: dateISO,
     startTime: sessionStart ? sessionStart.toISOString() : null,
     poolLength,
+    poolLengthSource: poolLength != null ? "fit" : null,
     calories: sessionCalories,
     distance: metrics.distance,
     distanceCorrection: null, // { originalDistance, correctedAt } — set only if the person manually corrects distance later
@@ -900,6 +938,7 @@ function backfillSwimSessions(list) {
   const next = (list || []).map((s) => {
     const migrated = migrateSwimSessionToOverrideLayer(s);
     let fixed = backfillSwimSessionStrokeStats(migrated);
+    if (fixed && fixed.poolLength != null && !fixed.poolLengthSource) fixed = { ...fixed, poolLengthSource: "legacy" };
     if (fixed !== s) changed = true;
     return fixed;
   });
@@ -1755,13 +1794,25 @@ function SwimmingTab({ isMobile, onExit }) {
     return weight ? weightedTotal / weight : null;
   };
 
+  const swolfReferencePools = useMemo(() => {
+    const refs = { all: null };
+    for (let i = chronSessions.length - 1; i >= 0; i--) {
+      const s = chronSessions[i];
+      if (refs.all == null && s.poolLength != null) refs.all = s.poolLength;
+      Object.keys(s.strokeStats || {}).forEach((stroke) => {
+        if (refs[stroke] == null && s.poolLength != null && s.strokeStats[stroke] && s.strokeStats[stroke].avgSwolf != null) refs[stroke] = s.poolLength;
+      });
+    }
+    return refs;
+  }, [chronSessions]);
+
   // Trend series, oldest -> newest, one point per session.
   const trendData = useMemo(() => {
     return chronSessions.map((s) => {
       const energy100 = s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null;
       const point = {
         date: s.date, label: fmtDate(s.date), pace100: s.pace100Overall,
-        swolf_all: allStrokeMetric(s, "avgSwolf"),
+        swolf_all: poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgSwolf") : null,
         cadence_all: allStrokeMetric(s, "avgCadence"),
         dps_all: allStrokeMetric(s, "avgDistPerStroke"),
         avgHR: s.avgHR, peakHR: s.peakHR, energy100,
@@ -1769,13 +1820,13 @@ function SwimmingTab({ isMobile, onExit }) {
       allStrokesSeen.forEach((stroke) => {
         const st = s.strokeStats && s.strokeStats[stroke];
         point[`pace100_${stroke}`] = st ? st.pace100 : null;
-        point[`swolf_${stroke}`] = st ? st.avgSwolf : null;
+        point[`swolf_${stroke}`] = st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgSwolf : null;
         point[`cadence_${stroke}`] = st ? st.avgCadence : null;
         point[`dps_${stroke}`] = st ? st.avgDistPerStroke : null;
       });
       return point;
     });
-  }, [chronSessions, allStrokesSeen]);
+  }, [chronSessions, allStrokesSeen, swolfReferencePools]);
 
   // Weekly-aggregated equivalent of trendData, for the Day/Week trend toggle. Sessions are
   // bucketed by the Monday of their week (same mondayOf/toISODate helpers used elsewhere);
@@ -1795,7 +1846,7 @@ function SwimmingTab({ isMobile, onExit }) {
       const hrVals = weekSessions.map((s) => s.avgHR).filter((v) => v != null);
       const peakHrVals = weekSessions.map((s) => s.peakHR).filter((v) => v != null);
       const energy100Vals = weekSessions.map((s) => (s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null)).filter((v) => v != null);
-      const swolfAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgSwolf")).filter((v) => v != null);
+      const swolfAllVals = weekSessions.map((s) => poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgSwolf") : null).filter((v) => v != null);
       const cadenceAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgCadence")).filter((v) => v != null);
       const dpsAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgDistPerStroke")).filter((v) => v != null);
       const point = {
@@ -1810,7 +1861,7 @@ function SwimmingTab({ isMobile, onExit }) {
       };
       allStrokesSeen.forEach((stroke) => {
         const pace100StrokeVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].pace100 : null)).filter((v) => v != null);
-        const swolfVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgSwolf : null)).filter((v) => v != null);
+        const swolfVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? s.strokeStats[stroke].avgSwolf : null)).filter((v) => v != null);
         const cadenceVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgCadence : null)).filter((v) => v != null);
         const dpsVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgDistPerStroke : null)).filter((v) => v != null);
         point[`pace100_${stroke}`] = pace100StrokeVals.length ? avg(pace100StrokeVals) : null;
@@ -1820,7 +1871,7 @@ function SwimmingTab({ isMobile, onExit }) {
       });
       return point;
     });
-  }, [chronSessions, allStrokesSeen]);
+  }, [chronSessions, allStrokesSeen, swolfReferencePools]);
 
   // The series actually feeding the sparkline cards + expanded charts, switched by the
   // Day/Week toggle. Collapsed cards and their expanded charts always read from this same
@@ -2078,7 +2129,10 @@ function SwimmingTab({ isMobile, onExit }) {
     if (latestPace != null && paceBase != null && latestPace > 0) addAxis("pace", latestPace, paceBase, 100 * (paceBase / latestPace), { latest: latestPace, baseline: paceBase });
 
     // 2. Stroke Efficiency — SWOLF lower-better + DPS higher-better, each z-scored.
-    const efficiencyBaseline = radarBaselineSessions.map((s) => ({ swolf: radarMetricValue(s, "swolf"), dps: radarMetricValue(s, "dps") })).filter((x) => x.swolf != null && x.dps != null);
+    const efficiencyBaseline = radarBaselineSessions
+      .filter((s) => latest.poolLength != null && poolLengthsMatch(s.poolLength, latest.poolLength))
+      .map((s) => ({ swolf: radarMetricValue(s, "swolf"), dps: radarMetricValue(s, "dps") }))
+      .filter((x) => x.swolf != null && x.dps != null);
     const latestSwolf = radarMetricValue(latest, "swolf"), latestDps = radarMetricValue(latest, "dps");
     const swolfVals = efficiencyBaseline.map((x) => x.swolf), dpsVals = efficiencyBaseline.map((x) => x.dps);
     const swolfZ = radarZ(latestSwolf, swolfVals), dpsZ = radarZ(latestDps, dpsVals);
@@ -3265,6 +3319,22 @@ function TrainingLog() {
     try { localStorage.setItem("main-tab-v1", tab); } catch {}
   }, [tab]);
 
+  const [athleteMode, setAthleteMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem("athlete-mode-v1");
+      return ["hybrid", "swim", "workout"].includes(saved) ? saved : null;
+    } catch { return null; }
+  });
+  const [showAthleteModePicker, setShowAthleteModePicker] = useState(false);
+  const saveAthleteMode = (mode) => {
+    if (!["hybrid", "swim", "workout"].includes(mode)) return;
+    setAthleteMode(mode);
+    setShowAthleteModePicker(false);
+    try { localStorage.setItem("athlete-mode-v1", mode); } catch {}
+  };
+  const athleteModeLabel = athleteMode === "swim" ? "Swim only" : athleteMode === "workout" ? "Workout only" : "Hybrid";
+  const visibleTabs = TABS.filter((t) => athleteMode === "swim" ? t.id !== "workout" : athleteMode === "workout" ? t.id !== "swim" : true);
+
   const [filter, setFilter] = useState("All");
   const [metric, setMetric] = useState("reps");
   const [range, setRange] = useState("all");
@@ -3314,10 +3384,27 @@ function TrainingLog() {
   // Controls which "log new session" flow shows (paste/manual form vs. .FIT upload) and
   // what the Import button expects (JSON vs. .FIT). Logging itself lives here now; the
   // Swimming tab is dashboard-only and simply re-reads SWIM_KEY whenever it mounts.
-  const [viewMode, setViewMode] = useState("workout"); // "workout" | "swim"
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem("athlete-mode-v1") === "swim" ? "swim" : "workout"; }
+    catch { return "workout"; }
+  }); // "workout" | "swim" | "all"
+  useEffect(() => {
+    if (!athleteMode) return;
+    if (athleteMode === "swim") {
+      if (tab === "workout") setTab("dashboard");
+      if (viewMode !== "swim") setViewMode("swim");
+    } else if (athleteMode === "workout") {
+      if (tab === "swim") setTab("dashboard");
+      if (viewMode !== "workout") setViewMode("workout");
+    }
+  }, [athleteMode]);
+
   const [swimSessions, setSwimSessions] = useState(null);
   const [swimUploading, setSwimUploading] = useState(false);
   const [swimUploadMsg, setSwimUploadMsg] = useState("");
+  const [pendingPoolUpload, setPendingPoolUpload] = useState(null);
+  const [swimEditingPoolFor, setSwimEditingPoolFor] = useState(null);
+  const [swimPoolDraft, setSwimPoolDraft] = useState("");
   const [swimMarkCss, setSwimMarkCss] = useState(false); // "Mark as CSS test" toggle at upload time
   const [pendingCssUpload, setPendingCssUpload] = useState(null); // { drafts: [...] } awaiting confirmation
   const [expandedSwimDetailId, setExpandedSwimDetailId] = useState(null);
@@ -3353,6 +3440,14 @@ function TrainingLog() {
 
   const sortedSwimSessions = [...(swimSessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1));
   const swimCategoryLabelOf = (s) => (s.isCssTest ? "CSS Test" : "Workout");
+
+  const correctSwimPoolLength = async (id) => {
+    const meters = parseFloat(swimPoolDraft);
+    if (!Number.isFinite(meters) || meters <= 0) return;
+    await persistSwim((swimSessions || []).map((s) => s.id === id ? withSwimPoolLength(s, meters, "manual") : s));
+    setSwimEditingPoolFor(null);
+    setSwimPoolDraft("");
+  };
 
   const correctSwimDistance = async (id) => {
     const newDistance = parseFloat(swimDistanceDraft);
@@ -3461,15 +3556,41 @@ function TrainingLog() {
       }
     }
     setSwimUploading(false);
-    if (added.length) await finalizeSwimUpload(added, swimMarkCss);
+    const missingPool = added.some((s) => s.poolLength == null || !Number.isFinite(s.poolLength) || s.poolLength <= 0);
+    if (added.length && missingPool) {
+      setPendingPoolUpload({ sessions: added, markCss: swimMarkCss, values: added.map((s) => s.poolLength != null ? String(Math.round(s.poolLength * 100) / 100) : "") });
+    } else if (added.length) {
+      await finalizeSwimUpload(added, swimMarkCss);
+    }
     const parts = [];
-    if (added.length && !swimMarkCss) parts.push(`Imported ${added.length} swim session${added.length > 1 ? "s" : ""}.`);
-    if (added.length && swimMarkCss) parts.push(`Parsed ${added.length} swim session${added.length > 1 ? "s" : ""} — confirm CSS test times below before saving.`);
+    if (added.length && missingPool) parts.push(`Parsed ${added.length} swim session${added.length > 1 ? "s" : ""}. Pool length is required before saving.`);
+    if (added.length && !missingPool && !swimMarkCss) parts.push(`Imported ${added.length} swim session${added.length > 1 ? "s" : ""}.`);
+    if (added.length && !missingPool && swimMarkCss) parts.push(`Parsed ${added.length} swim session${added.length > 1 ? "s" : ""} — confirm CSS test times below before saving.`);
     if (errors.length) parts.push(`Failed: ${errors.join(" · ")}`);
     setSwimUploadMsg(parts.join(" "));
     if (swimFileInputRef.current) swimFileInputRef.current.value = "";
     if (swimImportInputRef.current) swimImportInputRef.current.value = "";
   };
+
+  const updatePendingPoolValue = (idx, value) => setPendingPoolUpload((cur) => {
+    if (!cur) return cur;
+    const values = [...cur.values]; values[idx] = value;
+    return { ...cur, values };
+  });
+  const confirmPendingPoolUpload = async () => {
+    if (!pendingPoolUpload) return;
+    const meters = pendingPoolUpload.values.map((v) => parseFloat(v));
+    if (meters.some((v) => !Number.isFinite(v) || v <= 0)) {
+      setSwimUploadMsg("Pool length is mandatory for every swim session.");
+      return;
+    }
+    const finished = pendingPoolUpload.sessions.map((s, i) => withSwimPoolLength(s, meters[i], s.poolLength != null ? (s.poolLengthSource || "fit") : "manual"));
+    const markCss = pendingPoolUpload.markCss;
+    setPendingPoolUpload(null);
+    const saved = await finalizeSwimUpload(finished, markCss);
+    setSwimUploadMsg(saved ? `Imported ${finished.length} swim session${finished.length > 1 ? "s" : ""}.` : "Pool length saved. Confirm CSS test times below before saving.");
+  };
+  const cancelPendingPoolUpload = () => { setPendingPoolUpload(null); setSwimUploadMsg("Discarded — nothing was saved."); };
 
   const updatePendingCssDraft = (idx, field, value) => {
     setPendingCssUpload((cur) => {
@@ -4381,14 +4502,21 @@ function TrainingLog() {
     })();
   }, [tab]);
 
-  // Earliest logged date across both workout and swim history — the heatmap is clamped to
+  const modeWorkoutSessions = athleteMode === "swim" ? [] : (sessions || []);
+  const modeSwimSessions = athleteMode === "workout" ? [] : (swimSessions || []);
+  const visibleSessionDates = [...modeWorkoutSessions.map((s) => s.date), ...modeSwimSessions.map((s) => s.date)];
+  const visibleSessionCount = modeWorkoutSessions.length + modeSwimSessions.length;
+  const visibleFirstDate = visibleSessionDates.length ? visibleSessionDates.reduce((a, b) => a < b ? a : b) : null;
+  const visibleLatestDate = visibleSessionDates.length ? visibleSessionDates.reduce((a, b) => a > b ? a : b) : null;
+
+  // Earliest logged date across the currently visible training modes — the heatmap is clamped to
   // never render weeks before this, even if the selected dropdown window (8/12/24/52) is
   // longer than actual history. Prevents a wall of empty black cells when history is short.
   const combinedEarliestDate = useMemo(() => {
-    const dates = [...(sessions || []).map((s) => s.date), ...(swimSessions || []).map((s) => s.date)];
+    const dates = [...modeWorkoutSessions.map((s) => s.date), ...modeSwimSessions.map((s) => s.date)];
     if (dates.length === 0) return null;
     return dates.reduce((min, d) => (d < min ? d : min), dates[0]);
-  }, [sessions, swimSessions]);
+  }, [modeWorkoutSessions, modeSwimSessions]);
 
   // How many weeks actually get rendered: the smaller of the selected dropdown value and
   // the number of weeks since the earliest logged session (min 1 so a single-week-old log
@@ -4419,8 +4547,8 @@ function TrainingLog() {
 
   const combinedHeatmapWeeks = useMemo(() => {
     if (!combinedEarliestDate) return [];
-    const workoutDates = new Set((sessions || []).map((s) => s.date));
-    const swimDates = new Set((swimSessions || []).map((s) => s.date));
+    const workoutDates = new Set(modeWorkoutSessions.map((s) => s.date));
+    const swimDates = new Set(modeSwimSessions.map((s) => s.date));
     const currentMonday = mondayOf(todayStr);
     const weeks = [];
     for (let w = combinedRenderedWeekCount - 1; w >= 0; w--) {
@@ -4434,10 +4562,10 @@ function TrainingLog() {
       weeks.push(days);
     }
     return weeks;
-  }, [sessions, swimSessions, todayStr, combinedRenderedWeekCount, combinedEarliestDate]);
+  }, [modeWorkoutSessions, modeSwimSessions, todayStr, combinedRenderedWeekCount, combinedEarliestDate]);
 
   const combinedConsistency = useMemo(() => {
-    const dateSet = new Set([...(sessions || []).map((s) => s.date), ...(swimSessions || []).map((s) => s.date)]);
+    const dateSet = new Set([...modeWorkoutSessions.map((s) => s.date), ...modeSwimSessions.map((s) => s.date)]);
     if (dateSet.size === 0) return null;
     let dayStreak = 0; let cursor = new Date(todayStr + "T00:00:00");
     if (!dateSet.has(toISODate(cursor))) cursor.setDate(cursor.getDate() - 1);
@@ -4448,7 +4576,7 @@ function TrainingLog() {
     const last7 = Array.from({ length: 7 }, (_, i) => { const d = new Date(todayStr + "T00:00:00"); d.setDate(d.getDate() - i); return toISODate(d); });
     const trainedLast7 = last7.filter((d) => dateSet.has(d)).length;
     return { dayStreak, trainedLast7 };
-  }, [sessions, swimSessions, todayStr]);
+  }, [modeWorkoutSessions, modeSwimSessions, todayStr]);
 
   const swimConsistencyMini = useMemo(() => {
     if (!swimSessions || swimSessions.length === 0) return null;
@@ -4497,19 +4625,23 @@ function TrainingLog() {
     if (combinedConsistency) {
       bits.push(`Trained ${combinedConsistency.trainedLast7}/7 days this past week${combinedConsistency.dayStreak >= 2 ? `, on a ${combinedConsistency.dayStreak}-day streak` : ""}.`);
     }
-    if (consistency) {
+    if (athleteMode !== "swim" && consistency) {
       bits.push(consistency.daysSinceLast <= 3
         ? `Workouts on pace — last session ${consistency.daysSinceLast === 0 ? "today" : consistency.daysSinceLast + "d ago"}.`
         : `Workouts have slipped — last session was ${consistency.daysSinceLast}d ago.`);
     }
-    if (swimConsistencyMini) {
+    if (athleteMode !== "workout" && swimConsistencyMini) {
       bits.push(swimConsistencyMini.daysSinceLast <= 4
         ? `Swimming steady — last swim ${swimConsistencyMini.daysSinceLast === 0 ? "today" : swimConsistencyMini.daysSinceLast + "d ago"}.`
         : `Swimming's gone quiet — last swim was ${swimConsistencyMini.daysSinceLast}d ago.`);
     }
-    if (!(sessions || []).length && !(swimSessions || []).length) return "Log a workout or upload a swim to see your status here.";
+    if (visibleSessionCount === 0) {
+      if (athleteMode === "swim") return "Upload a swim to start building your swim profile.";
+      if (athleteMode === "workout") return "Log a workout to start building your training profile.";
+      return "Log a workout or upload a swim to see your status here.";
+    }
     return bits.join(" ");
-  }, [combinedConsistency, consistency, swimConsistencyMini, sessions, swimSessions]);
+  }, [combinedConsistency, consistency, swimConsistencyMini, athleteMode, visibleSessionCount]);
 
   const latestBw = latest ? bwMap[latest.id] : null;
   const firstBw = first ? bwMap[first.id] : null;
@@ -4800,6 +4932,8 @@ function TrainingLog() {
         .ui-day .profile-readout-card [style*="color: #8E8E93"] {
           color:#6E675D !important;
         }
+        .mode-chip { min-height:30px !important; padding:5px 8px !important; border-radius:999px !important; border:1px solid var(--border) !important; background:var(--card-2) !important; color:var(--text-dim) !important; font-size:9.5px !important; font-weight:800 !important; cursor:pointer; white-space:nowrap; }
+        .pool-quick-pill { min-height:28px !important; }
         .file-btn { position: relative; overflow: hidden; }
         .file-btn input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
         @media (max-width: 560px) {
@@ -4808,17 +4942,43 @@ function TrainingLog() {
         }
       `}</style>
 
+      {(!athleteMode || showAthleteModePicker) && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.72)", backdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ width: "min(520px, 100%)", background: "var(--card)", border: "1px solid var(--border)", borderRadius: 24, padding: isMobile ? 16 : 20, boxShadow: "0 24px 80px rgba(0,0,0,.35)" }}>
+            <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 800, marginBottom: 6 }}>Set up your training view</div>
+            <div className="disp" style={{ fontSize: isMobile ? 24 : 28, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>What kind of athlete are you?</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-dimmer)", lineHeight: 1.5, marginBottom: 14 }}>This only changes what the app shows. It never deletes workout or swim data, and you can change it later from the header.</div>
+            <div style={{ display: "grid", gap: 9 }}>
+              {[
+                { id: "hybrid", title: "Hybrid athlete", desc: "Workout + swim", Icon: LayoutGrid, color: "#30D158" },
+                { id: "swim", title: "Swim only", desc: "Hide workout-specific views", Icon: Waves, color: "#64D2FF" },
+                { id: "workout", title: "Workout only", desc: "Hide swim-specific views", Icon: Dumbbell, color: "#FF9F0A" },
+              ].map(({ id, title, desc, Icon, color }) => (
+                <button key={id} onClick={() => saveAthleteMode(id)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12, textAlign: "left", background: athleteMode === id ? `${color}18` : "var(--card-2)", border: `1px solid ${athleteMode === id ? color + "77" : "var(--border)"}`, borderRadius: 16, padding: "12px 14px", color: "var(--text)" }}>
+                  <span style={{ width: 34, height: 34, borderRadius: 12, background: `${color}18`, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon size={17} color={color} /></span>
+                  <span><span style={{ display: "block", fontSize: 13.5, fontWeight: 800 }}>{title}</span><span style={{ display: "block", fontSize: 11, color: "var(--text-dimmer)", marginTop: 2 }}>{desc}</span></span>
+                </button>
+              ))}
+            </div>
+            {athleteMode && <button onClick={() => setShowAthleteModePicker(false)} style={{ width: "100%", marginTop: 10, cursor: "pointer", background: "transparent", border: "none", color: "var(--text-dimmer)", fontSize: 11.5, fontWeight: 700, padding: 8 }}>Cancel</button>}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ borderBottom: "1px solid #27272A", padding: isMobile ? "14px 12px 0" : "20px 16px 0" }}>
         <div style={{ maxWidth: 1060, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Dumbbell size={20} color="#FF9F0A" strokeWidth={2.2} />
-              <span className="mono" style={{ fontSize: 11, letterSpacing: "0.15em", color: "#8E8E93", textTransform: "uppercase" }}>Calisthenics · Training Log</span>
+              {athleteMode === "swim" ? <Waves size={20} color="#64D2FF" strokeWidth={2.2} /> : athleteMode === "hybrid" ? <LayoutGrid size={20} color="#30D158" strokeWidth={2.2} /> : <Dumbbell size={20} color="#FF9F0A" strokeWidth={2.2} />}
+              <span className="mono" style={{ fontSize: 11, letterSpacing: "0.15em", color: "#8E8E93", textTransform: "uppercase" }}>{athleteMode === "swim" ? "Swim" : athleteMode === "hybrid" ? "Hybrid" : athleteMode === "workout" ? "Workout" : "Training"} · Training Log</span>
             </div>
-            <div className="theme-toggle" aria-label="Appearance">
-              <button className={uiTheme === "day" ? "active" : ""} onClick={() => setUiTheme("day")} title="Day">☀</button>
-              <button className={uiTheme === "night" ? "active" : ""} onClick={() => setUiTheme("night")} title="Night">☾</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {athleteMode && <button onClick={() => setShowAthleteModePicker(true)} title="Change athlete mode" className="mode-chip">{athleteModeLabel}</button>}
+              <div className="theme-toggle" aria-label="Appearance">
+                <button className={uiTheme === "day" ? "active" : ""} onClick={() => setUiTheme("day")} title="Day">☀</button>
+                <button className={uiTheme === "night" ? "active" : ""} onClick={() => setUiTheme("night")} title="Night">☾</button>
+              </div>
             </div>
           </div>
           {editingName ? (
@@ -4843,13 +5003,15 @@ function TrainingLog() {
               title="Click to edit"
               style={{ fontSize: "clamp(24px, 6vw, 32px)", fontWeight: 700, margin: "0 0 4px", color: "#FFFFFF", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}
             >
-              {ownerName ? `${ownerName}'s workout progression` : "Your workout progression"}
+              {ownerName
+                ? `${ownerName}'s ${athleteMode === "swim" ? "swim" : athleteMode === "workout" ? "workout" : "training"} progression`
+                : `Your ${athleteMode === "swim" ? "swim" : athleteMode === "workout" ? "workout" : "training"} progression`}
               <Pencil size={16} style={{ color: "#48484A", flexShrink: 0 }} />
             </h1>
           )}
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
-            <span style={{ fontSize: 13, color: "#8E8E93", fontWeight: 600 }}>{sessions.length} Sessions Logged</span>
-            <span className="mono" style={{ fontSize: 12, color: "#636366" }}>{first ? fmtDateFull(first.date) : ""} → {latest ? fmtDateFull(latest.date) : ""}</span>
+            <span style={{ fontSize: 13, color: "#8E8E93", fontWeight: 600 }}>{visibleSessionCount} Sessions Logged</span>
+            <span className="mono" style={{ fontSize: 12, color: "#636366" }}>{visibleFirstDate ? fmtDateFull(visibleFirstDate) : ""}{visibleFirstDate ? " → " : ""}{visibleLatestDate ? fmtDateFull(visibleLatestDate) : ""}</span>
           </div>
         </div>
       </div>
@@ -4863,7 +5025,7 @@ function TrainingLog() {
       <div style={{ background: FLOATING_BAR_BG_SOFT, borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
           <div style={{ display: "flex", gap: 4, overflowX: "auto", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 18, padding: 4 }}>
-            {TABS.map(({ id, label, Icon }) => (
+            {visibleTabs.map(({ id, label, Icon }) => (
               <button key={id} className="app-nav-pill" onClick={() => setTab(id)} style={{
                 display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", whiteSpace: "nowrap",
                 padding: "9px 14px", fontSize: 12.5, fontWeight: 700, color: tab === id ? "#000000" : "#8E8E93",
@@ -4890,7 +5052,8 @@ function TrainingLog() {
               <div style={{ fontSize: 13.5, color: "#FFFFFF", lineHeight: 1.5 }}>{statusBlurb}</div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: athleteMode === "hybrid" || !athleteMode ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 12 }}>
+              {athleteMode !== "swim" && (
               <div onClick={() => setTab("workout")} style={{ cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Dumbbell size={13} color="#FF9F0A" />
@@ -4899,6 +5062,8 @@ function TrainingLog() {
                 <div className="disp" style={{ fontSize: 32, fontWeight: 700, color: "#FFFFFF" }}>{consistency ? consistency.streak : 0}<span className="mono" style={{ fontSize: 11, color: "#636366" }}> wks</span></div>
                 <div style={{ fontSize: 10.5, color: "#636366", marginTop: 2 }}>{consistency ? (consistency.daysSinceLast === 0 ? "today" : `${consistency.daysSinceLast}d ago`) : "no sessions yet"} →</div>
               </div>
+              )}
+              {athleteMode !== "workout" && (
               <div onClick={() => setTab("swim")} style={{ cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <Waves size={13} color="#64D2FF" />
@@ -4907,9 +5072,11 @@ function TrainingLog() {
                 <div className="disp" style={{ fontSize: 32, fontWeight: 700, color: "#FFFFFF" }}>{swimConsistencyMini ? swimConsistencyMini.streak : 0}<span className="mono" style={{ fontSize: 11, color: "#636366" }}> wks</span></div>
                 <div style={{ fontSize: 10.5, color: "#636366", marginTop: 2 }}>{swimConsistencyMini ? (swimConsistencyMini.daysSinceLast === 0 ? "today" : `${swimConsistencyMini.daysSinceLast}d ago`) : "no swims yet"} →</div>
               </div>
+              )}
             </div>
 
-            {/* Bodyweight — tap to expand into the trend chart, with an optional target weight */}
+            {/* Bodyweight — workout-specific */}
+            {athleteMode !== "swim" && (
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 14, marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", cursor: "pointer" }} onClick={() => setWeightExpanded((v) => !v)}>
                 <div>
@@ -4973,20 +5140,22 @@ function TrainingLog() {
               )}
             </div>
 
+            )}
+
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6" }}>
                   {combinedRenderedWeekCount > 0
                     ? (combinedRenderedWeekCount < dashHeatmapWeekCount
                         ? `Last ${combinedRenderedWeekCount} week${combinedRenderedWeekCount === 1 ? "" : "s"} (all logged history) — days trained`
-                        : `Last ${dashHeatmapWeekCount} weeks — days trained (workout + swim)`)
-                    : "Days trained (workout + swim)"}
+                        : `Last ${dashHeatmapWeekCount} weeks — days trained${athleteMode === "hybrid" || !athleteMode ? " (workout + swim)" : ""}`)
+                    : `Days trained${athleteMode === "hybrid" || !athleteMode ? " (workout + swim)" : ""}`}
                 </span>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <div style={{ display: "flex", gap: 10, fontSize: 10.5, color: "#8E8E93" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#FF9F0A", display: "inline-block" }} /> workout</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#64D2FF", display: "inline-block" }} /> swim</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#30D158", display: "inline-block" }} /> both</span>
+                    {athleteMode !== "swim" && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#FF9F0A", display: "inline-block" }} /> workout</span>}
+                    {athleteMode !== "workout" && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#64D2FF", display: "inline-block" }} /> swim</span>}
+                    {(athleteMode === "hybrid" || !athleteMode) && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#30D158", display: "inline-block" }} /> both</span>}
                   </div>
                   <select value={dashHeatmapWeekCount} onChange={(e) => setDashHeatmapWeekCount(Number(e.target.value))} className="mono" style={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 6, padding: "4px 8px", color: "#D1D1D6", fontSize: 11, cursor: "pointer" }}>
                     {[8, 12, 24, 52].map((n) => (<option key={n} value={n}>{n} wks</option>))}
@@ -4994,7 +5163,7 @@ function TrainingLog() {
                 </div>
               </div>
               {combinedRenderedWeekCount === 0 ? (
-                <div style={{ fontSize: 12, color: "#636366", padding: "20px 0", textAlign: "center" }}>No workouts or swims logged yet — this fills in once you log your first session.</div>
+                <div style={{ fontSize: 12, color: "#636366", padding: "20px 0", textAlign: "center" }}>{athleteMode === "swim" ? "No swims logged yet — this fills in after your first swim." : athleteMode === "workout" ? "No workouts logged yet — this fills in after your first workout." : "No workouts or swims logged yet — this fills in once you log your first session."}</div>
               ) : (
                 <>
                   <div ref={dashHeatmapGridRef} style={{ display: "flex", gap: 3, width: "100%" }}>
@@ -5015,7 +5184,8 @@ function TrainingLog() {
               )}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: athleteMode === "hybrid" || !athleteMode ? (isMobile ? "1fr" : "1fr 1fr") : "1fr", gap: 12, marginBottom: 12 }}>
+              {athleteMode !== "swim" && (
               <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -5054,6 +5224,8 @@ function TrainingLog() {
                   )
                 ) : <div style={{ fontSize: 12, color: "#636366" }}>No workouts logged yet.</div>}
               </div>
+              )}
+              {athleteMode !== "workout" && (
               <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -5092,17 +5264,18 @@ function TrainingLog() {
                   )
                 ) : <div style={{ fontSize: 12, color: "#636366" }}>No swims logged yet.</div>}
               </div>
+              )}
             </div>
 
-            {/* Recent activity — merged workout + swim timeline, most recent first */}
+            {/* Recent activity — mode-aware workout/swim timeline */}
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16, marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>Recent activity</div>
               {(() => {
-                const wItems = (sessions || []).map((s) => ({ kind: "workout", date: s.date, s }));
-                const swItems = (swimSessions || []).map((s) => ({ kind: "swim", date: s.date, s }));
+                const wItems = modeWorkoutSessions.map((s) => ({ kind: "workout", date: s.date, s }));
+                const swItems = modeSwimSessions.map((s) => ({ kind: "swim", date: s.date, s }));
                 const merged = [...wItems, ...swItems].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 5);
                 if (merged.length === 0) {
-                  return <div style={{ fontSize: 12.5, color: "var(--text-dimmer)" }}>Complete your first workout to start building your training history.</div>;
+                  return <div style={{ fontSize: 12.5, color: "var(--text-dimmer)" }}>{athleteMode === "swim" ? "Upload your first swim to start building your swim history." : athleteMode === "workout" ? "Complete your first workout to start building your training history." : "Log your first workout or swim to start building your training history."}</div>;
                 }
                 return (
                   <div style={{ display: "grid", gap: 10 }}>
@@ -5364,7 +5537,11 @@ function TrainingLog() {
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
               <div style={{ display: "flex", background: "#000000", border: "1px solid #27272A", borderRadius: 16, padding: 3 }}>
-                {[{ id: "workout", label: "Workout", Icon: Dumbbell }, { id: "swim", label: "Swim", Icon: Waves }, { id: "all", label: "All", Icon: LayoutGrid }].map(({ id, label, Icon }) => (
+                {[
+                  ...(athleteMode !== "swim" ? [{ id: "workout", label: "Workout", Icon: Dumbbell }] : []),
+                  ...(athleteMode !== "workout" ? [{ id: "swim", label: "Swim", Icon: Waves }] : []),
+                  ...((athleteMode === "hybrid" || !athleteMode) ? [{ id: "all", label: "All", Icon: LayoutGrid }] : []),
+                ].map(({ id, label, Icon }) => (
                   <button key={id} onClick={() => setViewMode(id)} style={{
                     display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", borderRadius: 12,
                     padding: "7px 14px", fontSize: 12.5, fontWeight: 700,
@@ -5417,7 +5594,7 @@ function TrainingLog() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 15, color: "#FFFFFF", marginBottom: 3 }}>Log new swim session</div>
-                    <div style={{ fontSize: 12, color: "#636366" }}>Upload Garmin <span className="mono">.FIT</span> files (pool swims) — parsed entirely in your browser, nothing is uploaded anywhere.</div>
+                    <div style={{ fontSize: 12, color: "#636366" }}>Upload Garmin <span className="mono">.FIT</span> files (pool swims) — pool length is detected from FIT when available and must be supplied if missing. Everything is parsed locally in your browser.</div>
                   </div>
                   <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 16, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
                     <Upload size={14} /> {swimUploading ? "Parsing…" : "Upload .FIT"}
@@ -5460,6 +5637,35 @@ function TrainingLog() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {viewMode === "swim" && pendingPoolUpload && (
+              <div style={{ background: "#1C1C1E", border: "1px solid #FF9F0A66", borderRadius: 18, padding: 14, marginBottom: 12 }}>
+                <div style={{ fontSize: 11, color: "#FF9F0A", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 800, marginBottom: 4 }}>Pool length required</div>
+                <div style={{ fontSize: 11.5, color: "#8E8E93", lineHeight: 1.45, marginBottom: 10 }}>FIT pool length is used when available. If it is missing, a pool length is mandatory before saving because distance, pace and stroke-distance metrics depend on it.</div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {pendingPoolUpload.sessions.map((s, i) => (
+                    <div key={s.id || i} style={{ border: "1px solid #2C2C2E", borderRadius: 12, padding: 10, background: "#000000" }}>
+                      <div style={{ fontSize: 11, color: "#D1D1D6", fontWeight: 700, marginBottom: 6 }}>{s.fileName || `Swim ${i + 1}`}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        {[25, 50, 22.86].map((v) => (
+                          <button key={v} onClick={() => updatePendingPoolValue(i, String(v))} className="pool-quick-pill" style={{
+                            cursor: "pointer", background: Math.abs(parseFloat(pendingPoolUpload.values[i]) - v) < 0.05 ? "#64D2FF" : "transparent",
+                            color: Math.abs(parseFloat(pendingPoolUpload.values[i]) - v) < 0.05 ? "#000000" : "#8E8E93",
+                            border: "1px solid #2C2C2E", borderRadius: 8, padding: "4px 7px", fontSize: 10, fontWeight: 700
+                          }}>{v === 22.86 ? "25yd" : `${v}m`}</button>
+                        ))}
+                        <input type="number" step="0.01" min="1" value={pendingPoolUpload.values[i]} onChange={(e) => updatePendingPoolValue(i, e.target.value)} placeholder="Custom m" className="mono" style={{ width: 88, background: "#1C1C1E", border: "1px solid #2C2C2E", borderRadius: 8, padding: "5px 7px", color: "#F2F2F7", fontSize: 11 }} />
+                        {s.poolLength != null && <span style={{ fontSize: 9.5, color: "#30D158" }}>FIT detected</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button onClick={confirmPendingPoolUpload} style={{ flex: 1, cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 9, padding: "8px 10px", fontWeight: 800, fontSize: 11 }}>Save pool length</button>
+                  <button onClick={cancelPendingPoolUpload} style={{ cursor: "pointer", background: "transparent", color: "#8E8E93", border: "1px solid #2C2C2E", borderRadius: 9, padding: "8px 10px", fontWeight: 700, fontSize: 11 }}>Cancel</button>
+                </div>
               </div>
             )}
 
@@ -5589,6 +5795,7 @@ function TrainingLog() {
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#FFFFFF", display: "flex", alignItems: "center", gap: 6 }}>
                             {fmtDateFull(s.date)}
                             <span className="mono" style={{ fontSize: 9.5, color: s.isCssTest ? "#0A84FF" : "#64D2FF", border: `1px solid ${s.isCssTest ? "#0A84FF" : "#64D2FF"}55`, borderRadius: 5, padding: "1px 5px" }}>{swimCategoryLabelOf(s)}</span>
+                            <span className="mono" style={{ fontSize: 9.5, color: s.poolLength != null ? "#8E8E93" : "#FF453A", border: `1px solid ${s.poolLength != null ? "#8E8E9355" : "#FF453A55"}`, borderRadius: 5, padding: "1px 5px" }}>{formatPoolLength(s.poolLength)}</span>
                             {s.qualityNote && <AlertTriangle size={12} style={{ color: "#FF9F0A" }} title={s.qualityNote} />}
                           </div>
                           <div className="mono" style={{ fontSize: 11, color: "#636366" }}>{s.fileName}</div>
@@ -5614,11 +5821,27 @@ function TrainingLog() {
                             <div className="mono" style={{ color: "#D1D1D6" }}>{s.distance != null ? `${s.distance}m` : "—"}</div>
                             {s.distanceCorrection && <div style={{ fontSize: 9.5, color: "#48484A" }}>was {s.distanceCorrection.originalDistance}m (FIT-derived)</div>}
                           </div>
-                          <div><div style={{ color: "#636366", fontSize: 10 }}>Pool length</div><div className="mono" style={{ color: "#D1D1D6" }}>{s.poolLength != null ? `${s.poolLength}m` : "—"}</div></div>
+                          <div>
+                            <div style={{ color: "#636366", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}>Pool length <Pencil size={10} style={{ cursor: "pointer", color: "#48484A" }} onClick={(e) => { e.stopPropagation(); setSwimEditingPoolFor(s.id); setSwimPoolDraft(s.poolLength != null ? String(s.poolLength) : ""); }} /></div>
+                            <div className="mono" style={{ color: s.poolLength != null ? "#D1D1D6" : "#FF453A" }}>{formatPoolLength(s.poolLength)}</div>
+                            {s.poolLengthSource && <div style={{ fontSize: 9.5, color: "#48484A" }}>{s.poolLengthSource === "fit" ? "FIT detected" : s.poolLengthSource === "manual" ? "manually set" : "existing log"}</div>}
+                          </div>
                           <div><div style={{ color: "#636366", fontSize: 10 }}>Avg pace</div><div className="mono" style={{ color: "#D1D1D6" }}>{fmtPace100(s.pace100Overall)}</div></div>
                           <div><div style={{ color: "#636366", fontSize: 10 }}>Avg HR</div><div className="mono" style={{ color: "#D1D1D6" }}>{s.avgHR != null ? `${s.avgHR} bpm` : "—"}</div></div>
                           <div><div style={{ color: "#636366", fontSize: 10 }}>Rest time</div><div className="mono" style={{ color: "#D1D1D6" }}>{fmtMinSec(s.restTimeSec)}</div></div>
                         </div>
+                        {swimEditingPoolFor === s.id && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 10, padding: "8px 10px", marginBottom: 12 }} onClick={(e) => e.stopPropagation()}>
+                            <span style={{ fontSize: 11, color: "#8E8E93" }}>Pool</span>
+                            {[25, 50, 22.86].map((v) => <button key={v} onClick={() => setSwimPoolDraft(String(v))} style={{ cursor: "pointer", background: Math.abs(parseFloat(swimPoolDraft) - v) < 0.05 ? "#64D2FF" : "transparent", color: Math.abs(parseFloat(swimPoolDraft) - v) < 0.05 ? "#000000" : "#8E8E93", border: "1px solid #2C2C2E", borderRadius: 7, padding: "4px 7px", fontWeight: 700, fontSize: 10 }}>{v === 22.86 ? "25yd" : `${v}m`}</button>)}
+                            <input type="number" step="0.01" min="1" value={swimPoolDraft} onChange={(e) => setSwimPoolDraft(e.target.value)} className="mono" style={{ width: 85, background: "#1C1C1E", border: "1px solid #2C2C2E", borderRadius: 6, padding: "4px 8px", color: "#F2F2F7", fontSize: 12 }} />
+                            <span style={{ fontSize: 11, color: "#8E8E93" }}>m</span>
+                            <button onClick={() => correctSwimPoolLength(s.id)} style={{ cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 6, padding: "5px 10px", fontWeight: 700, fontSize: 11 }}>Save</button>
+                            <button onClick={() => { setSwimEditingPoolFor(null); setSwimPoolDraft(""); }} style={{ cursor: "pointer", background: "transparent", color: "#8E8E93", border: "1px solid #2C2C2E", borderRadius: 6, padding: "5px 10px", fontWeight: 600, fontSize: 11 }}>Cancel</button>
+                            <div style={{ fontSize: 10, color: "#48484A", width: "100%" }}>Changing pool length recalculates distance, pace, DPS, stroke-specific pace and reconstructed reps from the existing length records.</div>
+                          </div>
+                        )}
+
                         {swimEditingDistanceFor === s.id && (
                           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 10, padding: "8px 10px", marginBottom: 12 }} onClick={(e) => e.stopPropagation()}>
                             <span style={{ fontSize: 11, color: "#8E8E93" }}>Correct distance to</span>
