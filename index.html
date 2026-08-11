@@ -3217,15 +3217,18 @@ function SwimmingTab({ isMobile, onExit }) {
               const tickColor = axisMeta ? axisMeta.color : "#8E8E93";
               const words = label.split(" ");
               const shouldWrap = isMobile && words.length > 1 && label.length > 12;
+              const safeX = isMobile
+                ? x + (textAnchor === "end" ? 22 : textAnchor === "start" ? -22 : 0)
+                : x;
               return (
-                <text x={x} y={y} textAnchor={textAnchor} fill={tickColor} fontSize={10.5}>
+                <text x={safeX} y={y} textAnchor={textAnchor} fill={tickColor} fontSize={10.5}>
                   {shouldWrap ? (
                     <>
-                      <tspan x={x} dy="-0.25em">{words.slice(0, -1).join(" ")}</tspan>
-                      <tspan x={x} dy="1.15em">{words[words.length - 1]}</tspan>
+                      <tspan x={safeX} dy="-0.25em">{words.slice(0, -1).join(" ")}</tspan>
+                      <tspan x={safeX} dy="1.15em">{words[words.length - 1]}</tspan>
                     </>
                   ) : (
-                    <tspan x={x} dy="0.35em">{label}</tspan>
+                    <tspan x={safeX} dy="0.35em">{label}</tspan>
                   )}
                 </text>
               );
@@ -3300,6 +3303,7 @@ function SwimmingTab({ isMobile, onExit }) {
                   <div style={{ padding: "30px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5, lineHeight: 1.55 }}>Pick at least 3 available axes to draw the profile. Missing axes are omitted rather than estimated.</div>
                 ) : (
                   <>
+                    <div className="radar-profile-chart">
                     <ResponsiveContainer width="100%" height={isMobile ? 455 : 405}>
                       <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "82%" : "76%"} margin={isMobile ? { top: 16, right: 10, bottom: 16, left: 10 } : undefined}>
                         <PolarGrid stroke="#8E8E93" strokeOpacity={0.62} />
@@ -3317,6 +3321,7 @@ function SwimmingTab({ isMobile, onExit }) {
                         />
                       </RadarChart>
                     </ResponsiveContainer>
+                    </div>
 
                     <div style={{ fontSize: 10.5, color: "#636366", margin: "2px 2px 12px", lineHeight: 1.45, textAlign: isMobile ? "left" : "center" }}>
                       Personal performance profile · <strong style={{ color: "#8E8E93", fontWeight: 700 }}>100 = your baseline</strong> · &gt;100 above baseline · &lt;100 below baseline
@@ -4821,6 +4826,11 @@ function TrainingLog() {
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #3A3A3C; border-radius: 999px; }
         .recharts-cartesian-grid line, .recharts-polar-grid-concentric-polygon, .recharts-polar-grid-angle line { stroke: #27272A !important; }
+        .radar-profile-chart .recharts-polar-grid-concentric-polygon,
+        .radar-profile-chart .recharts-polar-grid-angle line {
+          stroke:#8E8E93 !important;
+          stroke-opacity:.62 !important;
+        }
         .recharts-default-tooltip { background: rgba(28,28,30,.96) !important; border: 1px solid #2C2C2E !important; border-radius: 14px !important; box-shadow: 0 10px 30px rgba(0,0,0,.28) !important; }
         /* UI-only Day/Night skin. Business logic and chart data remain unchanged. */
         .app-shell { transition: background-color .2s ease, color .2s ease; }
@@ -4852,8 +4862,8 @@ function TrainingLog() {
         .ui-day .recharts-polar-grid-concentric-polygon,
         .ui-day .recharts-polar-grid-angle line { stroke:var(--ui-grid)!important; }
         .ui-day .recharts-cartesian-axis-tick text,
-        .ui-day .recharts-polar-angle-axis-tick text,
         .ui-day .recharts-polar-radius-axis-tick text { fill:#756F67!important; }
+        /* Radar angle labels keep their per-axis colors. */
         .ui-day .recharts-default-tooltip { background:rgba(236,230,219,.98)!important; border-color:var(--ui-border)!important; color:var(--ui-text)!important; box-shadow:0 8px 24px rgba(62,52,40,.12)!important; }
         .ui-day .recharts-tooltip-label, .ui-day .recharts-tooltip-item { color:var(--ui-text)!important; }
 
