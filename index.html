@@ -3218,7 +3218,7 @@ function SwimmingTab({ isMobile, onExit }) {
               const words = label.split(" ");
               const shouldWrap = isMobile && words.length > 1 && label.length > 12;
               return (
-                <text x={x} y={y} textAnchor={textAnchor} fill={tickColor} fontSize={10.5} fontWeight={700}>
+                <text x={x} y={y} textAnchor={textAnchor} fill={tickColor} fontSize={10.5}>
                   {shouldWrap ? (
                     <>
                       <tspan x={x} dy="-0.25em">{words.slice(0, -1).join(" ")}</tspan>
@@ -3258,10 +3258,9 @@ function SwimmingTab({ isMobile, onExit }) {
                         const locked = selected && visibleCount <= 3;
                         return (
                           <button key={axis.key} onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} className="pill radar-axis-pill" style={{
-                            cursor: locked ? "default" : "pointer", background: selected ? axis.color : `${axis.color}18`,
-                            border: `1.5px solid ${selected ? axis.color : axis.color + "88"}`, color: axis.color,
-                            textShadow: selected ? "0 1px 0 rgba(0,0,0,.18)" : "none",
-                            borderRadius: 8, padding: isMobile ? "3px 6px" : "4px 7px", fontSize: isMobile ? 9 : 9.6, fontWeight: 800, minHeight: isMobile ? 25 : 27, opacity: locked ? 0.82 : 1,
+                            cursor: locked ? "default" : "pointer", background: selected ? axis.color : `${axis.color}1a`,
+                            border: `1.5px solid ${selected ? axis.color : axis.color + "55"}`, color: selected ? "#000000" : axis.color,
+                            borderRadius: 8, padding: isMobile ? "3px 6px" : "4px 7px", fontSize: isMobile ? 9 : 9.6, fontWeight: 700, minHeight: isMobile ? 25 : 27, opacity: locked ? 0.82 : 1,
                           }}>{axis.label}</button>
                         );
                       })}
