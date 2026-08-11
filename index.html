@@ -2680,13 +2680,25 @@ function SwimmingTab({ isMobile, onExit }) {
     if (mean == null || sd == null) return null;
     return sd > 0 ? (value - mean) / sd : 0;
   };
-  const radarHrCoverage = (s) => {
-    if (!s || !Array.isArray(s.lengths)) return 0;
-    const active = s.lengths.map(effectiveLength).filter((l) => l.lengthType === "active" && !l.userExcluded && l.elapsedSec > 0);
-    const totalSec = active.reduce((a, l) => a + l.elapsedSec, 0);
-    const coveredSec = active.filter((l) => l.avgHR != null && Number.isFinite(l.avgHR) && l.avgHR > 0).reduce((a, l) => a + l.elapsedSec, 0);
-    return totalSec > 0 ? coveredSec / totalSec : 0;
+  const radarHrContext = (s) => {
+    if (!s || !Array.isArray(s.lengths)) return { coverage: 0, avgHR: null };
+    const active = s.lengths
+      .map((raw) => ({ raw, eff: effectiveLength(raw) }))
+      .filter(({ raw, eff }) =>
+        eff.lengthType === "active" &&
+        !raw.userExcluded &&
+        eff.elapsedSec > 0 &&
+        (strokeFilter === "all" || eff.stroke === strokeFilter)
+      );
+    const totalSec = active.reduce((a, { eff }) => a + eff.elapsedSec, 0);
+    const withHr = active.filter(({ eff }) => eff.avgHR != null && Number.isFinite(eff.avgHR) && eff.avgHR > 0);
+    const coveredSec = withHr.reduce((a, { eff }) => a + eff.elapsedSec, 0);
+    const weightedHr = coveredSec > 0
+      ? withHr.reduce((a, { eff }) => a + eff.avgHR * eff.elapsedSec, 0) / coveredSec
+      : null;
+    return { coverage: totalSec > 0 ? coveredSec / totalSec : 0, avgHR: weightedHr };
   };
+  const radarHrCoverage = (s) => radarHrContext(s).coverage;
 
   // Session-based previous-6-week baseline. chronSessions is already the shared Trend/Compare
   // eligibility + category filter, so the Radar inherits exactly that pool. Latest is excluded.
@@ -2748,13 +2760,41 @@ function SwimmingTab({ isMobile, onExit }) {
     const distanceBase = radarMean(distanceVals), latestDistance = radarMetricValue(latest, "distance");
     if (latestDistance != null && distanceBase != null && distanceBase > 0) addAxis("endurance", latestDistance, distanceBase, 100 * (latestDistance / distanceBase), { latest: latestDistance, baseline: distanceBase });
 
-    // 5. Aerobic Efficiency — only with >=70% real HR coverage in latest and baseline sessions used.
-    const aerobicBaseline = radarBaselineSessions.filter((s) => radarHrCoverage(s) >= 0.70 && radarMetricValue(s, "pace") != null && s.avgHR != null && s.avgHR > 0);
-    const latestCoverage = radarHrCoverage(latest);
-    const aerobicVals = aerobicBaseline.map((s) => radarMetricValue(s, "pace") / s.avgHR).filter((v) => Number.isFinite(v));
-    const latestPPH = latestPace != null && latest.avgHR != null && latest.avgHR > 0 ? latestPace / latest.avgHR : null;
+    // 5. Aerobic Efficiency — speed produced per unit of cardiovascular response.
+    // Pace is seconds/100m, so swimming speed is proportional to 1/pace.
+    // Therefore efficiency is proportional to speed/HR = 1/(pace * HR).
+    // Higher score is favorable: faster at the same HR, same pace at lower HR, or both.
+    // HR must cover >=70% of the relevant active lengths. For a stroke-filtered Radar,
+    // HR is calculated from that stroke's own active lengths rather than the whole session.
+    const aerobicBaseline = radarBaselineSessions.filter((s) => {
+      const hrCtx = radarHrContext(s);
+      return hrCtx.coverage >= 0.70 && radarMetricValue(s, "pace") != null && hrCtx.avgHR != null && hrCtx.avgHR > 0;
+    });
+    const latestHrCtx = radarHrContext(latest);
+    const aerobicVals = aerobicBaseline.map((s) => {
+      const p = radarMetricValue(s, "pace");
+      const h = radarHrContext(s).avgHR;
+      return p != null && p > 0 && h != null && h > 0 ? 1 / (p * h) : null;
+    }).filter((v) => v != null && Number.isFinite(v) && v > 0);
+    const latestAerobicEfficiency = latestPace != null && latestPace > 0 && latestHrCtx.avgHR != null && latestHrCtx.avgHR > 0
+      ? 1 / (latestPace * latestHrCtx.avgHR)
+      : null;
     const aerobicBase = radarMean(aerobicVals);
-    if (latestCoverage >= 0.70 && latestPPH != null && aerobicBase != null && latestPPH > 0) addAxis("aerobic", latestPPH, aerobicBase, 100 * (aerobicBase / latestPPH), { latest: latestPPH, baseline: aerobicBase, latestHrCoverage: latestCoverage, baselineCount: aerobicBaseline.length });
+    if (latestHrCtx.coverage >= 0.70 && latestAerobicEfficiency != null && aerobicBase != null && aerobicBase > 0) {
+      addAxis(
+        "aerobic",
+        latestAerobicEfficiency,
+        aerobicBase,
+        100 * (latestAerobicEfficiency / aerobicBase),
+        {
+          latest: latestAerobicEfficiency,
+          baseline: aerobicBase,
+          latestAvgHR: latestHrCtx.avgHR,
+          latestHrCoverage: latestHrCtx.coverage,
+          baselineCount: aerobicBaseline.length
+        }
+      );
+    }
     return profile;
   })();
 
@@ -2952,7 +2992,7 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "dps",
       title: "Distance/stroke" + strokeTitleSuffix(activeStroke) + " · same pool",
       series: dpsSeries,
-      verdict: computeVerdict(dpsSeries, "higher-better", INSIGHT_THRESHOLDS.dpsMeaningfulPct, { worse: "Lower" }),
+      verdict: computeVerdict(dpsSeries, "neutral", INSIGHT_THRESHOLDS.dpsMeaningfulPct, { up: "Higher", down: "Lower" }),
       value: headlineOf(dpsSeries, strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`) != null ? `${headlineOf(dpsSeries, strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`).toFixed(2)}m` : "—",
       perStroke: true,
       color: strokeCardColor,
@@ -4010,7 +4050,7 @@ function SwimmingTab({ isMobile, onExit }) {
                         {radarVisibleProfile.map((axis) => {
                           const descriptions = {
                             pace: "Speed — compares the latest pace with your previous 6-week pace baseline. Higher than 100 means faster than your normal baseline.",
-                            efficiency: "Stroke Efficiency — blends same-pool SWOLF (lower is better) with same-pool distance per stroke (higher is better), each relative to your own baseline.",
+                            efficiency: "Stroke Efficiency — blends same-pool SWOLF with distance per stroke. The combined score is favorable when lower SWOLF and/or more distance per stroke move together versus your baseline.",
                             consistency: "Consistency — measures how typical today's pace was compared with your normal training variability. Around 100 means it stayed within your usual range.",
                             endurance: "Endurance — compares the latest session distance with your average qualifying session distance over the previous 6 weeks.",
                             aerobic: "Aerobic Efficiency — compares pace per heartbeat with your baseline. It appears only when real heart-rate coverage is sufficient; higher than 100 means better efficiency than baseline.",
