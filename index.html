@@ -3414,6 +3414,16 @@ function TrainingLog() {
   const athleteModeLabel = athleteMode === "swim" ? "Swim only" : athleteMode === "workout" ? "Workout only" : "Hybrid";
   const visibleTabs = TABS.filter((t) => athleteMode === "swim" ? t.id !== "workout" : athleteMode === "workout" ? t.id !== "swim" : true);
 
+  const [workoutSection, setWorkoutSection] = useState(() => {
+    try {
+      const saved = localStorage.getItem("workout-section-v1");
+      return ["dashboard", "stats"].includes(saved) ? saved : "dashboard";
+    } catch { return "dashboard"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("workout-section-v1", workoutSection); } catch {}
+  }, [workoutSection]);
+
   const [filter, setFilter] = useState("All");
   const [metric, setMetric] = useState("reps");
   const [range, setRange] = useState("all");
@@ -3457,6 +3467,10 @@ function TrainingLog() {
   const CUSTOM_LIB_KEY = "custom-exercises-v1";
   const OWNER_KEY = "owner-name-v1";
   const PR_SELECTION_KEY = "pr-selection-v1";
+  const WEIGHT_LOG_KEY = "weight-log-v1";
+  const [weightLog, setWeightLog] = useState([]);
+  const [weightLogDate, setWeightLogDate] = useState(() => toISODate(new Date()));
+  const [weightLogKg, setWeightLogKg] = useState("");
   const fileInputRef = useRef(null);
 
   // ---- History & Log: Workout / Swim toggle -------------------------------------------
@@ -3733,6 +3747,26 @@ function TrainingLog() {
   useEffect(() => {
     (async () => {
       try {
+        const res = await window.storage.get(WEIGHT_LOG_KEY, false);
+        const raw = res && res.value ? JSON.parse(res.value) : [];
+        const clean = Array.isArray(raw)
+          ? raw.filter((e) => e && e.date && Number.isFinite(Number(e.kg)) && Number(e.kg) > 0)
+              .map((e) => ({ id: e.id || `w-${e.date}`, date: e.date, kg: Number(e.kg) }))
+              .sort((a,b) => a.date.localeCompare(b.date))
+          : [];
+        setWeightLog(clean);
+        if (JSON.stringify(clean) !== JSON.stringify(raw)) {
+          try { await window.storage.set(WEIGHT_LOG_KEY, JSON.stringify(clean), false); } catch (_) {}
+        }
+      } catch (_) {
+        setWeightLog([]);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
         const res = await window.storage.get(TARGET_KEY, false);
         setTargetSettings(res && res.value ? JSON.parse(res.value) : {});
       } catch (e) {
@@ -3915,6 +3949,23 @@ function TrainingLog() {
     try { await window.storage.set(STORAGE_KEY, JSON.stringify(next), false); } catch (_) {}
   };
 
+  const persistWeightLog = async (next) => {
+    const clean = [...next].sort((a,b) => a.date.localeCompare(b.date));
+    setWeightLog(clean);
+    try { await window.storage.set(WEIGHT_LOG_KEY, JSON.stringify(clean), false); } catch (_) {}
+  };
+  const saveStandaloneWeight = async () => {
+    const kg = parseFloat(weightLogKg);
+    if (!weightLogDate || !Number.isFinite(kg) || kg <= 0) return;
+    const entry = { id: `w-${weightLogDate}`, date: weightLogDate, kg: Math.round(kg * 100) / 100 };
+    const next = [...(weightLog || []).filter((e) => e.date !== weightLogDate), entry];
+    await persistWeightLog(next);
+    setWeightLogKg("");
+  };
+  const deleteStandaloneWeight = async (id) => {
+    await persistWeightLog((weightLog || []).filter((e) => e.id !== id));
+  };
+
   const saveTargetSettings = async () => {
     const weeksNum = parseInt(targetDraft.weeks, 10);
     const next = {
@@ -4052,9 +4103,9 @@ function TrainingLog() {
     };
     const swimTargetSettings = await readSettingJSON("swim-target-settings-v1");
     const freshSwimSessions = viewMode === "workout" ? null : await readSwimSessionsFresh();
-    if (viewMode === "workout") { payload = { sessions, settings: workoutSettings }; suffix = "workout"; }
+    if (viewMode === "workout") { payload = { sessions, weightLog, settings: workoutSettings }; suffix = "workout"; }
     else if (viewMode === "swim") { payload = { swimSessions: freshSwimSessions, settings: { swimTargetSettings } }; suffix = "swim"; }
-    else { payload = { sessions, swimSessions: freshSwimSessions, settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
+    else { payload = { sessions, swimSessions: freshSwimSessions, weightLog, settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -4092,7 +4143,8 @@ function TrainingLog() {
         const isObj = parsed && !Array.isArray(parsed);
         const workoutArr = isObj && Array.isArray(parsed.sessions) ? parsed.sessions : Array.isArray(parsed) ? parsed : null;
         const swimArr = isObj && Array.isArray(parsed.swimSessions) ? parsed.swimSessions : null;
-        if (!workoutArr && !swimArr) throw new Error("unrecognized shape");
+        const weightArr = isObj && Array.isArray(parsed.weightLog) ? parsed.weightLog : null;
+        if (!workoutArr && !swimArr && !weightArr) throw new Error("unrecognized shape");
 
         let workoutMsg = "";
         if (workoutArr) {
@@ -4115,6 +4167,17 @@ function TrainingLog() {
           swimMsg = ` Imported ${swimToAdd.length} swim session(s)${swimSkipped ? `, skipped ${swimSkipped} duplicate(s)` : ""}.`;
         }
 
+        let weightMsg = "";
+        if (weightArr) {
+          const existingWeightDates = new Set((weightLog || []).map((e) => e.date));
+          const cleanWeights = weightArr
+            .filter((e) => e && e.date && Number.isFinite(Number(e.kg)) && Number(e.kg) > 0 && !existingWeightDates.has(e.date))
+            .map((e) => ({ id: e.id || `w-${e.date}`, date: e.date, kg: Number(e.kg) }));
+          const skippedWeight = weightArr.length - cleanWeights.length;
+          await persistWeightLog([...(weightLog || []), ...cleanWeights]);
+          weightMsg = ` Imported ${cleanWeights.length} weight entr${cleanWeights.length === 1 ? "y" : "ies"}${skippedWeight ? `, skipped ${skippedWeight} duplicate/invalid` : ""}.`;
+        }
+
         // Restore settings (target names/header, PR-card selection, tracked/custom exercises,
         // weight + swim targets) if the export included them — overwrites whatever's currently
         // saved, since importing a backup is an intentional restore.
@@ -4133,7 +4196,7 @@ function TrainingLog() {
           } catch (_) {}
         }
 
-        setImportMsg((workoutMsg || swimMsg || settingsMsg) ? `${workoutMsg}${swimMsg}${settingsMsg}` : "Nothing new to import.");
+        setImportMsg((workoutMsg || swimMsg || weightMsg || settingsMsg) ? `${workoutMsg}${swimMsg}${weightMsg}${settingsMsg}` : "Nothing new to import.");
       } catch (err) {
         setImportMsg("Import failed — file doesn't look like a valid export.");
       }
@@ -4155,17 +4218,23 @@ function TrainingLog() {
     return s;
   }, [sessions]);
 
-  // Carries the last logged bodyweight forward for any session where it wasn't entered,
-  // so volume/PR math doesn't silently break just because bodyweight was left blank that day.
+  // Carries the most recent known bodyweight forward into workouts where bodyweight was
+  // left blank. Standalone weight logs participate in this fallback, but an explicitly logged
+  // workout bodyweight always wins for that workout.
   const bwMap = useMemo(() => {
     const map = {};
-    let last = null;
+    const standalone = [...(weightLog || [])].sort((a,b) => a.date.localeCompare(b.date));
+    let wi = 0, last = null;
     (sessions || []).forEach((s) => {
+      while (wi < standalone.length && standalone[wi].date <= s.date) {
+        last = standalone[wi].kg;
+        wi += 1;
+      }
       if (s.bodyweight != null) last = s.bodyweight;
       map[s.id] = last;
     });
     return map;
-  }, [sessions]);
+  }, [sessions, weightLog]);
 
   // Per-set "load per rep" (bodyweight × ratio + THAT set's added weight), aligned with
   // s.ex[name] — since weight is now tracked per set rather than once per session, volume
@@ -4723,8 +4792,14 @@ function TrainingLog() {
     return bits.join(" ");
   }, [combinedConsistency, consistency, swimConsistencyMini, athleteMode, visibleSessionCount]);
 
-  const latestBw = latest ? bwMap[latest.id] : null;
-  const firstBw = first ? bwMap[first.id] : null;
+  const combinedWeightTimeline = useMemo(() => {
+    const byDate = {};
+    (sessions || []).forEach((s) => { if (s.bodyweight != null) byDate[s.date] = { date: s.date, kg: Number(s.bodyweight), source: "workout" }; });
+    (weightLog || []).forEach((e) => { if (e && e.date && e.kg != null) byDate[e.date] = { date: e.date, kg: Number(e.kg), source: "weight log" }; });
+    return Object.values(byDate).filter((e) => Number.isFinite(e.kg) && e.kg > 0).sort((a,b) => a.date.localeCompare(b.date));
+  }, [sessions, weightLog]);
+  const latestBw = combinedWeightTimeline.length ? combinedWeightTimeline[combinedWeightTimeline.length - 1].kg : null;
+  const firstBw = combinedWeightTimeline.length ? combinedWeightTimeline[0].kg : null;
   const bwDelta = latestBw != null && firstBw != null ? latestBw - firstBw : null;
 
   // ---- Dashboard: weight card (expand + target weight) --------------------------------
@@ -4765,12 +4840,12 @@ function TrainingLog() {
     return Math.max(0, Math.min(100, pct));
   })();
 
-  const dashBodyweightDaily = useMemo(() => (sessions || []).filter((s) => s.bodyweight != null).map((s) => ({ date: fmtDate(s.date), kg: s.bodyweight })), [sessions]);
+  const dashBodyweightDaily = useMemo(() => combinedWeightTimeline.map((e) => ({ date: fmtDate(e.date), kg: e.kg })), [combinedWeightTimeline]);
   const dashBodyweightWeekly = useMemo(() => {
     const byWeek = {};
-    (sessions || []).forEach((s) => { if (s.bodyweight != null) byWeek[toISODate(mondayOf(s.date))] = s.bodyweight; });
+    combinedWeightTimeline.forEach((e) => { byWeek[toISODate(mondayOf(e.date))] = e.kg; });
     return Object.keys(byWeek).sort().map((wk) => ({ date: fmtDate(wk), kg: byWeek[wk] }));
-  }, [sessions]);
+  }, [combinedWeightTimeline]);
   const dashBodyweightSeries = weightTimeView === "week" ? dashBodyweightWeekly : dashBodyweightDaily;
 
   // ---- Dashboard: swim target editing (Swim tab no longer shows/edits this) -----------
@@ -4912,7 +4987,8 @@ function TrainingLog() {
           background:#262321 !important;
           border-color:#3A3530 !important;
         }
-        .ui-day .swim-subnav {
+        .ui-day .swim-subnav,
+        .ui-day .workout-subnav {
           background:#EEE8DD !important;
           border-color:#D4CCBF !important;
         }
@@ -5105,7 +5181,7 @@ function TrainingLog() {
           Trends/Compare/Web chart switcher is the one that floats while scrolling now; having
           both float at once meant this bar's sticky region could sit on top of and hide the
           inner switcher depending on scroll position, which is what item 5 fixes. */}
-      {tab !== "swim" && (
+      {tab !== "swim" && tab !== "workout" && (
         <>
       <div style={{ background: FLOATING_BAR_BG_SOFT, borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
@@ -5413,6 +5489,26 @@ function TrainingLog() {
 
         {tab === "workout" && (
           <>
+            <div className="swim-subnav workout-subnav" style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 3, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 5, marginBottom: 14 }}>
+              <button className="app-nav-pill app-nav-back" onClick={() => setTab("dashboard")} title="Back to Today" style={{
+                flex: "0 0 auto", display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+                cursor: "pointer", background: "transparent", border: "none", borderRadius: 9,
+                color: "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 11,
+                padding: isMobile ? "7px 5px" : "8px 7px", whiteSpace: "nowrap"
+              }}>‹ Today</button>
+              {[["dashboard", "Dashboard", LayoutGrid], ["stats", "Stats", TrendingUp]].map(([v,l,Ic]) => {
+                const selected = workoutSection === v;
+                return <button key={v} className="app-nav-pill" onClick={() => setWorkoutSection(v)} style={{
+                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
+                  background: selected ? "#FF9F0A" : "transparent", border: "none", borderRadius: 10,
+                  color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 12,
+                  padding: isMobile ? "7px 4px" : "8px 7px"
+                }}><Ic size={isMobile ? 11 : 13} />{l}</button>;
+              })}
+            </div>
+
+            {workoutSection === "dashboard" && (
+            <>
             {/* PR card — top, matching the Swim tab's emphasis on PRs first */}
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 10 }}>
@@ -5467,6 +5563,34 @@ function TrainingLog() {
               </div>
             </div>
 
+            <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, padding: 16, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "#8E8E93", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Weight log</div>
+                  <div style={{ fontSize: 10.5, color: "#636366", marginTop: 2 }}>Log bodyweight even on rest days.</div>
+                </div>
+                <div className="mono" style={{ fontSize: 18, color: "#64D2FF", fontWeight: 800 }}>{latestBw != null ? `${fmtNum(latestBw,1)}kg` : "—"}</div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr auto" : "150px 140px auto", gap: 7, alignItems: "center", marginBottom: 10 }}>
+                <input type="date" value={weightLogDate} onChange={(e) => setWeightLogDate(e.target.value)} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 9, padding: "7px 8px", color: "#F2F2F7", fontSize: 11 }} />
+                <input type="number" step="0.1" min="1" value={weightLogKg} onChange={(e) => setWeightLogKg(e.target.value)} placeholder="Weight kg" className="mono" style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 9, padding: "7px 8px", color: "#F2F2F7", fontSize: 11 }} />
+                <button onClick={saveStandaloneWeight} disabled={!weightLogDate || !Number.isFinite(parseFloat(weightLogKg)) || parseFloat(weightLogKg) <= 0} style={{ cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 9, padding: "8px 10px", fontSize: 11, fontWeight: 800 }}>Save</button>
+              </div>
+              {(weightLog || []).length > 0 && (
+                <div style={{ display: "grid", gap: 5 }}>
+                  {[...(weightLog || [])].sort((a,b) => b.date.localeCompare(a.date)).slice(0,4).map((e) => (
+                    <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: "1px solid #27272A", paddingTop: 6 }}>
+                      <span className="mono" style={{ fontSize: 10.5, color: "#8E8E93" }}>{fmtDateFull(e.date)}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span className="mono" style={{ fontSize: 11.5, color: "#D1D1D6", fontWeight: 700 }}>{fmtNum(e.kg,1)}kg</span>
+                        <Trash2 size={12} color="#FF453A" style={{ cursor: "pointer" }} onClick={() => deleteStandaloneWeight(e.id)} />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 4 }}>Volume by muscle group — latest session ({latest ? fmtDate(latest.date) : ""})</div>
               <div style={{ fontSize: 11, color: "#636366", marginBottom: 12 }}>
@@ -5488,6 +5612,11 @@ function TrainingLog() {
               </div>
             </div>
 
+            </>
+            )}
+
+            {workoutSection === "stats" && (
+            <>
             <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
               <button className="pill" onClick={() => changeFilter("All")} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700, border: filter === "All" ? "1px solid #FFFFFF" : "1px solid #27272A", background: filter === "All" ? "#FFFFFF1a" : "#1C1C1E", color: filter === "All" ? "#FFFFFF" : "#8E8E93", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" }}>All</button>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -5613,6 +5742,8 @@ function TrainingLog() {
             <div style={{ background: "#000000", border: "1px dashed #27272A", borderRadius: 16, padding: "10px 14px", fontSize: 11, color: "#636366", marginBottom: 8 }}>
               "First logged session" ({first ? fmtDateFull(first.date) : ""}) is just your earliest entry — used only as a fixed reference point for comparisons, not a training assumption.
             </div>
+            </>
+            )}
           </>
         )}
 
