@@ -1854,7 +1854,8 @@ function SwimmingTab({ isMobile, onExit }) {
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
   const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "none", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
-  const [compareMetrics, setCompareMetrics] = useState(["pace", "cadence"]); // exactly two independently selected Compare metrics
+  const [compareMetrics, setCompareMetrics] = useState(["pace", "cadence"]); // freely selectable Compare metrics
+  const [compareHelpOpen, setCompareHelpOpen] = useState(false);
   const [selectedComparePoint, setSelectedComparePoint] = useState(null); // date string of a tapped Compare chart dot, or null for "overall trend" view
   const [showCompareInfo, setShowCompareInfo] = useState(false); // toggles the Compare chart's "what is this" info popover
   const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
@@ -3360,21 +3361,32 @@ function SwimmingTab({ isMobile, onExit }) {
                       setSelectedComparePoint(null);
                       setCompareMetrics((cur) => {
                         if (cur.includes(v)) return cur.length > 1 ? cur.filter((x) => x !== v) : cur;
-                        return cur.length < 2 ? [...cur, v] : [cur[1], v];
+                        return [...cur, v];
                       });
                     }} className="pill compare-combo-pill" style={{
                       cursor: "pointer", background: selected ? c : `${c}12`,
                       border: `1.5px solid ${selected ? c : c + "44"}`,
                       color: selected ? "#000000" : c,
                       borderRadius: 10, padding: "4px 8px", fontSize: 10.5, fontWeight: 700,
-                    }}>{selected ? `${order + 1} · ` : ""}{l}</button>
+                    }}>{l}</button>
                   );
                 })}
               </div>
+              <button onClick={() => setCompareHelpOpen((v) => !v)} style={{ marginTop: 8, padding: 0, border: 0, background: "transparent", cursor: "pointer", color: "#8E8E93", fontSize: 10.5, fontWeight: 700, textDecoration: "underline" }}>What do these metrics mean?</button>
+              {compareHelpOpen && <div style={{ marginTop: 8, padding: "10px 11px", border: "1px solid #2C2C2E", borderRadius: 12, background: "#141416", fontSize: 10.5, lineHeight: 1.45 }}>
+                <div style={{ color: "#8E8E93", marginBottom: 7 }}>σ = distance from <b style={{color:"#F5F5F7"}}>your own typical level</b>. Farther from 0σ means more unusual for you — not automatically better.</div>
+                {[
+                  ["Pace","#F5F5F7","Lower time is faster. Flipped here: above 0σ = faster; below = slower."],
+                  ["Distance / Stroke","#30D158","Metres per Garmin-counted stroke. Above 0σ = more distance per stroke. Higher alone does not prove better technique."],
+                  ["Stroke Rate","#64D2FF","Garmin-counted strokes per minute (spm). Above 0σ = higher turnover. Neither direction is automatically better."],
+                  ["SWOLF","#BF5AF2","Length time + stroke count. Compare like-for-like pool conditions. Flipped here: above 0σ = lower SWOLF."],
+                  ["Avg HR","#FF453A","Average session heart rate. Above 0σ = higher HR. Neither direction is automatically better; interpret with pace/workload."]
+                ].map(([name,color,desc]) => <div key={name} style={{marginTop:6}}><b style={{color}}>{name}</b><span style={{color:"#AEAEB2"}}> — {desc}</span></div>)}
+              </div>}
             </div>
             {showCompareInfo && (
               <div style={{ fontSize: 11, color: "#8E8E93", background: "#000000", border: "1px solid #27272A", borderRadius: 12, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }}>
-                Pick any two metrics. Tap a selected metric to remove it, or tap another metric to replace the oldest selection. Lines are normalized (σ) so differently-scaled metrics can share one axis; real values stay in the tooltip. Pace and SWOLF are flipped so upward means better, DPS and Stroke Rate keep their natural direction, and HR remains neutral (higher simply means higher cardiovascular response).
+                Select any metrics you want to overlay. Tap a selected metric to remove it. Lines are normalized (σ) so differently-scaled metrics can share one axis; real values stay in the tooltip.
               </div>
             )}
             {/* Swim-type filter lives only once now, as the shared floating filter above both
@@ -3390,186 +3402,47 @@ function SwimmingTab({ isMobile, onExit }) {
                 if (metric === "swolf") return { id: metric, key: strokeFilter === "all" ? "swolf_all" : `swolf_${compareStroke}`, label: "SWOLF", fmt: (v) => `${Math.round(v)}`, color: "#BF5AF2", direction: "lower", wholeSession: false };
                 return { id: "hr", key: "avgHR", label: "Avg HR", fmt: (v) => `${Math.round(v)} bpm`, color: "#FF453A", direction: "neutral", wholeSession: true };
               };
-              const cfgA = metricCfg(compareMetrics[0]);
-              const cfgB = metricCfg(compareMetrics[1]);
-              const primaryKey = cfgA.key, primaryLabel = cfgA.label, primaryFmt = cfgA.fmt;
-              const otherKey = cfgB.key, otherLabel = cfgB.label, otherFmt = cfgB.fmt, otherColor = cfgB.color;
-              const comparePrimaryColor = cfgA.color;
+              const selectedCfgs = compareMetrics.map(metricCfg);
               const strokeLabel = strokeFilter === "all" ? "All swim types" : SWIM_STROKE_LABELS[activeStroke];
-
-              if ((cfgA.wholeSession || cfgB.wholeSession) && !trendDataView.some((d) => d.avgHR != null)) {
-                return <div style={{ padding: "20px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5 }}>No heart rate data recorded yet.</div>;
-              }
-
-              const primaryStats = computeMeanStd(trendDataView.map((d) => d[primaryKey]));
-              const otherStats = computeMeanStd(trendDataView.map((d) => d[otherKey]));
-              const pairedCount = trendDataView.filter((d) => d[primaryKey] != null && d[otherKey] != null).length;
-              const normalizedData = trendDataView.map((d) => ({
-                ...d,
-                primaryZ: primaryStats ? (() => { const z = zScoreOf(d[primaryKey], primaryStats); return z == null ? null : (cfgA.direction === "lower" ? -z : z); })() : null,
-                otherZ: otherStats ? (() => { const z = zScoreOf(d[otherKey], otherStats); return z == null ? null : (cfgB.direction === "lower" ? -z : z); })() : null,
-              }));
-              const zTooltipFormatter = (v, name, props) => {
-                if (name === primaryLabel) return [props.payload[primaryKey] != null ? primaryFmt(props.payload[primaryKey]) : "—", name];
-                if (name === otherLabel) return [props.payload[otherKey] != null ? otherFmt(props.payload[otherKey]) : "—", name];
-                return [v, name];
-              };
-
+              const metricStats = Object.fromEntries(selectedCfgs.map((cfg) => [cfg.id, computeMeanStd(trendDataView.map((d) => d[cfg.key]))]));
+              const normalizedData = trendDataView.map((d) => {
+                const out = { ...d };
+                selectedCfgs.forEach((cfg) => {
+                  const stats = metricStats[cfg.id];
+                  const z = stats ? zScoreOf(d[cfg.key], stats) : null;
+                  out[`compareZ_${cfg.id}`] = z == null ? null : (cfg.direction === "lower" ? -z : z);
+                });
+                return out;
+              });
+              if (!trendDataView.some((d) => selectedCfgs.some((cfg) => d[cfg.key] != null))) return <div style={{ padding: "26px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5 }}>No comparable data for these metrics and filters.</div>;
               return (
                 <div>
-                  <div style={{ fontSize: 10.5, color: "#636366", marginBottom: 10, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 10.5, color: "#636366", marginBottom: 10, display: "flex", gap: 5, flexWrap: "wrap" }}>
                     <span>{strokeLabel}</span>
-                    {strokeFilter === "all" && <span style={{ color: "#636366" }}>· all applicable swim types are aggregated</span>}
-                    {(cfgA.wholeSession || cfgB.wholeSession) && strokeFilter !== "all" && <span style={{ color: "#48484A" }}>· HR is whole-session, not stroke-specific</span>}
-                    {(cfgA.id === "dps" || cfgB.id === "dps" || cfgA.id === "swolf" || cfgB.id === "swolf") && <span style={{ color: "#48484A" }}>· DPS/SWOLF use same-pool comparisons</span>}
+                    {strokeFilter === "all" && <span>· all applicable swim types are aggregated</span>}
+                    {selectedCfgs.some((cfg) => cfg.wholeSession) && strokeFilter !== "all" && <span>· HR is whole-session</span>}
+                    {selectedCfgs.some((cfg) => cfg.id === "dps" || cfg.id === "swolf") && <span>· DPS/SWOLF use same-pool comparisons</span>}
                   </div>
-                  {pairedCount < 2 ? (
-                    pairedCount === 0 ? (
-                      <div style={{ padding: "26px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5, lineHeight: 1.5 }}>
-                        No sessions yet with both {primaryLabel.toLowerCase()} and {otherLabel.toLowerCase()} recorded for {strokeLabel.toLowerCase()}.
-                      </div>
-                    ) : (
-                      <>
-                        {(() => {
-                          const only = trendDataView.find((d) => d[primaryKey] != null && d[otherKey] != null) || trendDataView[0];
-                          return (
-                            <div style={{ display: "flex", gap: 28, padding: "18px 4px 8px" }}>
-                              <div>
-                                <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.06em" }}>{primaryLabel}</div>
-                                <div style={{ fontSize: 30, fontWeight: 700, color: "#64D2FF" }}>{only[primaryKey] != null ? primaryFmt(only[primaryKey]) : "—"}</div>
-                              </div>
-                              <div>
-                                <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.06em" }}>{otherLabel}</div>
-                                <div style={{ fontSize: 30, fontWeight: 700, color: otherColor }}>{only[otherKey] != null ? otherFmt(only[otherKey]) : "—"}</div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                        <div style={{ fontSize: 10, color: "#48484A", marginTop: 4 }}>Log one more comparable swim to see these actually plotted against each other.</div>
-                      </>
-                    )
-                  ) : (() => {
-                    const primaryPoints = trendDataView.map((d) => ({ date: d.date, v: d[primaryKey] })).filter((p) => p.v != null);
-                    const secPoints = trendDataView.map((d) => ({ date: d.date, v: d[otherKey] })).filter((p) => p.v != null);
-
-                    const selectedRow = selectedComparePoint ? trendDataView.find((d) => d.date === selectedComparePoint) : null;
-                    const selectedPrimary = selectedRow ? selectedRow[primaryKey] : null;
-                    const selectedSecondary = selectedRow ? selectedRow[otherKey] : null;
-                    // Baseline for a selected session = up to 6 other recent sessions where BOTH
-                    // compared metrics exist on the same date. This prevents the primary and secondary
-                    // baselines from silently being built from different sessions.
-                    const pairedBaselineRows = trendDataView
-                      .filter((d) => d.date !== selectedComparePoint && d[primaryKey] != null && d[otherKey] != null)
-                      .slice(-6);
-                    const baselinePrimaryVals = pairedBaselineRows.map((d) => d[primaryKey]);
-                    const baselineSecondaryVals = pairedBaselineRows.map((d) => d[otherKey]);
-
-                    const trendInterp = !selectedComparePoint ? generateFlexibleCompareTrendInterpretation(cfgA.id, cfgB.id, primaryPoints, secPoints, INSIGHT_THRESHOLDS.mediumTermWeeks) : null;
-                    const sessionInterp = selectedRow ? generateFlexibleCompareSessionInterpretation(cfgA.id, cfgB.id, selectedPrimary, selectedSecondary, baselinePrimaryVals, baselineSecondaryVals) : null;
-                    const interp = selectedComparePoint ? sessionInterp : trendInterp;
-                    const cat = interp ? INSIGHT_CATEGORIES[interp.category] : null;
-
-                    // Custom dot renderer: purely visual now (see item 4/6) — selection itself is
-                    // driven by the chart-level onClick above, not this dot's own click, since that's
-                    // what reliably registers on mobile taps. Selected dot enlarges and lightens,
-                    // every other dot dims so the selection reads clearly against the full trend line.
-                    const makeDot = (color) => (dotProps) => {
-                      const { cx, cy, payload, index } = dotProps;
-                      if (cx == null || cy == null) return null;
-                      const isSelected = selectedComparePoint === payload.date;
-                      const isDimmed = selectedComparePoint && !isSelected;
-                      return (
-                        <circle
-                          key={`dot-${color}-${index}`}
-                          cx={cx} cy={cy}
-                          r={isSelected ? 6 : 3}
-                          fill={isSelected ? "#FFFFFF" : color}
-                          stroke={color}
-                          strokeWidth={isSelected ? 2 : 1}
-                          opacity={isDimmed ? 0.3 : 1}
-                        />
-                      );
-                    };
-
-                    return (
-                      <>
-                        {selectedRow && (
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "#FFFFFF" }}>Selected: {selectedRow.label}</div>
-                            <button onClick={() => setSelectedComparePoint(null)} className="pill" style={{ cursor: "pointer", background: "transparent", border: "1px solid #3A3A3C", color: "#8E8E93", borderRadius: 12, padding: "3px 9px", fontSize: 11 }}>
-                              ← View overall trend
-                            </button>
-                          </div>
-                        )}
-                        {interp ? (
-                          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: cat.bg, border: `1px solid ${cat.color}33`, borderRadius: 14, padding: "10px 12px", marginBottom: 12 }}>
-                            <cat.Icon size={14} style={{ color: cat.color, flexShrink: 0, marginTop: 1 }} />
-                            <div>
-                              <div style={{ fontSize: 12.5, fontWeight: 700, color: cat.color }}>{interp.headline}</div>
-                              <div style={{ fontSize: 11.5, color: "#D1D1D6", marginTop: 1 }}>{interp.detail}</div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 11.5, color: "#636366", marginBottom: 12 }}>
-                            {selectedComparePoint ? "Not enough other comparable sessions yet to compare this one against." : "Not enough comparable sessions yet to interpret this trend — keep logging and this will fill in."}
-                          </div>
-                        )}
-                        {selectedRow && selectedPrimary != null && selectedSecondary != null && (
-                          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 12 }}>
-                            <div>
-                              <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.06em" }}>Selected session</div>
-                              <div style={{ fontSize: 13, color: "#FFFFFF" }}>{primaryLabel} {primaryFmt(selectedPrimary)} &nbsp; {otherLabel} {otherFmt(selectedSecondary)}</div>
-                            </div>
-                            {baselinePrimaryVals.length >= 2 && baselineSecondaryVals.length >= 2 && (
-                              <div>
-                                <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.06em" }}>Recent baseline</div>
-                                <div style={{ fontSize: 13, color: "#8E8E93" }}>{primaryLabel} {primaryFmt(medianOf(baselinePrimaryVals))} &nbsp; {otherLabel} {otherFmt(medianOf(baselineSecondaryVals))}</div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        <ResponsiveContainer width="100%" height={220}>
-                          <LineChart
-                            data={normalizedData}
-                            margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-                            onClick={(e) => {
-                              // Chart-level click/tap handler, not per-dot: this uses Recharts' own
-                              // touch-tracking (the same mechanism that already drives the Tooltip),
-                              // which reliably hit-tests on mobile taps — a raw onClick on a 3px SVG
-                              // dot circle does not, since the tracking layer intercepts the touch
-                              // first. activePayload carries the full row (including its date) for
-                              // whichever x-position was tapped.
-                              if (!e || !e.activePayload || !e.activePayload.length) return;
-                              const clickedDate = e.activePayload[0].payload.date;
-                              if (clickedDate == null) return;
-                              setSelectedComparePoint((prev) => (prev === clickedDate ? null : clickedDate));
-                            }}
-                          >
-                            <XAxis dataKey="label" tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} tickMargin={8} interval="preserveStartEnd" />
-                            <YAxis
-                              tick={{ fill: "#8E8E93", fontSize: 10 }}
-                              tickLine={false}
-                              axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }}
-                              width={42}
-                              tickFormatter={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`}
-                              domain={[(dataMin) => Math.min(dataMin - 0.3, -1), (dataMax) => Math.max(dataMax + 0.3, 1)]}
-                            />
-                            {/* Bright teal, distinct from every line color this chart can show (blue
-                                primary, gold or red secondary) so "Avg" reads clearly against all of them —
-                                previously a low-contrast gray that nearly disappeared on the dark background. */}
-                            <ReferenceLine y={0} stroke="#A7A7AC" strokeWidth={1} strokeDasharray="4 5" label={{ value: "Avg", position: "insideTopRight", fill: "#8E8E93", fontSize: 9.5, fontWeight: 700 }} />
-                            <Tooltip contentStyle={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={zTooltipFormatter} />
-                            <Legend wrapperStyle={{ fontSize: 11 }} />
-                            {/* Keep the primary series visually dominant and make the secondary
-                                series dashed/translucent so identical or near-identical values remain
-                                distinguishable without modifying the underlying data. */}
-                            <Line type="monotone" dataKey="otherZ" name={otherLabel} stroke={otherColor} strokeWidth={2.4} strokeOpacity={0.9} dot={{ r: 2.5, fill: otherColor, strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
-                            <Line type="monotone" dataKey="primaryZ" name={primaryLabel} stroke={comparePrimaryColor} strokeWidth={2.6} strokeOpacity={1} dot={{ r: 2.5, fill: comparePrimaryColor, strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </>
-                    );
-                  })()}
+                  <ResponsiveContainer width="100%" height={310}>
+                    <LineChart data={normalizedData} margin={{ top: 12, right: 12, left: -8, bottom: 4 }}>
+                      <CartesianGrid stroke="#2C2C2E" strokeDasharray="3 5" vertical={false} />
+                      <XAxis dataKey="date" tick={{ fill: "#636366", fontSize: 9.5 }} tickLine={false} axisLine={{ stroke: "#3A3A3C" }} />
+                      <YAxis tick={{ fill: "#636366", fontSize: 9.5 }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v > 0 ? "+" : ""}${fmtNum(v,1)}σ`} />
+                      <ReferenceLine y={0} stroke="#8E8E93" strokeDasharray="4 5" label={{ value: "Typical", fill: "#8E8E93", fontSize: 9.5 }} />
+                      <Tooltip content={({active,payload,label}) => {
+                        if (!active || !payload?.length) return null;
+                        const row=payload[0].payload;
+                        return <div style={{background:"#000",border:"1px solid #2C2C2E",borderRadius:12,padding:"9px 11px",fontSize:11}}>
+                          <div style={{color:"#F5F5F7",fontWeight:800,marginBottom:5}}>{label}</div>
+                          {selectedCfgs.map((cfg)=>row[cfg.key]==null?null:<div key={cfg.id} style={{color:cfg.color,fontWeight:700}}>{cfg.label}: {cfg.fmt(row[cfg.key])}</div>)}
+                        </div>;
+                      }} />
+                      {selectedCfgs.map((cfg) => <Line key={cfg.id} type="monotone" dataKey={`compareZ_${cfg.id}`} name={cfg.label} stroke={cfg.color} strokeWidth={2.5} dot={{r:2.5,fill:cfg.color,strokeWidth:0}} activeDot={{r:5}} connectNulls />)}
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div style={{display:"flex",justifyContent:"center",gap:10,flexWrap:"wrap",marginTop:4}}>
+                    {selectedCfgs.map((cfg)=><span key={cfg.id} style={{color:cfg.color,fontSize:10.5,fontWeight:700}}>—●— {cfg.label}</span>)}
+                  </div>
                 </div>
               );
             })()}
