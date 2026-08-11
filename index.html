@@ -2400,22 +2400,28 @@ function buildDashboardStrokeAwareInsights({ workoutSessions, allSwimSessions, t
     }));
   });
 
-  // Frequency is about training rhythm, so CSS tests still count as swims.
-  const frequency = generateFrequencyInsight(allSwimSessions, todayStr);
-  if (frequency) candidates.push(frequency);
-
+  // Dashboard has one profile-level insight only. Stroke-specific candidates are still
+  // calculated independently, then the strongest non-contradictory signal represents the
+  // overall Work-effort profile. Frequency remains a separate dashboard statistic elsewhere.
   candidates.sort((a,b) => (a.priority ?? 50) - (b.priority ?? 50));
 
-  // Avoid three near-identical stories from the same stroke.
-  const picked = [];
-  const usedStrokes = new Set();
-  for (const c of candidates) {
-    if (c.sourceStroke && usedStrokes.has(c.sourceStroke)) continue;
-    picked.push(c);
-    if (c.sourceStroke) usedStrokes.add(c.sourceStroke);
-    if (picked.length >= 3) break;
+  if (candidates.length) {
+    const strongest = candidates[0];
+    const strokeName = strongest.sourceStroke ? SWIM_STROKE_LABELS[strongest.sourceStroke] : null;
+    return [{
+      ...strongest,
+      id: `overall-${strongest.id}`,
+      title: strongest.category === "positive"
+        ? "Overall profile is improving"
+        : strongest.category === "warning"
+          ? "Overall profile needs watching"
+          : "Overall profile is steady",
+      message: strokeName
+        ? `${strongest.message} This is currently the strongest meaningful signal in your overall Work-effort profile.`
+        : strongest.message,
+      sourceStroke: null,
+    }];
   }
-  if (picked.length) return picked;
 
   const workoutCount = (workoutSessions || []).length;
   if (workoutCount < 2) {
@@ -2434,9 +2440,9 @@ function buildDashboardStrokeAwareInsights({ workoutSessions, allSwimSessions, t
     category: "neutral",
     priority: 50,
     confidence: "medium",
-    title: "Work-effort profile looks steady",
+    title: "Overall profile is steady",
     message: "No stroke-specific Work-effort signal has crossed the app's meaningful-change thresholds yet. Easy, Speed and CSS contexts remain separate.",
-    metrics: [{ label: "Comparable workouts", value: workoutCount }],
+    metrics: [{ label: "Overall profile", value: "steady" }],
   }];
 }
 
