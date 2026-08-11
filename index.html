@@ -3014,8 +3014,8 @@ function SwimmingTab({ isMobile, onExit }) {
             {(() => {
               const compareStroke = strokeFilter === "all" ? null : activeStroke;
               const modeCfg = {
-                cadence:  { primary: "pace", secLabel: "Stroke rate", secFmt: (v) => `${fmtNum(v, 1)} spm`, secKey: strokeFilter === "all" ? "cadence_all" : `cadence_${compareStroke}`, secColor: "#FF9F0A", wholeSession: false },
-                dps:      { primary: "pace", secLabel: "Distance/stroke", secFmt: (v) => `${fmtNum(v, 2)}m`, secKey: strokeFilter === "all" ? "dps_all" : `dps_${compareStroke}`, secColor: "#FF9F0A", wholeSession: false },
+                cadence:  { primary: "pace", secLabel: "Stroke rate", secFmt: (v) => `${fmtNum(v, 1)} spm`, secKey: strokeFilter === "all" ? "cadence_all" : `cadence_${compareStroke}`, secColor: "#64D2FF", wholeSession: false },
+                dps:      { primary: "pace", secLabel: "Distance/stroke", secFmt: (v) => `${fmtNum(v, 2)}m`, secKey: strokeFilter === "all" ? "dps_all" : `dps_${compareStroke}`, secColor: "#30D158", wholeSession: false },
                 hr:       { primary: "pace", secLabel: "Avg HR", secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR", secColor: "#FF453A", wholeSession: true },
                 swolfhr:  { primary: strokeFilter === "all" ? "swolf_all" : `swolf_${compareStroke}`, secLabel: "Avg HR", secFmt: (v) => `${Math.round(v)} bpm`, secKey: "avgHR", secColor: "#FF453A", wholeSession: true },
               };
