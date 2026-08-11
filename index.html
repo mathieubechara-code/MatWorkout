@@ -583,6 +583,10 @@ const SWIM_MAX_PLAUSIBLE_CADENCE = { freestyle: 130, backstroke: 110, breaststro
 // The set of swim types a person can manually assign to a length in Session detail — the 4
 // standard competitive strokes plus the two board-kick drills.
 const EDITABLE_SWIM_STROKES = ["freestyle", "backstroke", "breaststroke", "butterfly", "kick_free", "kick_frog"];
+// Stroke-count-derived technique metrics are only trusted for the four standard strokes.
+// Drill/kick/mixed/unknown lengths keep valid pace/distance but do not generate SWOLF,
+// cadence or DPS analytics because those stroke counts are not reliably comparable.
+const TECHNIQUE_SWIM_STROKES = new Set(["freestyle", "backstroke", "breaststroke", "butterfly"]);
 // Per-chart overlay options for the expanded swim trend charts — each chart offers only the
 // secondary metrics that are actually meaningful for it, rather than one fixed global overlay.
 // Per-chart overlay options for the expanded swim trend charts. HR overlay is only offered
@@ -644,7 +648,7 @@ function buildSwimEffortAssignments(sessions) {
   chron.forEach((s) => {
     (s.lengths || []).forEach((raw) => {
       const l = effectiveLength(raw);
-      if (l.lengthType !== "active" || raw.userExcluded || l.pace100 == null || !Number.isFinite(l.pace100) || l.pace100 <= 0) return;
+      if (l.lengthType !== "active" || raw.userExcluded || raw.glitch || l.pace100 == null || !Number.isFinite(l.pace100) || l.pace100 <= 0) return;
       const poolKey = s.poolLength != null ? `${l.stroke}|${Math.round(s.poolLength * 100) / 100}` : null;
       if (poolKey) push(byStrokePool, poolKey, l.pace100);
       push(byStroke, l.stroke, l.pace100);
@@ -671,7 +675,6 @@ function buildSwimEffortAssignments(sessions) {
       let sample = poolKey && (byStrokePool[poolKey] || []).length >= 8 ? byStrokePool[poolKey]
         : (byStroke[eff.stroke] || []).length >= 8 ? byStroke[eff.stroke]
         : (sessionByStroke[eff.stroke] || []).length >= 5 ? sessionByStroke[eff.stroke]
-        : sessionAllPaces.length >= 6 ? sessionAllPaces
         : null;
 
       if (!sample || sample.length < 5) {
@@ -826,37 +829,115 @@ const withSwimPoolLength = (session, meters, source = "manual") => {
   };
 };
 
+// Review-only data-quality pass. It never excludes or rewrites a length.
+// It flags extreme same-stroke combinations where BOTH pace and Garmin stroke count move
+// implausibly together relative to the swimmer's own session (e.g. a "25m breaststroke"
+// recorded vastly faster with only a fraction of the normal stroke count). This catches
+// likely transitions/misdetected lengths that simple cadence ceilings cannot catch.
+function applyPersonalSwimOutlierFlags(lengths) {
+  if (!Array.isArray(lengths)) return lengths || [];
+  const groups = {};
+  lengths.forEach((raw) => {
+    const eff = effectiveLength(raw);
+    if (
+      eff.lengthType !== "active" ||
+      raw.userExcluded ||
+      !TECHNIQUE_SWIM_STROKES.has(eff.stroke) ||
+      eff.pace100 == null || !Number.isFinite(eff.pace100) || eff.pace100 <= 0
+    ) return;
+    if (!groups[eff.stroke]) groups[eff.stroke] = [];
+    groups[eff.stroke].push({ raw, eff });
+  });
+
+  const med = (vals) => {
+    if (!vals.length) return null;
+    const a = [...vals].sort((x,y)=>x-y);
+    const m = Math.floor(a.length/2);
+    return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+  };
+
+  const flagged = new Map();
+  Object.entries(groups).forEach(([stroke, rows]) => {
+    if (rows.length < 5) return;
+    const paceMed = med(rows.map(({eff})=>eff.pace100));
+    const strokeCounts = rows.map(({eff})=>eff.totalStrokes).filter((v)=>v!=null && Number.isFinite(v) && v>0);
+    if (!(paceMed > 0) || strokeCounts.length < 5) return;
+    const strokeMed = med(strokeCounts);
+    if (!(strokeMed > 0)) return;
+
+    rows.forEach(({raw,eff}) => {
+      const sc = eff.totalStrokes;
+      if (!(sc > 0)) return;
+      const extremeFastLowCount = eff.pace100 < paceMed * 0.60 && sc < strokeMed * 0.60;
+      const extremeSlowHighCount = eff.pace100 > paceMed * 1.70 && sc > strokeMed * 1.30;
+      if (extremeFastLowCount || extremeSlowHighCount) {
+        const reason = extremeFastLowCount
+          ? `possible misdetected/transition length: pace ${Math.round(eff.pace100)}s/100m and ${sc} strokes are both far below this session's ${SWIM_STROKE_LABELS[stroke]} pattern`
+          : `possible misdetected/transition length: pace ${Math.round(eff.pace100)}s/100m and ${sc} strokes are both far above this session's ${SWIM_STROKE_LABELS[stroke]} pattern`;
+        flagged.set(raw.index, reason);
+      }
+    });
+  });
+
+  return lengths.map((raw) => {
+    const personalFlag = flagged.get(raw.index);
+    // Preserve parser-level/device-field warnings if already present; otherwise add this
+    // personal-pattern review flag. The person still decides whether to exclude/reclassify it.
+    if (!personalFlag || raw.glitch) return raw;
+    return { ...raw, glitch: personalFlag };
+  });
+}
+
 function computeSwimSessionMetrics(lengths, poolLength) {
   const eff = lengths.map(effectiveLength);
   const validActive = eff.filter((l) => l.lengthType === "active" && !l.userExcluded);
   const idleLengths = eff.filter((l) => l.lengthType === "idle" && !l.userExcluded);
 
   const distance = poolLength != null ? Math.round(validActive.length * poolLength * 100) / 100 : null;
-  const swimTimeSec = validActive.reduce((a, l) => a + l.elapsedSec, 0);
-  const restTimeSec = idleLengths.reduce((a, l) => a + l.elapsedSec, 0);
+  const swimTimeSec = validActive.reduce((a, l) => a + (l.elapsedSec || 0), 0);
+  const restTimeSec = idleLengths.reduce((a, l) => a + (l.elapsedSec || 0), 0);
   const pace100Overall = swimTimeSec > 0 && distance ? (swimTimeSec / distance) * 100 : null;
 
   const strokeGroups = {};
   validActive.forEach((l) => {
-    if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = { swolfs: [], cadences: [], distPerStroke: [], timeSec: 0, lengthCount: 0 };
-    const swolf = l.elapsedSec != null && l.totalStrokes != null ? Math.round(l.elapsedSec + l.totalStrokes) : null;
-    if (swolf != null) strokeGroups[l.stroke].swolfs.push(swolf);
-    const cadence = canonicalSwimCadence(l);
-    if (cadence != null && cadence > 0) strokeGroups[l.stroke].cadences.push(cadence);
-    if (l.totalStrokes > 0 && poolLength) strokeGroups[l.stroke].distPerStroke.push(poolLength / l.totalStrokes);
-    strokeGroups[l.stroke].timeSec += l.elapsedSec;
-    strokeGroups[l.stroke].lengthCount += 1;
+    if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = {
+      swolfs: [], timeSec: 0, lengthCount: 0,
+      countedStrokeTotal: 0, countedStrokeTimeSec: 0, countedStrokeLengths: 0
+    };
+    const g = strokeGroups[l.stroke];
+    const elapsed = l.elapsedSec != null && Number.isFinite(l.elapsedSec) ? l.elapsedSec : 0;
+    g.timeSec += elapsed;
+    g.lengthCount += 1;
+
+    if (TECHNIQUE_SWIM_STROKES.has(l.stroke)) {
+      if (l.elapsedSec != null && l.totalStrokes != null && Number.isFinite(l.totalStrokes)) {
+        g.swolfs.push(Math.round(l.elapsedSec + l.totalStrokes));
+      }
+      if (l.totalStrokes != null && Number.isFinite(l.totalStrokes) && l.totalStrokes > 0 && elapsed > 0) {
+        g.countedStrokeTotal += l.totalStrokes;
+        g.countedStrokeTimeSec += elapsed;
+        g.countedStrokeLengths += 1;
+      }
+    }
   });
+
   const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
   const strokeStats = {};
   Object.keys(strokeGroups).forEach((stroke) => {
     const g = strokeGroups[stroke];
     const strokeDistance = poolLength != null ? g.lengthCount * poolLength : null;
+    const countedDistance = poolLength != null ? g.countedStrokeLengths * poolLength : null;
     strokeStats[stroke] = {
-      count: g.swolfs.length,
-      avgSwolf: avg(g.swolfs),
-      avgCadence: avg(g.cadences),
-      avgDistPerStroke: avg(g.distPerStroke),
+      count: g.lengthCount,
+      avgSwolf: TECHNIQUE_SWIM_STROKES.has(stroke) ? avg(g.swolfs) : null,
+      // True ratio-of-totals. This keeps Pace ≈ DPS × Stroke Rate mathematically coherent
+      // whenever all contributing lengths have valid Garmin stroke counts.
+      avgCadence: g.countedStrokeTotal > 0 && g.countedStrokeTimeSec > 0
+        ? (g.countedStrokeTotal / g.countedStrokeTimeSec) * 60
+        : null,
+      avgDistPerStroke: g.countedStrokeTotal > 0 && countedDistance
+        ? countedDistance / g.countedStrokeTotal
+        : null,
       pace100: g.timeSec > 0 && strokeDistance ? (g.timeSec / strokeDistance) * 100 : null,
     };
   });
@@ -870,7 +951,7 @@ function computeSwimSessionMetrics(lengths, poolLength) {
     if (l.lengthType === "active") {
       if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timeSec: 0, strokeSet: new Set() };
       currentRep.lengthCount += 1;
-      currentRep.timeSec += l.elapsedSec;
+      currentRep.timeSec += l.elapsedSec || 0;
       currentRep.strokeSet.add(l.stroke);
     } else if (l.lengthType === "idle") {
       if (currentRep) { reps.push(currentRep); currentRep = null; }
@@ -980,7 +1061,8 @@ function processSwimFit(parsed, fileName) {
     return { ...len, index, glitch, swolf, avgHR, pace100, userExcluded: false, userLengthType: null, userStroke: null, userEffort: null };
   });
 
-  const metrics = computeSwimSessionMetrics(lengths, poolLength);
+  const qualityFlaggedLengths = applyPersonalSwimOutlierFlags(lengths);
+  const metrics = computeSwimSessionMetrics(qualityFlaggedLengths, poolLength);
 
   // Cross-check the FIT session-level total_distance against our length-based count rather
   // than trusting it outright — surfaced in the quality note if they disagree.
@@ -1019,7 +1101,7 @@ function processSwimFit(parsed, fileName) {
     excludedCount: metrics.excludedCount,
     qualityNote,
     strokeStats: metrics.strokeStats,
-    lengths,
+    lengths: qualityFlaggedLengths,
     reps: metrics.reps,
     isCssTest: false,
     cssTest: null, // { t200, t400 } seconds, entered manually — see SwimmingTab
@@ -1126,8 +1208,31 @@ function backfillSwimSessions(list) {
   const next = (list || []).map((s) => {
     const migrated = migrateSwimSessionToOverrideLayer(s);
     let fixed = backfillSwimSessionStrokeStats(migrated);
+    if (fixed && fixed.lengths && fixed.poolLength) {
+      const flaggedLengths = applyPersonalSwimOutlierFlags(fixed.lengths);
+      const metrics = computeSwimSessionMetrics(flaggedLengths, fixed.poolLength);
+      const preservedDistance = fixed.distanceCorrection ? fixed.distance : metrics.distance;
+      const preservedPace = fixed.distanceCorrection && preservedDistance
+        ? (metrics.swimTimeSec > 0 ? (metrics.swimTimeSec / preservedDistance) * 100 : null)
+        : metrics.pace100Overall;
+      fixed = {
+        ...fixed,
+        lengths: flaggedLengths,
+        distance: preservedDistance,
+        pace100Overall: preservedPace,
+        swimTimeSec: metrics.swimTimeSec,
+        restTimeSec: metrics.restTimeSec,
+        strokeStats: metrics.strokeStats,
+        reps: metrics.reps,
+        totalActiveLengths: metrics.totalActiveLengths,
+        validActiveLengths: metrics.validActiveLengths,
+        excludedCount: metrics.excludedCount,
+        qualityNote: metrics.qualityNote,
+        derivedMetricsVersion: 2,
+      };
+    }
     if (fixed && fixed.poolLength != null && !fixed.poolLengthSource) fixed = { ...fixed, poolLengthSource: "legacy" };
-    if (fixed !== s) changed = true;
+    if (fixed !== s || s.derivedMetricsVersion !== 2) changed = true;
     return fixed;
   });
   return { sessions: next, changed };
@@ -1734,7 +1839,7 @@ function compareStoryFromChanges(changes, scopeLabel = "Recent swimming") {
 
 function buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView) {
   if (!selectedCfgs?.length || !trendDataView || trendDataView.length < 4) return null;
-  const usableDates = trendDataView.filter((d) => selectedCfgs.some((cfg) => d[cfg.key] != null));
+  const usableDates = trendDataView.filter((d) => selectedCfgs.every((cfg) => d[cfg.key] != null));
   if (usableDates.length < 4) return null;
   const splitAt = Math.max(2, Math.floor(usableDates.length / 2));
   const baselineRows = usableDates.slice(0, splitAt);
@@ -1752,7 +1857,10 @@ function buildMultiMetricSessionInterpretation(selectedCfgs, trendDataView, sele
   if (!selectedDate || !selectedCfgs?.length) return null;
   const selected = trendDataView.find((d) => d.date === selectedDate);
   if (!selected) return null;
-  const priorRows = trendDataView.filter((d) => d.date < selectedDate).slice(-6);
+  if (!selectedCfgs.every((cfg) => selected[cfg.key] != null)) return null;
+  const priorRows = trendDataView
+    .filter((d) => d.date < selectedDate && selectedCfgs.every((cfg) => d[cfg.key] != null))
+    .slice(-6);
   if (priorRows.length < 2) return null;
   const changes = selectedCfgs.map((cfg) => summarizeCompareMetricChange(
     cfg.id,
@@ -2009,9 +2117,12 @@ function buildSwimInsights({ chronSessions, trendData, activeStroke, strokeLabel
   if (!chronSessions || chronSessions.length === 0) return [];
   const allMode = !activeStroke;
   const paceSeries = allMode ? extractSeriesKey(trendData, "pace100") : extractSeries(trendData, activeStroke, "pace100");
-  const swolfSeries = allMode ? extractSeriesKey(trendData, "swolf_all") : extractSeries(trendData, activeStroke, "swolf");
-  const cadenceSeries = allMode ? extractSeriesKey(trendData, "cadence_all") : extractSeries(trendData, activeStroke, "cadence");
-  const dpsSeries = allMode ? extractSeriesKey(trendData, "dps_all") : extractSeries(trendData, activeStroke, "dps");
+  // Mixed-stroke technique values are descriptive only; Garmin explicitly treats SWOLF as
+  // non-comparable across stroke types. Overall Dashboard insights therefore use whole-session
+  // pace/HR/frequency, while technique stories are reserved for a concrete stroke.
+  const swolfSeries = allMode ? [] : extractSeries(trendData, activeStroke, "swolf");
+  const cadenceSeries = allMode ? [] : extractSeries(trendData, activeStroke, "cadence");
+  const dpsSeries = allMode ? [] : extractSeries(trendData, activeStroke, "dps");
   const overallPaceSeries = extractSeriesKey(trendData, "pace100");
   const hrSeries = extractSeriesKey(trendData, "avgHR");
 
@@ -2335,19 +2446,58 @@ function SwimmingTab({ isMobile, onExit }) {
   // "All strokes" technique metrics must represent the whole swim, not the most-common
   // stroke. Per-stroke stats are length-level averages with `count` = contributing lengths,
   // so a count-weighted aggregation gives one session value across every swim type present.
+  const swimHrContext = (s, stroke = null) => {
+    if (!s || !Array.isArray(s.lengths)) return { avgHR: null, coveredSec: 0, totalSec: 0, coverage: 0 };
+    const active = s.lengths
+      .map((raw) => ({ raw, eff: effectiveLength(raw) }))
+      .filter(({ raw, eff }) =>
+        eff.lengthType === "active" &&
+        !raw.userExcluded &&
+        eff.elapsedSec != null &&
+        Number.isFinite(eff.elapsedSec) &&
+        eff.elapsedSec > 0 &&
+        (!stroke || eff.stroke === stroke)
+      );
+    const totalSec = active.reduce((a,{eff})=>a+eff.elapsedSec,0);
+    const withHr = active.filter(({eff})=>eff.avgHR != null && Number.isFinite(eff.avgHR) && eff.avgHR > 0);
+    const coveredSec = withHr.reduce((a,{eff})=>a+eff.elapsedSec,0);
+    const avgHR = coveredSec > 0 ? withHr.reduce((a,{eff})=>a+eff.avgHR*eff.elapsedSec,0)/coveredSec : null;
+    return { avgHR, coveredSec, totalSec, coverage: totalSec > 0 ? coveredSec/totalSec : 0 };
+  };
+
   const allStrokeMetric = (s, field) => {
-    const stats = Object.values(s.strokeStats || {});
-    let weightedTotal = 0;
-    let weight = 0;
-    stats.forEach((st) => {
-      const value = st && st[field];
-      const count = st && Number.isFinite(st.count) ? st.count : 0;
-      if (value != null && Number.isFinite(value) && count > 0) {
-        weightedTotal += value * count;
-        weight += count;
-      }
-    });
-    return weight ? weightedTotal / weight : null;
+    if (!s || !Array.isArray(s.lengths) || !s.poolLength) return null;
+    const active = s.lengths
+      .map((raw) => ({ raw, eff: effectiveLength(raw) }))
+      .filter(({ raw, eff }) =>
+        eff.lengthType === "active" &&
+        !raw.userExcluded &&
+        TECHNIQUE_SWIM_STROKES.has(eff.stroke)
+      );
+    if (!active.length) return null;
+
+    if (field === "avgSwolf") {
+      const vals = active
+        .filter(({ eff }) => eff.elapsedSec != null && eff.totalStrokes != null && Number.isFinite(eff.totalStrokes))
+        .map(({ eff }) => Math.round(eff.elapsedSec + eff.totalStrokes));
+      return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+    }
+
+    const counted = active.filter(({ eff }) =>
+      eff.totalStrokes != null && Number.isFinite(eff.totalStrokes) && eff.totalStrokes > 0 &&
+      eff.elapsedSec != null && Number.isFinite(eff.elapsedSec) && eff.elapsedSec > 0
+    );
+    if (!counted.length) return null;
+    const totalStrokes = counted.reduce((a,{eff})=>a+eff.totalStrokes,0);
+    if (!(totalStrokes > 0)) return null;
+    if (field === "avgCadence") {
+      const totalSec = counted.reduce((a,{eff})=>a+eff.elapsedSec,0);
+      return totalSec > 0 ? (totalStrokes / totalSec) * 60 : null;
+    }
+    if (field === "avgDistPerStroke") {
+      return (counted.length * s.poolLength) / totalStrokes;
+    }
+    return null;
   };
 
   const dashboardSwolfReferencePool = useMemo(() => {
@@ -2365,7 +2515,7 @@ function SwimmingTab({ isMobile, onExit }) {
     swolf_all: poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgSwolf") : null,
     cadence_all: allStrokeMetric(s, "avgCadence"),
     dps_all: poolLengthsMatch(s.poolLength, dashboardSwolfReferencePool) ? allStrokeMetric(s, "avgDistPerStroke") : null,
-    avgHR: s.avgHR,
+    avgHR: swimHrContext(s).avgHR,
     peakHR: s.peakHR,
     energy100: s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null,
   })), [dashboardChronSessions, dashboardSwolfReferencePool]);
@@ -2391,7 +2541,7 @@ function SwimmingTab({ isMobile, onExit }) {
         swolf_all: poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgSwolf") : null,
         cadence_all: allStrokeMetric(s, "avgCadence"),
         dps_all: poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgDistPerStroke") : null,
-        avgHR: s.avgHR, peakHR: s.peakHR, energy100,
+        avgHR: swimHrContext(s).avgHR, peakHR: s.peakHR, energy100,
       };
       allStrokesSeen.forEach((stroke) => {
         const st = s.strokeStats && s.strokeStats[stroke];
@@ -2399,6 +2549,7 @@ function SwimmingTab({ isMobile, onExit }) {
         point[`swolf_${stroke}`] = st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgSwolf : null;
         point[`cadence_${stroke}`] = st ? st.avgCadence : null;
         point[`dps_${stroke}`] = st && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? st.avgDistPerStroke : null;
+        point[`hr_${stroke}`] = swimHrContext(s, stroke).avgHR;
       });
       return point;
     });
@@ -2415,35 +2566,70 @@ function SwimmingTab({ isMobile, onExit }) {
       if (!buckets[weekKey]) buckets[weekKey] = [];
       buckets[weekKey].push(s);
     });
-    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+
+    const pooledFor = (weekSessions, stroke = null, requirePool = null) => {
+      let timeSec = 0, distance = 0, totalStrokes = 0, countedSec = 0, countedDistance = 0;
+      const swolfs = [];
+      let hrWeighted = 0, hrSec = 0;
+      weekSessions.forEach((s) => {
+        if (requirePool != null && !poolLengthsMatch(s.poolLength, requirePool)) return;
+        (s.lengths || []).forEach((raw) => {
+          const eff = effectiveLength(raw);
+          if (eff.lengthType !== "active" || raw.userExcluded || (stroke && eff.stroke !== stroke)) return;
+          const elapsed = eff.elapsedSec != null && Number.isFinite(eff.elapsedSec) ? eff.elapsedSec : 0;
+          timeSec += elapsed;
+          if (s.poolLength) distance += s.poolLength;
+
+          if ((!stroke || TECHNIQUE_SWIM_STROKES.has(eff.stroke)) && TECHNIQUE_SWIM_STROKES.has(eff.stroke)) {
+            if (eff.totalStrokes != null && Number.isFinite(eff.totalStrokes)) swolfs.push(Math.round(elapsed + eff.totalStrokes));
+            if (eff.totalStrokes != null && Number.isFinite(eff.totalStrokes) && eff.totalStrokes > 0 && elapsed > 0) {
+              totalStrokes += eff.totalStrokes;
+              countedSec += elapsed;
+              if (s.poolLength) countedDistance += s.poolLength;
+            }
+          }
+          if (eff.avgHR != null && Number.isFinite(eff.avgHR) && eff.avgHR > 0 && elapsed > 0) {
+            hrWeighted += eff.avgHR * elapsed;
+            hrSec += elapsed;
+          }
+        });
+      });
+      return {
+        pace100: timeSec > 0 && distance > 0 ? (timeSec / distance) * 100 : null,
+        swolf: swolfs.length ? swolfs.reduce((a,b)=>a+b,0)/swolfs.length : null,
+        cadence: totalStrokes > 0 && countedSec > 0 ? (totalStrokes / countedSec) * 60 : null,
+        dps: totalStrokes > 0 && countedDistance > 0 ? countedDistance / totalStrokes : null,
+        avgHR: hrSec > 0 ? hrWeighted/hrSec : null,
+      };
+    };
+
     return Object.keys(buckets).sort().map((weekKey) => {
       const weekSessions = buckets[weekKey];
-      const pace100Vals = weekSessions.map((s) => s.pace100Overall).filter((v) => v != null);
-      const hrVals = weekSessions.map((s) => s.avgHR).filter((v) => v != null);
-      const peakHrVals = weekSessions.map((s) => s.peakHR).filter((v) => v != null);
-      const energy100Vals = weekSessions.map((s) => (s.calories != null && s.distance ? (s.calories / s.distance) * 100 : null)).filter((v) => v != null);
-      const swolfAllVals = weekSessions.map((s) => poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgSwolf") : null).filter((v) => v != null);
-      const cadenceAllVals = weekSessions.map((s) => allStrokeMetric(s, "avgCadence")).filter((v) => v != null);
-      const dpsAllVals = weekSessions.map((s) => poolLengthsMatch(s.poolLength, swolfReferencePools.all) ? allStrokeMetric(s, "avgDistPerStroke") : null).filter((v) => v != null);
+      const overall = pooledFor(weekSessions, null, null);
+      const samePoolAll = pooledFor(weekSessions, null, swolfReferencePools.all);
+      const peakHrVals = weekSessions.map((s)=>s.peakHR).filter((v)=>v!=null);
+      const totalCalories = weekSessions.reduce((a,s)=>a+(s.calories || 0),0);
+      const totalDistance = weekSessions.reduce((a,s)=>a+(s.distance || 0),0);
       const point = {
-        date: weekKey, label: `Wk ${fmtDate(weekKey)}`, pace100: avg(pace100Vals),
-        swolf_all: avg(swolfAllVals), cadence_all: avg(cadenceAllVals), dps_all: avg(dpsAllVals),
-        avgHR: avg(hrVals),
-        // Peak HR aggregates as the week's actual highest reading, not an average of peaks —
-        // "peak" stays meaningful as the hardest single effort that week.
+        date: weekKey,
+        label: `Wk ${fmtDate(weekKey)}`,
+        pace100: overall.pace100,
+        swolf_all: samePoolAll.swolf,
+        cadence_all: overall.cadence,
+        dps_all: samePoolAll.dps,
+        avgHR: overall.avgHR,
         peakHR: peakHrVals.length ? Math.max(...peakHrVals) : null,
-        energy100: avg(energy100Vals),
+        energy100: totalCalories > 0 && totalDistance > 0 ? (totalCalories/totalDistance)*100 : null,
         sessionCount: weekSessions.length,
       };
       allStrokesSeen.forEach((stroke) => {
-        const pace100StrokeVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].pace100 : null)).filter((v) => v != null);
-        const swolfVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? s.strokeStats[stroke].avgSwolf : null)).filter((v) => v != null);
-        const cadenceVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] ? s.strokeStats[stroke].avgCadence : null)).filter((v) => v != null);
-        const dpsVals = weekSessions.map((s) => (s.strokeStats && s.strokeStats[stroke] && poolLengthsMatch(s.poolLength, swolfReferencePools[stroke]) ? s.strokeStats[stroke].avgDistPerStroke : null)).filter((v) => v != null);
-        point[`pace100_${stroke}`] = pace100StrokeVals.length ? avg(pace100StrokeVals) : null;
-        point[`swolf_${stroke}`] = swolfVals.length ? avg(swolfVals) : null;
-        point[`cadence_${stroke}`] = cadenceVals.length ? avg(cadenceVals) : null;
-        point[`dps_${stroke}`] = dpsVals.length ? avg(dpsVals) : null;
+        const pooled = pooledFor(weekSessions, stroke, null);
+        const pooledSame = pooledFor(weekSessions, stroke, swolfReferencePools[stroke]);
+        point[`pace100_${stroke}`] = pooled.pace100;
+        point[`swolf_${stroke}`] = pooledSame.swolf;
+        point[`cadence_${stroke}`] = pooled.cadence;
+        point[`dps_${stroke}`] = pooledSame.dps;
+        point[`hr_${stroke}`] = pooled.avgHR;
       });
       return point;
     });
@@ -2688,7 +2874,8 @@ function SwimmingTab({ isMobile, onExit }) {
   // Lower CV = more stable pacing.
   const radarSessionPaceVariability = (s) => {
     if (!s || !Array.isArray(s.lengths)) return null;
-    const paces = s.lengths
+    const groups = {};
+    s.lengths
       .map((raw) => ({ raw, eff: effectiveLength(raw) }))
       .filter(({ raw, eff }) =>
         eff.lengthType === "active" &&
@@ -2696,16 +2883,28 @@ function SwimmingTab({ isMobile, onExit }) {
         eff.pace100 != null &&
         Number.isFinite(eff.pace100) &&
         eff.pace100 > 0 &&
-        (strokeFilter === "all" || eff.stroke === strokeFilter)
+        (strokeFilter === "all" ? TECHNIQUE_SWIM_STROKES.has(eff.stroke) : eff.stroke === strokeFilter)
       )
-      .map(({ eff }) => eff.pace100);
-    // Require at least 3 comparable active lengths; fewer points are too fragile to call consistency.
-    if (paces.length < 3) return null;
-    const mean = paces.reduce((a,b) => a+b, 0) / paces.length;
-    if (!(mean > 0)) return null;
-    const variance = paces.reduce((a,b) => a + (b - mean) ** 2, 0) / paces.length;
-    const sd = Math.sqrt(variance);
-    return { cv: sd / mean, mean, sd, count: paces.length };
+      .forEach(({ eff }) => {
+        if (!groups[eff.stroke]) groups[eff.stroke] = [];
+        groups[eff.stroke].push(eff.pace100);
+      });
+
+    const groupStats = Object.entries(groups).map(([stroke,paces]) => {
+      if (paces.length < 3) return null;
+      const mean = paces.reduce((a,b)=>a+b,0)/paces.length;
+      if (!(mean > 0)) return null;
+      const variance = paces.reduce((a,b)=>a+(b-mean)**2,0)/paces.length;
+      const sd = Math.sqrt(variance);
+      return { stroke, cv: sd/mean, mean, sd, count: paces.length };
+    }).filter(Boolean);
+    if (!groupStats.length) return null;
+
+    // All-strokes Consistency means "within-stroke pacing stability across the session";
+    // it never treats the normal pace difference between freestyle and breaststroke as inconsistency.
+    const weight = groupStats.reduce((a,g)=>a+g.count,0);
+    const cv = groupStats.reduce((a,g)=>a+g.cv*g.count,0)/weight;
+    return { cv, count: weight, groups: groupStats };
   };
 
   const radarMean = (values) => {
@@ -2775,30 +2974,59 @@ function SwimmingTab({ isMobile, onExit }) {
     const paceBaseline = radarBaselineSessions.map((s) => radarMetricValue(s, "pace"));
     const paceBase = radarMean(paceBaseline);
     const latestPace = radarMetricValue(latest, "pace");
-    if (latestPace != null && paceBase != null && latestPace > 0) addAxis("pace", latestPace, paceBase, 100 * (paceBase / latestPace), { latest: latestPace, baseline: paceBase });
+    if (radarBaselineSessions.length >= 2 && latestPace != null && paceBase != null && latestPace > 0) addAxis("pace", latestPace, paceBase, 100 * (paceBase / latestPace), { latest: latestPace, baseline: paceBase });
 
-    // 2. Stroke Efficiency — SWOLF lower-better + DPS higher-better, each z-scored.
-    const efficiencyBaseline = radarBaselineSessions
-      .filter((s) => latest.poolLength != null && poolLengthsMatch(s.poolLength, latest.poolLength))
-      .map((s) => ({ swolf: radarMetricValue(s, "swolf"), dps: radarMetricValue(s, "dps") }))
-      .filter((x) => x.swolf != null && x.dps != null);
-    const latestSwolf = radarMetricValue(latest, "swolf"), latestDps = radarMetricValue(latest, "dps");
-    const swolfVals = efficiencyBaseline.map((x) => x.swolf), dpsVals = efficiencyBaseline.map((x) => x.dps);
-    const swolfZ = radarZ(latestSwolf, swolfVals), dpsZ = radarZ(latestDps, dpsVals);
-    if (swolfZ != null && dpsZ != null) {
-      const efficiencyZ = ((-swolfZ) + dpsZ) / 2;
-      addAxis("efficiency", { swolf: latestSwolf, dps: latestDps }, { swolf: radarMean(swolfVals), dps: radarMean(dpsVals) }, 100 + efficiencyZ * 10, { swolfZ: -swolfZ, dpsZ, efficiencyZ });
+    // 2. Stroke Efficiency — same-pool, and never compares SWOLF directly across stroke types.
+    // Each component is converted to a favorable ratio around baseline=100:
+    // lower SWOLF => >100, higher DPS => >100. Their geometric mean gives one balanced score.
+    if (strokeFilter === "all") {
+      const latestStrokeEntries = Object.entries(latest.strokeStats || {})
+        .filter(([stroke, st]) => TECHNIQUE_SWIM_STROKES.has(stroke) && st && st.avgSwolf != null && st.avgDistPerStroke != null && st.count > 0);
+      const components = [];
+      latestStrokeEntries.forEach(([stroke, latestSt]) => {
+        const baseRows = radarBaselineSessions
+          .filter((s) => poolLengthsMatch(s.poolLength, latest.poolLength))
+          .map((s) => s.strokeStats && s.strokeStats[stroke])
+          .filter((st) => st && st.avgSwolf != null && st.avgDistPerStroke != null);
+        if (baseRows.length < 2) return;
+        const baseSwolf = radarMean(baseRows.map((st)=>st.avgSwolf));
+        const baseDps = radarMean(baseRows.map((st)=>st.avgDistPerStroke));
+        if (!(baseSwolf > 0) || !(baseDps > 0) || !(latestSt.avgSwolf > 0) || !(latestSt.avgDistPerStroke > 0)) return;
+        const score = 100 * Math.sqrt((baseSwolf / latestSt.avgSwolf) * (latestSt.avgDistPerStroke / baseDps));
+        components.push({ stroke, score, weight: latestSt.count, latestSwolf: latestSt.avgSwolf, latestDps: latestSt.avgDistPerStroke, baseSwolf, baseDps, baselineCount: baseRows.length });
+      });
+      if (components.length) {
+        const weight = components.reduce((a,c)=>a+c.weight,0);
+        const score = components.reduce((a,c)=>a+c.score*c.weight,0)/weight;
+        addAxis("efficiency", score, 100, score, { components });
+      }
+    } else {
+      const efficiencyBaseline = radarBaselineSessions
+        .filter((s) => poolLengthsMatch(s.poolLength, latest.poolLength))
+        .map((s) => ({ swolf: radarMetricValue(s, "swolf"), dps: radarMetricValue(s, "dps") }))
+        .filter((x) => x.swolf != null && x.dps != null);
+      const latestSwolf = radarMetricValue(latest, "swolf");
+      const latestDps = radarMetricValue(latest, "dps");
+      if (efficiencyBaseline.length >= 2 && latestSwolf > 0 && latestDps > 0) {
+        const baseSwolf = radarMean(efficiencyBaseline.map((x)=>x.swolf));
+        const baseDps = radarMean(efficiencyBaseline.map((x)=>x.dps));
+        if (baseSwolf > 0 && baseDps > 0) {
+          const score = 100 * Math.sqrt((baseSwolf / latestSwolf) * (latestDps / baseDps));
+          addAxis("efficiency", { swolf: latestSwolf, dps: latestDps }, { swolf: baseSwolf, dps: baseDps }, score, { baseSwolf, baseDps, baselineCount: efficiencyBaseline.length });
+        }
+      }
     }
 
     // 3. Consistency — within-session pace stability, relative to the previous 6-week baseline.
     // Each session gets a pace coefficient of variation (CV = SD / mean) across comparable
     // active lengths. Lower CV means steadier pacing. Score >100 = more consistent than usual.
     const consistencyBaseline = radarBaselineSessions
+      .filter((s) => poolLengthsMatch(s.poolLength, latest.poolLength))
       .map((s) => radarSessionPaceVariability(s))
       .filter((x) => x && x.cv != null && Number.isFinite(x.cv));
     const latestConsistency = radarSessionPaceVariability(latest);
     const baselineCv = radarMean(consistencyBaseline.map((x) => x.cv));
-    if (latestConsistency && baselineCv != null) {
+    if (latestConsistency && consistencyBaseline.length >= 2 && baselineCv != null) {
       let consistencyScore;
       if (baselineCv === 0) consistencyScore = latestConsistency.cv === 0 ? 100 : 0;
       else consistencyScore = 100 * (baselineCv / Math.max(latestConsistency.cv, 0.000001));
@@ -2821,7 +3049,7 @@ function SwimmingTab({ isMobile, onExit }) {
     // 4. Endurance — distance in the exact selected Radar context (category + effort + stroke).
     const distanceVals = radarBaselineSessions.map((s) => radarMetricValue(s, "distance"));
     const distanceBase = radarMean(distanceVals), latestDistance = radarMetricValue(latest, "distance");
-    if (latestDistance != null && distanceBase != null && distanceBase > 0) addAxis("endurance", latestDistance, distanceBase, 100 * (latestDistance / distanceBase), { latest: latestDistance, baseline: distanceBase });
+    if (radarBaselineSessions.length >= 2 && latestDistance != null && distanceBase != null && distanceBase > 0) addAxis("endurance", latestDistance, distanceBase, 100 * (latestDistance / distanceBase), { latest: latestDistance, baseline: distanceBase });
 
     // 5. Aerobic Efficiency — speed produced per unit of cardiovascular response.
     // Pace is seconds/100m, so swimming speed is proportional to 1/pace.
@@ -2843,7 +3071,7 @@ function SwimmingTab({ isMobile, onExit }) {
       ? 1 / (latestPace * latestHrCtx.avgHR)
       : null;
     const aerobicBase = radarMean(aerobicVals);
-    if (latestHrCtx.coverage >= 0.70 && latestAerobicEfficiency != null && aerobicBase != null && aerobicBase > 0) {
+    if (aerobicBaseline.length >= 2 && latestHrCtx.coverage >= 0.70 && latestAerobicEfficiency != null && aerobicBase != null && aerobicBase > 0) {
       addAxis(
         "aerobic",
         latestAerobicEfficiency,
@@ -3036,7 +3264,12 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "swolf",
       title: "SWOLF" + strokeTitleSuffix(activeStroke),
       series: swolfSeries,
-      verdict: computeVerdict(swolfSeries, "lower-better", INSIGHT_THRESHOLDS.swolfMeaningfulPct, { worse: "Less efficient" }),
+      verdict: computeVerdict(
+        swolfSeries,
+        strokeFilter === "all" ? "neutral" : "lower-better",
+        INSIGHT_THRESHOLDS.swolfMeaningfulPct,
+        strokeFilter === "all" ? { up: "Higher", down: "Lower" } : { worse: "Less efficient" }
+      ),
       value: headlineOf(swolfSeries, strokeFilter === "all" ? "swolf_all" : `swolf_${strokeFilter}`) != null ? Math.round(headlineOf(swolfSeries, strokeFilter === "all" ? "swolf_all" : `swolf_${strokeFilter}`)) : "—",
       perStroke: true,
       lowerBetter: true,
@@ -3853,7 +4086,7 @@ function SwimmingTab({ isMobile, onExit }) {
                 if (metric === "dps") return { id: metric, key: strokeFilter === "all" ? "dps_all" : `dps_${compareStroke}`, label: "Distance / Stroke", fmt: (v) => `${fmtNum(v, 2)}m`, color: "#30D158", direction: "higher", wholeSession: false };
                 if (metric === "cadence") return { id: metric, key: strokeFilter === "all" ? "cadence_all" : `cadence_${compareStroke}`, label: "Stroke Rate", fmt: (v) => `${fmtNum(v, 1)} spm`, color: "#64D2FF", direction: "higher", wholeSession: false };
                 if (metric === "swolf") return { id: metric, key: strokeFilter === "all" ? "swolf_all" : `swolf_${compareStroke}`, label: "SWOLF", fmt: (v) => `${Math.round(v)}`, color: "#BF5AF2", direction: "lower", wholeSession: false };
-                return { id: "hr", key: "avgHR", label: "Avg HR", fmt: (v) => `${Math.round(v)} bpm`, color: "#FF453A", direction: "neutral", wholeSession: true };
+                return { id: "hr", key: strokeFilter === "all" ? "avgHR" : `hr_${compareStroke}`, label: "Avg HR", fmt: (v) => `${Math.round(v)} bpm`, color: "#FF453A", direction: "neutral", wholeSession: false };
               };
               const selectedCfgs = compareMetrics.map(metricCfg);
               const strokeLabel = strokeFilter === "all" ? "All swim types" : SWIM_STROKE_LABELS[activeStroke];
@@ -3883,7 +4116,7 @@ function SwimmingTab({ isMobile, onExit }) {
                   <div style={{ fontSize: 10.5, color: "#636366", marginBottom: 10, display: "flex", gap: 5, flexWrap: "wrap" }}>
                     <span>{strokeLabel}</span>
                     {strokeFilter === "all" && <span>· all applicable swim types are aggregated</span>}
-                    {selectedCfgs.some((cfg) => cfg.wholeSession) && strokeFilter !== "all" && <span>· HR is whole-session</span>}
+                    {compareMetrics.includes("hr") && <span>· HR follows the selected stroke/effort context</span>}
                     {selectedCfgs.some((cfg) => cfg.id === "dps" || cfg.id === "swolf") && <span>· DPS/SWOLF use same-pool comparisons</span>}
                   </div>
                   {selectedComparePoint && (
@@ -4113,8 +4346,8 @@ function SwimmingTab({ isMobile, onExit }) {
                         {radarVisibleProfile.map((axis) => {
                           const descriptions = {
                             pace: "Speed — latest comparable pace vs your previous 6-week baseline. Above 100 = faster than usual.",
-                            efficiency: "Stroke Efficiency — combines same-pool SWOLF and distance per stroke vs your baseline. Above 100 = a more favorable combined stroke-economy signal.",
-                            consistency: "Consistency — how stable your pace was across comparable active lengths in this session vs your previous 6 weeks. Above 100 = steadier pacing than usual; below 100 = more variable.",
+                            efficiency: "Stroke Efficiency — combines same-pool SWOLF and distance per stroke against each stroke's own baseline. Above 100 = a more favorable combined stroke-economy signal.",
+                            consistency: "Consistency — how evenly you held pace within each selected stroke vs same-pool sessions from your previous 6 weeks. Above 100 = steadier than usual; below 100 = more variable.",
                             endurance: "Endurance — distance completed in the current stroke/effort/category context vs your previous 6-week average for the same context. Above 100 = more distance than usual; below 100 = less. More is not automatically better.",
                             aerobic: "Aerobic Efficiency — swimming speed relative to heart-rate cost vs your previous 6-week baseline. Above 100 = more speed for the cardiovascular cost. Shown only with sufficient real HR coverage.",
                           };
