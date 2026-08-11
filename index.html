@@ -618,6 +618,158 @@ function effectiveLength(l) {
   return { ...l, lengthType, stroke, isOverridden: !!(l.userLengthType || l.userStroke) };
 }
 
+const SWIM_EFFORT_META = {
+  easy:  { label: "Easy",  color: "#30D158" },
+  work:  { label: "Work",  color: "#64D2FF" },
+  speed: { label: "Speed", color: "#FF9F0A" },
+};
+const validSwimEffort = (v) => ["easy", "work", "speed"].includes(v);
+const swimMedianLocal = (values) => {
+  const vals = values.filter((v) => v != null && Number.isFinite(v)).slice().sort((a,b) => a-b);
+  if (!vals.length) return null;
+  const mid = Math.floor(vals.length / 2);
+  return vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+};
+
+// Deterministic personal classifier. It deliberately avoids absolute pace cutoffs.
+// With limited history it defaults toward Work instead of pretending to know intensity.
+// Once enough personal same-stroke data exists, clearly faster/slower lengths can become
+// Speed/Easy; nearby rest and session position are used only as supporting context.
+function buildSwimEffortAssignments(sessions) {
+  const chron = [...(sessions || [])].sort((a,b) => (a.date < b.date ? -1 : 1));
+  const byStrokePool = {};
+  const byStroke = {};
+  const push = (obj, key, v) => { if (!obj[key]) obj[key] = []; obj[key].push(v); };
+
+  chron.forEach((s) => {
+    (s.lengths || []).forEach((raw) => {
+      const l = effectiveLength(raw);
+      if (l.lengthType !== "active" || raw.userExcluded || l.pace100 == null || !Number.isFinite(l.pace100) || l.pace100 <= 0) return;
+      const poolKey = s.poolLength != null ? `${l.stroke}|${Math.round(s.poolLength * 100) / 100}` : null;
+      if (poolKey) push(byStrokePool, poolKey, l.pace100);
+      push(byStroke, l.stroke, l.pace100);
+    });
+  });
+
+  const assignments = {};
+  chron.forEach((s) => {
+    const allEff = (s.lengths || []).map((raw) => ({ raw, eff: effectiveLength(raw) }));
+    const active = allEff.filter(({ raw, eff }) => eff.lengthType === "active" && !raw.userExcluded && eff.pace100 != null && Number.isFinite(eff.pace100) && eff.pace100 > 0);
+    const sessionAllPaces = active.map(({ eff }) => eff.pace100);
+    const sessionByStroke = {};
+    active.forEach(({ eff }) => push(sessionByStroke, eff.stroke, eff.pace100));
+    assignments[s.id] = {};
+
+    active.forEach(({ raw, eff }, activePos) => {
+      // Drill pace is not a reliable intensity signal; keep it neutral unless the user overrides it.
+      if (eff.stroke === "drill") {
+        assignments[s.id][raw.index] = "work";
+        return;
+      }
+
+      const poolKey = s.poolLength != null ? `${eff.stroke}|${Math.round(s.poolLength * 100) / 100}` : null;
+      let sample = poolKey && (byStrokePool[poolKey] || []).length >= 8 ? byStrokePool[poolKey]
+        : (byStroke[eff.stroke] || []).length >= 8 ? byStroke[eff.stroke]
+        : (sessionByStroke[eff.stroke] || []).length >= 5 ? sessionByStroke[eff.stroke]
+        : sessionAllPaces.length >= 6 ? sessionAllPaces
+        : null;
+
+      if (!sample || sample.length < 5) {
+        assignments[s.id][raw.index] = "work";
+        return;
+      }
+
+      const med = swimMedianLocal(sample);
+      const absDev = sample.map((v) => Math.abs(v - med));
+      const mad = swimMedianLocal(absDev);
+      const relMad = med > 0 && mad != null ? mad / med : 0;
+      // Personal variability widens/narrows the detection band, bounded so the classifier
+      // remains conservative and doesn't turn normal noise into Speed/Easy.
+      const band = Math.max(0.055, Math.min(0.11, relMad * 2.2 || 0.055));
+      const fastCut = med * (1 - band);
+      const easyCut = med * (1 + band);
+
+      const rawPos = (s.lengths || []).findIndex((x) => x.index === raw.index);
+      const prev = rawPos > 0 ? effectiveLength(s.lengths[rawPos - 1]) : null;
+      const next = rawPos >= 0 && rawPos < s.lengths.length - 1 ? effectiveLength(s.lengths[rawPos + 1]) : null;
+      const prevRaw = rawPos > 0 ? s.lengths[rawPos - 1] : null;
+      const nextRaw = rawPos >= 0 && rawPos < s.lengths.length - 1 ? s.lengths[rawPos + 1] : null;
+      const restBefore = prev && prev.lengthType === "idle" && !prevRaw.userExcluded ? (prev.elapsedSec || 0) : 0;
+      const restAfter = next && next.lengthType === "idle" && !nextRaw.userExcluded ? (next.elapsedSec || 0) : 0;
+      const meaningfulRest = Math.max(restBefore, restAfter) >= Math.max(6, (eff.elapsedSec || 0) * 0.25);
+      const edgeOfSession = activePos <= 1 || activePos >= active.length - 2;
+
+      if (eff.pace100 <= med * 0.90 || (eff.pace100 <= fastCut && (meaningfulRest || s.isCssTest))) {
+        assignments[s.id][raw.index] = "speed";
+      } else if (eff.pace100 >= med * 1.12 || (eff.pace100 >= easyCut && edgeOfSession)) {
+        assignments[s.id][raw.index] = "easy";
+      } else {
+        assignments[s.id][raw.index] = "work";
+      }
+    });
+  });
+  return assignments;
+}
+
+const swimEffortForLength = (session, rawLength, assignments) => {
+  if (validSwimEffort(rawLength && rawLength.userEffort)) return rawLength.userEffort;
+  return (assignments && assignments[session.id] && assignments[session.id][rawLength.index]) || "work";
+};
+
+const swimEffortComposition = (session, assignments) => {
+  const counts = { easy: 0, work: 0, speed: 0 };
+  (session && session.lengths || []).forEach((raw) => {
+    const l = effectiveLength(raw);
+    if (l.lengthType !== "active" || raw.userExcluded) return;
+    counts[swimEffortForLength(session, raw, assignments)] += 1;
+  });
+  const pool = session && session.poolLength;
+  const distances = Object.fromEntries(Object.entries(counts).map(([k,v]) => [k, pool != null ? Math.round(v * pool * 100) / 100 : null]));
+  return { counts, distances, totalCount: counts.easy + counts.work + counts.speed };
+};
+
+// Returns the original session object unchanged for All. For a specific effort, only
+// matching active lengths contribute to pace/distance/stroke metrics. Whole-session calories
+// are intentionally omitted rather than guessed. HR is a real time-weighted average of
+// selected lengths that actually contain HR data.
+function deriveSwimSessionForEffort(session, effort, assignments) {
+  if (!session || effort === "all") return session;
+  const selectedOriginal = [];
+  const filteredLengths = (session.lengths || []).map((raw) => {
+    const eff = effectiveLength(raw);
+    if (eff.lengthType !== "active" || raw.userExcluded) return raw;
+    const keep = swimEffortForLength(session, raw, assignments) === effort;
+    if (keep) selectedOriginal.push(raw);
+    return keep ? raw : { ...raw, userExcluded: true };
+  });
+  if (!selectedOriginal.length) return null;
+
+  const metrics = computeSwimSessionMetrics(filteredLengths, session.poolLength);
+  const hrLengths = selectedOriginal
+    .map((raw) => effectiveLength(raw))
+    .filter((l) => l.avgHR != null && Number.isFinite(l.avgHR) && l.avgHR > 0 && l.elapsedSec > 0);
+  const hrSec = hrLengths.reduce((a,l) => a + l.elapsedSec, 0);
+  const avgHR = hrSec > 0 ? hrLengths.reduce((a,l) => a + l.avgHR * l.elapsedSec, 0) / hrSec : null;
+
+  return {
+    ...session,
+    lengths: filteredLengths,
+    distance: metrics.distance,
+    distanceCorrection: null,
+    swimTimeSec: metrics.swimTimeSec,
+    restTimeSec: metrics.restTimeSec,
+    pace100Overall: metrics.pace100Overall,
+    strokeStats: metrics.strokeStats,
+    reps: metrics.reps,
+    totalActiveLengths: metrics.totalActiveLengths,
+    validActiveLengths: metrics.validActiveLengths,
+    avgHR,
+    peakHR: null,
+    calories: null,
+    effortView: effort,
+  };
+}
+
 // Single source of truth for every derived swim-session number (distance, swim/rest time,
 // pace, per-stroke stats, reps). Takes a session's `lengths` array (with whatever user
 // overrides are currently set) and recomputes everything downstream from scratch — called
@@ -795,7 +947,7 @@ function processSwimFit(parsed, fileName) {
     // userExcluded/userLengthType/userStroke form the correction/override layer (Part 1E/9):
     // null/false means "use the original imported value". Only ever set later by explicit
     // person action in the Length-by-length editor — never touched automatically.
-    return { ...len, index, glitch, swolf, avgHR, pace100, userExcluded: false, userLengthType: null, userStroke: null };
+    return { ...len, index, glitch, swolf, avgHR, pace100, userExcluded: false, userLengthType: null, userStroke: null, userEffort: null };
   });
 
   const metrics = computeSwimSessionMetrics(lengths, poolLength);
@@ -905,10 +1057,16 @@ function backfillSwimSessionStrokeStats(session) {
 // migrated swim time so it stays internally consistent.
 function migrateSwimSessionToOverrideLayer(session) {
   if (!session || !session.lengths) return session;
-  const alreadyMigrated = session.lengths.every((l) => "userExcluded" in l);
+  const alreadyMigrated = session.lengths.every((l) => "userExcluded" in l && "userEffort" in l);
   if (alreadyMigrated) return session;
 
-  const lengths = session.lengths.map((l) => ({ ...l, userExcluded: false, userLengthType: null, userStroke: null }));
+  const lengths = session.lengths.map((l) => ({
+    ...l,
+    userExcluded: "userExcluded" in l ? !!l.userExcluded : false,
+    userLengthType: l.userLengthType || null,
+    userStroke: l.userStroke || null,
+    userEffort: validSwimEffort(l.userEffort) ? l.userEffort : null,
+  }));
   const metrics = computeSwimSessionMetrics(lengths, session.poolLength);
   const distance = session.distanceCorrection ? session.distance : metrics.distance;
   const pace100Overall = session.distanceCorrection && distance
@@ -1611,9 +1769,8 @@ function SwimmingTab({ isMobile, onExit }) {
     try { localStorage.setItem("swim-section-v1", swimSection); } catch {}
   }, [swimSection]);
 
-  const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "workout" | "csstest" — filters Trends + Compare only (Session
-                                                                 // Detail below always shows everything). Derived straight from isCssTest,
-                                                                 // no separate category field (see categoryValueOf below).
+  const [categoryFilter, setCategoryFilter] = useState("all"); // session context: All | Workout | CSS Test
+  const [effortFilter, setEffortFilter] = useState("all"); // length role: All | Easy | Work | Speed; independent of session context
   const [radarMetricKeys, setRadarMetricKeys] = useState(() => new Set(["pace", "efficiency", "consistency", "endurance", "aerobic"])); // personalized Radar axis visibility picker
   const [radarCurrentId, setRadarCurrentId] = useState(null); // session id for the radar's "Current" polygon — null falls back to the latest session
   const [radarBaselineId, setRadarBaselineId] = useState("avg6"); // "avg6" (last-6-session average) or a specific session id
@@ -1805,14 +1962,19 @@ function SwimmingTab({ isMobile, onExit }) {
   const categoryLabelOf = (s) => (s.isCssTest ? "CSS Test" : "Workout");
   const categoryValueOf = (s) => (s.isCssTest ? "csstest" : "workout");
 
-  // chronSessions feeds Trends + Compare (and Insights) — filtered by the Workout/CSS Test
-  // picker so a CSS effort test (or, flipped, casual swims) can be excluded from those views.
-  // Session Detail always shows every session regardless of this filter, since that's where
-  // CSS tests actually get marked/unmarked.
+  // Auto effort detection always sees the complete swim history; changing a slicer must not
+  // move the classifier's own reference point. Manual userEffort overrides are read on top.
+  const effortAssignments = useMemo(() => buildSwimEffortAssignments(sessions || []), [sessions]);
+
+  // Shared eligibility pipeline for Trend + Compare + Radar + Insights:
+  // 1) existing session category filter, then 2) optional Easy/Work/Speed length view.
+  // Effort=All returns the original sessions untouched, so V79 behavior is exactly preserved.
   const chronSessions = useMemo(() => {
     const chron = sessions ? [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
-    return categoryFilter === "all" ? chron : chron.filter((s) => categoryValueOf(s) === categoryFilter);
-  }, [sessions, categoryFilter]);
+    const categoryChron = categoryFilter === "all" ? chron : chron.filter((s) => categoryValueOf(s) === categoryFilter);
+    if (effortFilter === "all") return categoryChron;
+    return categoryChron.map((s) => deriveSwimSessionForEffort(s, effortFilter, effortAssignments)).filter(Boolean);
+  }, [sessions, categoryFilter, effortFilter, effortAssignments]);
   const sortedSessions = useMemo(() => (sessions ? [...sessions].sort((a, b) => (a.date < b.date ? 1 : -1)) : []), [sessions]);
 
   const allStrokesSeen = useMemo(() => {
@@ -2253,9 +2415,9 @@ function SwimmingTab({ isMobile, onExit }) {
 
   // Deterministic interpretation only. It reads the already-calculated Radar scores; it never
   // recalculates a metric or invents a missing axis.
-  const radarProfileStrokeLabel = strokeFilter === "all"
+  const radarProfileStrokeLabel = `${strokeFilter === "all"
     ? "All swim types"
-    : (SWIM_STROKE_LABELS[strokeFilter] || strokeFilter);
+    : (SWIM_STROKE_LABELS[strokeFilter] || strokeFilter)}${effortFilter !== "all" ? ` · ${SWIM_EFFORT_META[effortFilter].label}` : ""}`;
   const radarBaselineColor = "#BF5AF2";
   const radarLatestColor = strokeFilter === "all"
     ? "#F5F5F7"
@@ -2274,7 +2436,9 @@ function SwimmingTab({ isMobile, onExit }) {
     if (availablePerformance.length >= 2 && abovePerformance >= 2) return "Your latest swim was above your 6-week baseline across several available performance dimensions.";
     if (vals.filter(near).length >= Math.ceil(vals.length * 0.6)) return "Your latest swim was broadly in line with your normal 6-week profile.";
     if (byKey.efficiency > 105 && byKey.pace != null && near(byKey.pace)) return "Stroke efficiency was above your 6-week baseline while speed stayed close to normal.";
-    if (byKey.endurance > 105 && byKey.pace != null && near(byKey.pace)) return "You covered more distance than your normal session baseline while speed stayed close to normal.";
+    if (byKey.endurance > 105 && byKey.pace != null && near(byKey.pace)) return effortFilter === "all"
+      ? "You covered more distance than your normal session baseline while speed stayed close to normal."
+      : `You accumulated more ${SWIM_EFFORT_META[effortFilter].label.toLowerCase()} distance than your normal baseline while speed stayed close to normal.`;
     if (belowPerformance >= 2) return "Several performance dimensions were below your 6-week baseline in this session.";
     if (byKey.pace < 95 && byKey.efficiency >= 95) return "Speed was below your 6-week baseline while stroke efficiency remained comparatively close to normal.";
     return "Your latest swim showed a mixed profile versus your normal 6-week baseline.";
@@ -2328,7 +2492,7 @@ function SwimmingTab({ isMobile, onExit }) {
       lowerBetter: true,
       color: "#0A84FF",
     },
-  ];
+  ].filter((c) => effortFilter === "all" || c.key !== "css");
 
   const allMetricsExpanded = metricCards.length > 0 && metricCards.every((c) => expandedMetrics.has(c.key));
   const toggleMetric = (key) => {
@@ -2374,12 +2538,13 @@ function SwimmingTab({ isMobile, onExit }) {
           these tabs analyze. Category comes straight from isCssTest (item 3), not a separate
           field. */}
       {(sessions || []).length > 0 && (
+        <>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", paddingTop: allStrokesSeen.length > 0 ? 6 : 0, borderTop: allStrokesSeen.length > 0 ? "1px solid #2b241a" : "none" }}>
           <span style={{ fontSize: 10, color: "#636366", marginRight: 2 }}>Category</span>
           {[["all", "All", "#FFFFFF", null], ["workout", "Workout", "#64D2FF", Dumbbell], ["csstest", "CSS Test", "#0A84FF", Target]].map(([v, l, c, Ic]) => {
             const selected = categoryFilter === v;
             return (
-              <button key={v} onClick={() => setCategoryFilter(v)} className="pill swim-filter-pill" style={{
+              <button key={v} onClick={() => { setCategoryFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
                 background: selected ? c : `${c}1a`, border: `1.5px solid ${selected ? c : c + "55"}`,
                 color: selected ? "#000000" : c, borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
@@ -2387,6 +2552,21 @@ function SwimmingTab({ isMobile, onExit }) {
             );
           })}
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", paddingTop: 6, borderTop: "1px solid #2b241a" }}>
+          <span style={{ fontSize: 10, color: "#636366", marginRight: 2 }}>Effort</span>
+          {[["all", "All", "#F5F5F7"], ["easy", "Easy", SWIM_EFFORT_META.easy.color], ["work", "Work", SWIM_EFFORT_META.work.color], ["speed", "Speed", SWIM_EFFORT_META.speed.color]].map(([v,l,c]) => {
+            const selected = effortFilter === v;
+            return (
+              <button key={v} onClick={() => { setEffortFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
+                cursor: "pointer", background: selected ? c : `${c}1a`,
+                border: `1.5px solid ${selected ? c : c + "55"}`, color: selected ? "#000000" : c,
+                borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
+              }}>{l}</button>
+            );
+          })}
+          {effortFilter !== "all" && <span style={{ fontSize: 9.5, color: "#48484A", marginLeft: 2 }}>classified lengths only</span>}
+        </div>
+        </>
       )}
     </div>
   );
@@ -2709,7 +2889,7 @@ function SwimmingTab({ isMobile, onExit }) {
             })}
           </div>
 
-          <React.Fragment key={`swim-section-${swimSection}-${strokeFilter}-${categoryFilter}`}>
+          <React.Fragment key={`swim-section-${swimSection}-${strokeFilter}-${categoryFilter}-${effortFilter}`}>
           {swimSection === "dashboard" && (
             <>
           {/* Insights — rule-based, deterministic interpretation of your swim data. No AI, no
@@ -2717,13 +2897,23 @@ function SwimmingTab({ isMobile, onExit }) {
               above (trendData / chronSessions). See buildSwimInsights and its generator
               functions near the top of the file. */}
           <div style={cardStyle}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-              <Sparkles size={13} color="#FF9F0A" />
-              <div style={{ ...labelStyle, marginBottom: 0 }}>Insights</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <Sparkles size={13} color="#FF9F0A" />
+                <div style={{ ...labelStyle, marginBottom: 0 }}>Insights</div>
+              </div>
+              {(strokeFilter !== "all" || categoryFilter !== "all" || effortFilter !== "all") && (
+                <div className="mono" style={{ fontSize: 9.5, color: "#636366", display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  <span>Analysis:</span>
+                  {strokeFilter !== "all" && <span style={{ color: SWIM_STROKE_COLORS[strokeFilter] || "#8E8E93" }}>{SWIM_STROKE_LABELS[strokeFilter]}</span>}
+                  {categoryFilter !== "all" && <span style={{ color: categoryFilter === "csstest" ? "#0A84FF" : "#64D2FF" }}>{categoryFilter === "csstest" ? "CSS Test" : "Workout"}</span>}
+                  {effortFilter !== "all" && <span style={{ color: SWIM_EFFORT_META[effortFilter].color }}>{SWIM_EFFORT_META[effortFilter].label}</span>}
+                </div>
+              )}
             </div>
             {(() => {
               const insightStroke = strokeFilter === "all" ? null : strokeFilter;
-              const strokeLabel = strokeFilter === "all" ? "Overall swim" : (SWIM_STROKE_LABELS[strokeFilter] || "Swim");
+              const strokeLabel = strokeFilter === "all" ? "Overall" : (SWIM_STROKE_LABELS[strokeFilter] || "Swim");
               const swimInsights = buildSwimInsights({
                 chronSessions, trendData, activeStroke: insightStroke, strokeLabel, todayStr,
                 strokeFilterActive: strokeFilter !== "all",
@@ -3522,6 +3712,8 @@ function TrainingLog() {
   const [swimActivityStrokeFilter, setSwimActivityStrokeFilter] = useState({});
   const [swimOpenRepsFor, setSwimOpenRepsFor] = useState({});
   const [swimOpenLengthsFor, setSwimOpenLengthsFor] = useState({});
+  const [swimEffortEditFor, setSwimEffortEditFor] = useState(null);
+  const [swimEffortSelected, setSwimEffortSelected] = useState({});
   const [swimIdleToActiveFor, setSwimIdleToActiveFor] = useState(null);
   const [swimCssRepPick, setSwimCssRepPick] = useState({});
   const swimFileInputRef = useRef(null);
@@ -3548,6 +3740,7 @@ function TrainingLog() {
   };
 
   const sortedSwimSessions = [...(swimSessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const swimEffortAssignments = useMemo(() => buildSwimEffortAssignments(swimSessions || []), [swimSessions]);
   const swimCategoryLabelOf = (s) => (s.isCssTest ? "CSS Test" : "Workout");
 
   const correctSwimPoolLength = async (id) => {
@@ -3595,6 +3788,36 @@ function TrainingLog() {
   const markSwimLengthIdle = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userLengthType: l.lengthType === "idle" ? null : "idle", userStroke: null }));
   const toggleExcludeSwimLength = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: !l.userExcluded }));
   const resetSwimLengthOverrides = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: false, userLengthType: null, userStroke: null }));
+
+  const toggleSwimEffortSelection = (sessionId, lengthIndex) => {
+    setSwimEffortSelected((prev) => {
+      const cur = new Set(prev[sessionId] || []);
+      if (cur.has(lengthIndex)) cur.delete(lengthIndex); else cur.add(lengthIndex);
+      return { ...prev, [sessionId]: cur };
+    });
+  };
+  const setAllSwimEffortSelection = (session, selectAll) => {
+    const next = new Set();
+    if (selectAll) (session.lengths || []).forEach((l) => {
+      const eff = effectiveLength(l);
+      if (eff.lengthType === "active" && !l.userExcluded) next.add(l.index);
+    });
+    setSwimEffortSelected((prev) => ({ ...prev, [session.id]: next }));
+  };
+  const applyBulkSwimEffort = async (sessionId, effort) => {
+    const selected = new Set(swimEffortSelected[sessionId] || []);
+    if (!selected.size) return;
+    const next = (swimSessions || []).map((s) => s.id !== sessionId ? s : {
+      ...s,
+      lengths: (s.lengths || []).map((l) => selected.has(l.index) ? { ...l, userEffort: validSwimEffort(effort) ? effort : null } : l)
+    });
+    await persistSwim(next);
+    setSwimEffortSelected((prev) => ({ ...prev, [sessionId]: new Set() }));
+  };
+  const closeSwimEffortEditor = (sessionId) => {
+    setSwimEffortEditFor(null);
+    setSwimEffortSelected((prev) => ({ ...prev, [sessionId]: new Set() }));
+  };
 
   const pickSwimCssRep = (sessionId, slot, repIdx) => setSwimCssRepPick((prev) => { const cur = prev[sessionId] || {}; return { ...prev, [sessionId]: { ...cur, [slot]: cur[slot] === repIdx ? null : repIdx } }; });
   const applySwimCssRepPick = async (sessionId) => {
@@ -6274,6 +6497,44 @@ function TrainingLog() {
                           </div>
                         )}
 
+                        {(() => {
+                          const comp = swimEffortComposition(s, swimEffortAssignments);
+                          const editingEffort = swimEffortEditFor === s.id;
+                          const selectedCount = (swimEffortSelected[s.id] && swimEffortSelected[s.id].size) || 0;
+                          return (
+                            <div style={{ marginBottom: 12, padding: "10px 11px", border: "1px solid var(--border, #27272A)", borderRadius: 12, background: "var(--card-2, #1C1C1E)" }} onClick={(e) => e.stopPropagation()}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 7 }}>
+                                <div>
+                                  <div style={{ fontSize: 10, color: "var(--text-dimmer, #636366)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>Training composition</div>
+                                  <div style={{ fontSize: 9.5, color: "var(--text-faint, #48484A)", marginTop: 2 }}>Auto detected · your manual choices always win</div>
+                                </div>
+                                <button onClick={() => {
+                                  if (editingEffort) closeSwimEffortEditor(s.id);
+                                  else { setSwimEffortEditFor(s.id); setSwimOpenLengthsFor((o) => ({ ...o, [s.id]: true })); }
+                                }} style={{ cursor: "pointer", background: editingEffort ? "#27272A" : "transparent", border: "1px solid #3A3A3C", color: editingEffort ? "#FFFFFF" : "#8E8E93", borderRadius: 8, padding: "4px 8px", fontSize: 10, fontWeight: 700 }}>
+                                  {editingEffort ? "Done" : "Edit"}
+                                </button>
+                              </div>
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                                {["easy","work","speed"].map((k) => {
+                                  const meta = SWIM_EFFORT_META[k];
+                                  const d = comp.distances[k];
+                                  return <span key={k} className="mono" style={{ fontSize: 10.5, color: meta.color, border: `1px solid ${meta.color}55`, background: `${meta.color}10`, borderRadius: 8, padding: "4px 7px" }}>{meta.label} {d != null ? `${fmtNum(d,0)}m` : `${comp.counts[k]} lengths`}</span>;
+                                })}
+                              </div>
+                              {editingEffort && (
+                                <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px solid var(--border, #27272A)", display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                                  <span className="mono" style={{ fontSize: 10, color: "#8E8E93", marginRight: 2 }}>{selectedCount} selected</span>
+                                  {["easy","work","speed"].map((k) => <button key={k} disabled={!selectedCount} onClick={() => applyBulkSwimEffort(s.id, k)} style={{ cursor: selectedCount ? "pointer" : "default", opacity: selectedCount ? 1 : 0.4, background: `${SWIM_EFFORT_META[k].color}18`, border: `1px solid ${SWIM_EFFORT_META[k].color}66`, color: SWIM_EFFORT_META[k].color, borderRadius: 7, padding: "4px 7px", fontSize: 10, fontWeight: 800 }}>{SWIM_EFFORT_META[k].label}</button>)}
+                                  <button disabled={!selectedCount} onClick={() => applyBulkSwimEffort(s.id, null)} title="Remove manual classification and return selected lengths to automatic detection" style={{ cursor: selectedCount ? "pointer" : "default", opacity: selectedCount ? 1 : 0.4, background: "transparent", border: "1px solid #3A3A3C", color: "#8E8E93", borderRadius: 7, padding: "4px 7px", fontSize: 10, fontWeight: 700 }}>Auto</button>
+                                  <button onClick={() => setAllSwimEffortSelection(s, true)} style={{ cursor: "pointer", marginLeft: "auto", background: "transparent", border: "none", color: "#64D2FF", fontSize: 9.5, fontWeight: 700 }}>Select all</button>
+                                  <button onClick={() => setAllSwimEffortSelection(s, false)} style={{ cursor: "pointer", background: "transparent", border: "none", color: "#636366", fontSize: 9.5, fontWeight: 700 }}>Clear</button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         <div style={{ marginBottom: 12 }}>
                           <div
                             onClick={(e) => { e.stopPropagation(); setSwimOpenLengthsFor((o) => ({ ...o, [s.id]: !o[s.id] })); }}
@@ -6285,7 +6546,9 @@ function TrainingLog() {
                           {swimOpenLengthsFor[s.id] && (
                             <>
                               <div style={{ fontSize: 10, color: "var(--text-faint, #48484A)", marginBottom: 8, lineHeight: 1.5 }}>
-                                You're in control here: nothing is ever removed or changed automatically. ⚠ marks a length the app thinks looks off (kept in your totals either way) — tap <b>Exclude</b> if it's wrong, <b>Include</b> to undo. Tap a stroke to relabel it, or flip a row between Active/Idle.
+                                {swimEffortEditFor === s.id
+                                  ? "Classification mode: tap any active lengths — consecutive or not — then assign Easy, Work or Speed above. Auto removes your manual effort override and returns those lengths to detection."
+                                  : <>You're in control here: nothing is ever removed or changed automatically. ⚠ marks a length the app thinks looks off (kept in your totals either way) — tap <b>Exclude</b> if it's wrong, <b>Include</b> to undo. Tap a stroke to relabel it, or flip a row between Active/Idle.</>}
                               </div>
                               <div style={{ overflowX: "auto" }}>
                                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
@@ -6315,12 +6578,21 @@ function TrainingLog() {
                                       // reads as struck through.
                                       const dataCellStyle = { textDecoration: excluded ? "line-through" : "none" };
                                       const showActivePicker = swimIdleToActiveFor && swimIdleToActiveFor.sessionId === s.id && swimIdleToActiveFor.lengthIndex === l.index;
+                                      const editingEffort = swimEffortEditFor === s.id;
+                                      const effort = eff.lengthType === "active" && !excluded ? swimEffortForLength(s, l, swimEffortAssignments) : null;
+                                      const effortSelected = editingEffort && swimEffortSelected[s.id] && swimEffortSelected[s.id].has(l.index);
                                       return (
                                         <React.Fragment key={l.index}>
                                         <tr style={rowStyle}>
-                                          <td className="mono" style={{ padding: "5px 8px", color: "var(--text-dimmer, #636366)", ...dataCellStyle }}>{l.index + 1}</td>
+                                          <td className="mono" style={{ padding: "5px 8px", color: "var(--text-dimmer, #636366)", ...dataCellStyle }}>
+                                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                                              {editingEffort && eff.lengthType === "active" && !excluded && <input type="checkbox" checked={!!effortSelected} onChange={() => toggleSwimEffortSelection(s.id, l.index)} onClick={(e) => e.stopPropagation()} style={{ accentColor: effort ? SWIM_EFFORT_META[effort].color : "#64D2FF" }} />}
+                                              {l.index + 1}
+                                            </span>
+                                          </td>
                                           <td style={{ padding: "5px 8px", color: eff.lengthType === "idle" ? "var(--text-dimmer, #636366)" : "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>
-                                            {eff.lengthType}{l.glitch && !excluded ? " ⚠" : ""}{eff.isOverridden ? " ✎" : ""}
+                                            <span>{eff.lengthType}{l.glitch && !excluded ? " ⚠" : ""}{eff.isOverridden ? " ✎" : ""}</span>
+                                            {editingEffort && effort && <span className="mono" style={{ display: "inline-block", marginLeft: 5, fontSize: 9, color: SWIM_EFFORT_META[effort].color, border: `1px solid ${SWIM_EFFORT_META[effort].color}55`, borderRadius: 5, padding: "1px 4px" }}>{SWIM_EFFORT_META[effort].label}{validSwimEffort(l.userEffort) ? " · manual" : ""}</span>}
                                           </td>
                                           <td style={{ padding: "5px 8px", ...dataCellStyle }}>
                                             {eff.lengthType === "active" ? (
