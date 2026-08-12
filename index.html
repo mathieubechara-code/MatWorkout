@@ -3213,19 +3213,18 @@ function SwimmingTab({ isMobile, onExit }) {
   const dpsSeries = seriesFor(strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`);
 
   const latestOf = (series) => { const vals = series.filter((v) => v != null); return vals.length ? vals[vals.length - 1] : null; };
-  const sixWeekAverageFromRows = (rows, key) => {
-    const valid = (rows || []).filter((d) => d && d.date && d[key] != null && Number.isFinite(d[key]));
-    if (!valid.length) return null;
-    const latestDate = valid[valid.length - 1].date;
-    const cutoff = new Date(`${latestDate}T00:00:00`);
-    cutoff.setDate(cutoff.getDate() - 42);
-    const cutoffStr = toISODate(cutoff);
-    const vals = valid.filter((d) => d.date >= cutoffStr && d.date < latestDate).map((d) => d[key]);
+  // Trend-card headline average = the arithmetic mean of every valid point currently
+  // represented by that card after the active Category / Stroke / Effort / pool-quality
+  // eligibility rules have been applied. No minimum session count is required.
+  const averageFromRows = (rows, key) => {
+    const vals = (rows || [])
+      .map((d) => d && d[key])
+      .filter((v) => v != null && Number.isFinite(v));
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
   const headlineOf = (series, dataKey = null, sourceRows = trendDataView) => (
     metricValueMode === "avg6" && dataKey
-      ? sixWeekAverageFromRows(sourceRows, dataKey)
+      ? averageFromRows(sourceRows, dataKey)
       : latestOf(series)
   );
 
@@ -3838,7 +3837,7 @@ function SwimmingTab({ isMobile, onExit }) {
       title: "Critical Swim Speed (CSS)",
       series: cssTrendData.map((d) => d.cssPace100),
       verdict: computeVerdict(cssTrendData.map((d) => d.cssPace100), "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower" }),
-      value: cssTrendData.length ? fmtPace100(metricValueMode === "avg6" ? sixWeekAverageFromRows(cssTrendData, "cssPace100") : cssTrendData[cssTrendData.length - 1].cssPace100) : "—",
+      value: cssTrendData.length ? fmtPace100(metricValueMode === "avg6" ? averageFromRows(cssTrendData, "cssPace100") : cssTrendData[cssTrendData.length - 1].cssPace100) : "—",
       lowerBetter: true,
       color: "#0A84FF",
     },
@@ -3875,7 +3874,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={s} onClick={() => setStrokeFilter(s)} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? color : `${color}1a`,
                 border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#000000" : color,
-                borderRadius: 8, padding: isMobile ? "2px 5px" : "3px 6px", fontSize: isMobile ? 8.8 : 9.6, fontWeight: 700, lineHeight: 1.05,
+                borderRadius: 7, padding: isMobile ? "2px 4px" : "2px 5px", fontSize: isMobile ? 8.2 : 8.8, fontWeight: 700, lineHeight: 1.0,
               }}>{s === "all" ? "All" : SWIM_STROKE_LABELS[s]}</button>
             );
           })}
@@ -3897,7 +3896,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={v} onClick={() => { setCategoryFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
                 background: selected ? c : `${c}1a`, border: `1.5px solid ${selected ? c : c + "55"}`,
-                color: selected ? "#000000" : c, borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
+                color: selected ? "#000000" : c, borderRadius: 7, padding: isMobile ? "2px 5px" : "3px 6px", fontSize: isMobile ? 8.4 : 9, fontWeight: 700,
               }}>{Ic && <Ic size={11} />}{l}</button>
             );
           })}
@@ -3910,7 +3909,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={v} onClick={() => { setEffortFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? c : `${c}1a`,
                 border: `1.5px solid ${selected ? c : c + "55"}`, color: selected ? "#000000" : c,
-                borderRadius: 8, padding: isMobile ? "2px 5px" : "3px 6px", fontSize: isMobile ? 8.8 : 9.6, fontWeight: 700, lineHeight: 1.05,
+                borderRadius: 7, padding: isMobile ? "2px 4px" : "2px 5px", fontSize: isMobile ? 8.2 : 8.8, fontWeight: 700, lineHeight: 1.0,
               }}>{l}</button>
             );
           })}
@@ -4579,7 +4578,7 @@ function SwimmingTab({ isMobile, onExit }) {
                       cursor: "pointer", background: selected ? c : `${c}12`,
                       border: `1.5px solid ${selected ? c : c + "44"}`,
                       color: selected ? "#000000" : c,
-                      borderRadius: 8, padding: "3px 6px", fontSize: 9.6, fontWeight: 700, lineHeight: 1.05,
+                      borderRadius: 7, padding: "2px 5px", fontSize: 8.8, fontWeight: 700, lineHeight: 1.0,
                     }}>{l}</button>
                   );
                 })}
@@ -4759,18 +4758,23 @@ function SwimmingTab({ isMobile, onExit }) {
             <>
               {renderFilterBar()}
               <div style={cardStyle}>
-                <div style={{ ...labelStyle, marginBottom: 2 }}>CURRENT PROFILE</div>
-                <div style={{ fontSize: 12, color: "#8E8E93", marginBottom: 4 }}>Latest session vs previous 6 weeks</div>
-                {radarLatestSession && (
-                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
-                    <div><div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase" }}>Latest session</div><div className="mono" style={{ fontSize: 13, color: "#FFFFFF", fontWeight: 700 }}>{fmtDate(radarLatestSession.date)}</div></div>
-                    <div><div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase" }}>Reference</div><div className="mono" style={{ fontSize: 13, color: "#8E8E93" }}>Previous 6 weeks · {radarBaselineSessions.length} sessions</div></div>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ ...labelStyle, marginBottom: 3 }}>CURRENT PROFILE</div>
+                    <div style={{ fontSize: 11, color: "#8E8E93" }}>How your latest swim compares with your recent normal.</div>
                   </div>
-                )}
+                  {radarLatestSession && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 9.5 }}>
+                      <span className="mono" style={{ color: radarLatestColor, fontWeight: 800 }}>{fmtDate(radarLatestSession.date)}</span>
+                      <span style={{ color: "#48484A" }}>vs</span>
+                      <span className="mono" style={{ color: radarBaselineColor }}>previous 6 weeks · {radarBaselineSessions.length} sessions</span>
+                    </div>
+                  )}
+                </div>
 
-                <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 8, fontSize: 10.5 }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: radarLatestColor }}><span style={{ width: 18, height: 3, background: radarLatestColor, display: "inline-block", borderRadius: 2 }} /> Latest session</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: radarBaselineColor }}><span style={{ width: 18, height: 0, borderTop: `2px dashed ${radarBaselineColor}`, display: "inline-block" }} /> 6-week baseline = 100</span>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 8, fontSize: 9.5 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: radarLatestColor }}><span style={{ width: 14, height: 2, background: radarLatestColor, display: "inline-block", borderRadius: 2 }} /> Latest</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: radarBaselineColor }}><span style={{ width: 14, height: 0, borderTop: `2px dashed ${radarBaselineColor}`, display: "inline-block" }} /> Baseline = 100</span>
                 </div>
 
                 {radarProfile.length >= 3 && (
@@ -4785,7 +4789,7 @@ function SwimmingTab({ isMobile, onExit }) {
                           <button key={axis.key} onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} className="pill radar-axis-pill" style={{
                             cursor: locked ? "default" : "pointer", background: selected ? axis.color : `${axis.color}1a`,
                             border: `1.5px solid ${selected ? axis.color : axis.color + "55"}`, color: selected ? "#000000" : axis.color,
-                            borderRadius: 8, padding: isMobile ? "3px 6px" : "4px 7px", fontSize: isMobile ? 9 : 9.6, fontWeight: 700, minHeight: isMobile ? 25 : 27, opacity: locked ? 0.82 : 1,
+                            borderRadius: 7, padding: isMobile ? "2px 5px" : "2px 5px", fontSize: isMobile ? 8.2 : 8.8, fontWeight: 700, minHeight: isMobile ? 21 : 22, opacity: locked ? 0.82 : 1,
                           }}>{axis.label}</button>
                         );
                       })}
@@ -4865,11 +4869,11 @@ function SwimmingTab({ isMobile, onExit }) {
                       Personal performance profile · <strong style={{ color: "#8E8E93", fontWeight: 700 }}>100 = your baseline</strong> · &gt;100 above baseline · &lt;100 below baseline
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginTop: 2 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(4, Math.max(1, radarVisibleProfile.length))}, minmax(0, 1fr))`, gap: 6, margin: "2px auto 0", maxWidth: 520 }}>
                       {radarVisibleProfile.map((axis) => (
-                        <div key={axis.key} style={{ border: "1px solid #2C2C2E", borderRadius: 12, padding: "9px 10px", background: "#18181B" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><div style={{ fontSize: 11, color: axis.color, fontWeight: 700 }}>{axis.label}</div><div className="mono" style={{ fontSize: 12, color: "#FFFFFF", fontWeight: 700 }}>{axis.score.toFixed(1)}</div></div>
-                          <div style={{ fontSize: 9.5, color: "#48484A", marginTop: 4 }}>100 = personal baseline</div>
+                        <div key={axis.key} style={{ aspectRatio: "1 / 1", minWidth: 0, border: `1px solid ${axis.color}55`, borderRadius: 9, padding: "6px 5px", background: "#18181B", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+                          <div style={{ fontSize: 8.5, lineHeight: 1.1, color: axis.color, fontWeight: 750, marginBottom: 4 }}>{axis.label}</div>
+                          <div className="mono" style={{ fontSize: 12, lineHeight: 1, color: "#FFFFFF", fontWeight: 800 }}>{axis.score.toFixed(1)}</div>
                         </div>
                       ))}
                     </div>
@@ -4886,7 +4890,7 @@ function SwimmingTab({ isMobile, onExit }) {
                               : "Speed — this stroke's average pace vs its same-pool 6-week baseline. Above 100 = faster than usual.",
                             efficiency: "Stroke Efficiency — combines same-pool SWOLF and distance per stroke against each stroke's own baseline. It appears only when at least 95% of the relevant swim has valid Garmin stroke counts. Above 100 = a more favorable combined stroke-economy signal.",
                             consistency: "Consistency — how evenly you held pace within each stroke vs same-pool sessions from your previous 6 weeks. The score is bounded around 100: above 100 = steadier than usual; below 100 = more variable. It is not a percentage.",
-                            endurance: "Endurance — distance completed in the current stroke/effort/category context vs your previous 6-week average for the same context. Above 100 = more distance than usual; below 100 = less. More is not automatically better.",
+                            endurance: "Endurance — distance completed in the current stroke/effort/category context vs your previous average for the same context. Above 100 = more distance than usual; below 100 = less. More is not automatically better.",
                             aerobic: strokeFilter === "all"
                               ? "Aerobic Efficiency — compares same-pool speed/HR within each stroke against its own baseline, then combines them. Above 100 = more speed for the cardiovascular cost."
                               : "Aerobic Efficiency — this stroke's same-pool speed relative to heart-rate cost vs its previous 6-week baseline. Above 100 = more speed for the cardiovascular cost. Shown only with sufficient real HR coverage.",
