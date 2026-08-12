@@ -4844,8 +4844,8 @@ function SwimmingTab({ isMobile, onExit }) {
                 ) : (
                   <>
                     <div className="radar-profile-chart" style={{ position: "relative" }}>
-                    <ResponsiveContainer width="100%" height={isMobile ? 455 : 420}>
-                      <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "82%" : "78%"} margin={isMobile ? { top: 18, right: 8, bottom: 16, left: 8 } : { top: 12, right: 10, bottom: 12, left: 10 }}>
+                    <ResponsiveContainer width="100%" height={isMobile ? 505 : 455}>
+                      <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "86%" : "82%"} margin={isMobile ? { top: 14, right: 4, bottom: 12, left: 4 } : { top: 10, right: 8, bottom: 10, left: 8 }}>
                         <PolarGrid stroke="#8E8E93" strokeOpacity={0.62} />
                         <PolarAngleAxis dataKey="label" tick={radarAxisTick} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.58 }} />
                         <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -4876,32 +4876,7 @@ function SwimmingTab({ isMobile, onExit }) {
                       ))}
                     </div>
 
-                    <details style={{ marginTop: 10, border: "1px solid #2C2C2E", borderRadius: 12, background: "#18181B", overflow: "hidden" }}>
-                      <summary style={{ cursor: "pointer", listStyle: "none", padding: "10px 12px", display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "#8E8E93", fontWeight: 700 }}>
-                        <Info size={13} /> What do these axes mean?
-                      </summary>
-                      <div style={{ padding: "0 12px 11px", display: "grid", gap: 8 }}>
-                        {radarVisibleProfile.map((axis) => {
-                          const descriptions = {
-                            pace: strokeFilter === "all"
-                              ? "Speed — compares each stroke with its own same-pool 6-week pace baseline, then combines them. Above 100 = faster than usual without being distorted by stroke mix or pool length."
-                              : "Speed — this stroke's average pace vs its same-pool 6-week baseline. Above 100 = faster than usual.",
-                            efficiency: "Stroke Efficiency — combines same-pool SWOLF and distance per stroke against each stroke's own baseline. It appears only when at least 95% of the relevant swim has valid Garmin stroke counts. Above 100 = a more favorable combined stroke-economy signal.",
-                            consistency: "Consistency — how evenly you held pace within each stroke vs same-pool sessions from your previous 6 weeks. The score is bounded around 100: above 100 = steadier than usual; below 100 = more variable. It is not a percentage.",
-                            endurance: "Endurance — distance completed in the current stroke/effort/category context vs your previous average for the same context. Above 100 = more distance than usual; below 100 = less. More is not automatically better.",
-                            aerobic: strokeFilter === "all"
-                              ? "Aerobic Efficiency — compares same-pool speed/HR within each stroke against its own baseline, then combines them. Above 100 = more speed for the cardiovascular cost."
-                              : "Aerobic Efficiency — this stroke's same-pool speed relative to heart-rate cost vs its previous 6-week baseline. Above 100 = more speed for the cardiovascular cost. Shown only with sufficient real HR coverage.",
-                          };
-                          return (
-                            <div key={axis.key} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "start" }}>
-                              <span style={{ width: 7, height: 7, borderRadius: "50%", background: axis.color, marginTop: 5 }} />
-                              <div style={{ fontSize: 10.5, color: "#8E8E93", lineHeight: 1.45 }}>{descriptions[axis.key]}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </details>
+                    
 
                     <div style={{ fontSize: 10, color: "#48484A", marginTop: 10, lineHeight: 1.45 }}>
                       Display is limited to 70–130 only for the visual scale; raw calculated scores are unchanged and shown in the tooltip and values above.
