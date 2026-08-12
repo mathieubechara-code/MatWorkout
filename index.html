@@ -6999,6 +6999,25 @@ function TrainingLog() {
           button, .file-btn, input[type="checkbox"] { min-height: 40px; }
           .pill { padding: 8px 12px !important; font-size: 12.5px !important; }
         }
+
+        /* Swim pills: final cascade override. Match the ACTUAL rendered Gym
+           training-group/exercise controls on mobile, not merely their inline values. */
+        .pill.swim-filter-pill {
+          min-height: 29px !important;
+          padding: 5px 8px !important;
+          font-size: 10.3px !important;
+          line-height: 1.15 !important;
+          border-radius: 9px !important;
+        }
+        @media (max-width: 560px) {
+          .pill.swim-filter-pill {
+            min-height: 40px !important; /* Gym buttons inherit the mobile 40px tap target */
+            padding: 5px 8px !important;
+            font-size: 10.3px !important;
+            line-height: 1.15 !important;
+            border-radius: 9px !important;
+          }
+        }
       `}</style>
 
       {(!athleteMode || showAthleteModePicker) && (
