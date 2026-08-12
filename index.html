@@ -4438,7 +4438,7 @@ function SwimmingTab({ isMobile, onExit }) {
           {/* Trends — compact sparkline cards, tap to expand */}
           <div style={cardStyle}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ ...labelStyle, marginBottom: 0 }}>Trends</div><button onClick={() => setTrendHelpOpen((v) => !v)} title="What do these metrics mean?" style={{ cursor: "pointer", background: trendHelpOpen ? "#27272A" : "transparent", border: "1px solid " + (trendHelpOpen ? "#3A3A3C" : "#2C2C2E"), borderRadius: 999, padding: "1px 5px", color: trendHelpOpen ? "#FFFFFF" : "#8E8E93", fontSize: 8.3, fontWeight: 750 }}>Meaning</button></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ ...labelStyle, marginBottom: 0 }}>Trends</div><button onClick={() => setTrendHelpOpen((v) => !v)} title="What do these metrics mean?" className="meaning-btn" style={{ cursor: "pointer", background: trendHelpOpen ? "#64D2FF22" : "transparent", border: "1px solid #64D2FF88", borderRadius: 999, padding: "1px 5px", color: "#64D2FF", fontSize: 8.3, fontWeight: 800 }}>Meaning</button></div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: 4 }}>
                   {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
@@ -4564,7 +4564,7 @@ function SwimmingTab({ isMobile, onExit }) {
                 >
                   <Info size={12} style={{ color: showCompareInfo ? "#FFFFFF" : "#8E8E93" }} />
                 </button>
-                <button onClick={() => setCompareHelpOpen((v) => !v)} title="What do these metrics mean?" style={{ cursor: "pointer", background: compareHelpOpen ? "#27272A" : "transparent", border: "1px solid " + (compareHelpOpen ? "#3A3A3C" : "#2C2C2E"), borderRadius: 999, padding: "3px 7px", color: compareHelpOpen ? "#FFFFFF" : "#8E8E93", fontSize: 9.5, fontWeight: 700 }}>Meaning</button>
+                <button onClick={() => setCompareHelpOpen((v) => !v)} title="What do these metrics mean?" className="meaning-btn" style={{ cursor: "pointer", background: compareHelpOpen ? "#64D2FF22" : "transparent", border: "1px solid #64D2FF88", borderRadius: 999, padding: "3px 7px", color: "#64D2FF", fontSize: 9.5, fontWeight: 800 }}>Meaning</button>
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
                 {[["pace","Pace","#F5F5F7"],["dps","Distance / Stroke","#30D158"],["cadence","Stroke Rate","#64D2FF"],["swolf","SWOLF","#BF5AF2"],["hr","Avg HR","#FF453A"]].map(([v,l,c]) => {
@@ -4809,7 +4809,7 @@ function SwimmingTab({ isMobile, onExit }) {
 
                 {radarProfile.length >= 3 && (
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}><div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>Axes · tap to show / hide</div><button onClick={() => setRadarHelpOpen((v) => !v)} title="What do these metrics mean?" style={{ cursor: "pointer", background: radarHelpOpen ? "#27272A" : "transparent", border: "1px solid " + (radarHelpOpen ? "#3A3A3C" : "#2C2C2E"), borderRadius: 999, padding: "1px 5px", color: radarHelpOpen ? "#FFFFFF" : "#8E8E93", fontSize: 8.3, fontWeight: 750 }}>Meaning</button></div>{radarHelpOpen && (<div style={{ marginBottom: 7, padding: "8px 10px", border: "1px solid #2C2C2E", borderRadius: 11, background: "#141416", fontSize: 10.2, lineHeight: 1.4 }}>{radarVisibleProfile.map((axis) => { const d = { pace: "Faster pace is better.", efficiency: "Lower SWOLF and/or higher distance per stroke is favorable.", consistency: "Higher means steadier pacing than your normal variability.", endurance: "Higher means more qualifying distance than your normal session level.", aerobic: "Higher means more pace produced per heartbeat than your baseline." }[axis.key]; return d ? <div key={axis.key} style={{ marginBottom: 4 }}><b style={{ color: axis.color }}>{axis.label}</b><span style={{ color: "#AEAEB2" }}> — {d}</span></div> : null; })}</div>)}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}><div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>Axes · tap to show / hide</div><button onClick={() => setRadarHelpOpen((v) => !v)} title="What do these metrics mean?" className="meaning-btn" style={{ cursor: "pointer", background: radarHelpOpen ? "#64D2FF22" : "transparent", border: "1px solid #64D2FF88", borderRadius: 999, padding: "1px 5px", color: "#64D2FF", fontSize: 8.3, fontWeight: 800 }}>Meaning</button></div>{radarHelpOpen && (<div style={{ marginBottom: 7, padding: "8px 10px", border: "1px solid #2C2C2E", borderRadius: 11, background: "#141416", fontSize: 10.2, lineHeight: 1.4 }}>{radarVisibleProfile.map((axis) => { const d = { pace: "Faster pace is better.", efficiency: "Lower SWOLF and/or higher distance per stroke is favorable.", consistency: "Higher means steadier pacing than your normal variability.", endurance: "Higher means more qualifying distance than your normal session level.", aerobic: "Higher means more pace produced per heartbeat than your baseline." }[axis.key]; return d ? <div key={axis.key} style={{ marginBottom: 4 }}><b style={{ color: axis.color }}>{axis.label}</b><span style={{ color: "#AEAEB2" }}> — {d}</span></div> : null; })}</div>)}
                     <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                       {radarProfile.map((axis) => {
                         const selected = radarMetricKeys.has(axis.key);
@@ -6842,6 +6842,30 @@ function TrainingLog() {
         .theme-toggle button { min-height:0!important; width:32px; height:28px; border:0; border-radius:999px; cursor:pointer; background:transparent; color:var(--ui-muted); display:flex; align-items:center; justify-content:center; font-size:14px; }
         .theme-toggle button.active { background:var(--ui-text); color:var(--ui-bg); }
 
+        /* Day header: dark, high-contrast title instead of white-on-beige. */
+        .ui-day .app-header-title { color:#11100F !important; }
+        .ui-day .app-header { border-bottom-color:#AFA79B !important; }
+        .ui-day .app-header .mono { color:#5F5A53 !important; }
+
+        /* Meaning is a discoverable help action everywhere. */
+        .meaning-btn {
+          color:#64D2FF !important;
+          border-color:#64D2FF88 !important;
+          font-weight:800 !important;
+        }
+        .meaning-btn:hover { background:#64D2FF16 !important; }
+        .ui-day .meaning-btn {
+          color:#0077A8 !important;
+          border-color:#0077A877 !important;
+        }
+
+        /* Primary workout-log CTA must remain readable in both themes. */
+        .log-session-primary {
+          background:#FF9F0A !important;
+          color:#000000 !important;
+          border-color:#FF9F0A !important;
+        }
+
         /* Compact collapsed Trend cards: same behavior, less vertical weight. */
         .trend-compact-card { transition: background-color .18s ease, border-color .18s ease; }
         .trend-compact-card[data-expanded="false"] { padding-top:9px!important; padding-bottom:9px!important; }
@@ -7047,7 +7071,7 @@ function TrainingLog() {
       )}
 
       {/* Header */}
-      <div style={{ borderBottom: "1px solid #27272A", padding: isMobile ? "14px 12px 0" : "20px 16px 0" }}>
+      <div className="app-header" style={{ borderBottom: "1px solid #27272A", padding: isMobile ? "14px 12px 0" : "20px 16px 0" }}>
         <div style={{ maxWidth: 1060, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -7079,7 +7103,7 @@ function TrainingLog() {
             </div>
           ) : (
             <h1
-              className="disp"
+              className="disp app-header-title"
               onClick={() => { setNameDraft(ownerName); setEditingName(true); }}
               title="Click to edit"
               style={{ fontSize: "clamp(24px, 6vw, 32px)", fontWeight: 700, margin: "0 0 4px", color: "#FFFFFF", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}
@@ -7553,9 +7577,9 @@ function TrainingLog() {
                     </div>
                   </div>
                   <button onClick={()=>setShowWorkoutRadarMeaning((v)=>!v)} style={{
-                    cursor:"pointer", border:"1px solid #3A3A3C", background:"transparent", color:"#8E8E93",
-                    borderRadius:999, padding:"5px 8px", fontSize:9.5, fontWeight:750
-                  }}>Meaning</button>
+                    cursor:"pointer", border:"1px solid #64D2FF88", background:showWorkoutRadarMeaning ? "#64D2FF22" : "transparent", color:"#64D2FF",
+                    borderRadius:999, padding:"5px 8px", fontSize:9.5, fontWeight:800
+                  }} className="meaning-btn">Meaning</button>
                 </div>
 
                 <div style={{ fontSize:8.8, color:"#636366", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>Training group</div>
@@ -7829,7 +7853,7 @@ function TrainingLog() {
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
               {viewMode === "workout" && !showForm && (
-                <button onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#1C1C1E", color: "#101214", border: "none", borderRadius: 16, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}><Plus size={16} /> Log new session</button>
+                <button className="log-session-primary" onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#FF9F0A", color: "#000000", border: "1px solid #FF9F0A", borderRadius: 16, padding: "10px 16px", fontWeight: 800, fontSize: 13 }}><Plus size={16} /> Log new session</button>
               )}
               <button onClick={exportJSON} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", color: "#D1D1D6", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export {viewMode === "workout" ? "workout" : viewMode === "swim" ? "swim" : "all"} JSON</button>
               {viewMode === "workout" && (
