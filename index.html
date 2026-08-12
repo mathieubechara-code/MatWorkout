@@ -4660,37 +4660,65 @@ function SwimmingTab({ isMobile, onExit }) {
                   )}
                   {compareInterpretation ? (
                     <div style={{
-                      margin: "10px 0 12px", padding: "11px 12px",
-                      border: `1px solid ${interpTheme.border}`, borderRadius: 13,
+                      margin: "7px 0 8px",
+                      padding: "8px 9px",
+                      border: `1px solid ${interpTheme.border}`,
+                      borderLeft: `3px solid ${interpTheme.color}`,
+                      borderRadius: 10,
                       background: interpTheme.bg
                     }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                        <TrendingUp size={13} style={{ color: interpTheme.color }} />
-                        <div style={{ color: interpTheme.color, fontSize: 12.5, fontWeight: 800 }}>{compareInterpretation.headline}</div>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                        <TrendingUp size={11} style={{ color: interpTheme.color, flexShrink: 0, marginTop: 1 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ color: interpTheme.color, fontSize: 11.5, lineHeight: 1.2, fontWeight: 800, marginBottom: 2 }}>
+                            {compareInterpretation.headline}
+                          </div>
+                          <div style={{
+                            color: "#C7C7CC",
+                            fontSize: 9.6,
+                            lineHeight: 1.3,
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden"
+                          }}>
+                            {compareInterpretation.story}
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ color: "#D1D1D6", fontSize: 10.5, lineHeight: 1.45, marginBottom: 7 }}>
-                        {compareInterpretation.story}
-                      </div>
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
+                      <div style={{
+                        display: "flex",
+                        gap: 4,
+                        overflowX: "auto",
+                        WebkitOverflowScrolling: "touch",
+                        scrollbarWidth: "none",
+                        marginTop: 6,
+                        paddingBottom: 1
+                      }}>
                         {compareInterpretation.notes.map((note, i) => {
                           const cfg = selectedCfgs[i];
                           return <span key={note} style={{
-                            color: cfg ? cfg.color : "#AEAEB2", fontSize: 10,
+                            flexShrink: 0,
+                            color: cfg ? cfg.color : "#AEAEB2",
+                            fontSize: 8.8,
                             border: `1px solid ${cfg ? cfg.color + "44" : "#3A3A3C"}`,
-                            borderRadius: 7, padding: "3px 6px", background: cfg ? cfg.color + "0D" : "transparent"
+                            borderRadius: 999,
+                            padding: "2px 5px",
+                            background: cfg ? cfg.color + "0D" : "transparent",
+                            whiteSpace: "nowrap"
                           }}>{note}</span>;
                         })}
                       </div>
-                      <div style={{ color: "#8E8E93", fontSize: 9.5, lineHeight: 1.4 }}>
+                      <div style={{ color: "#636366", fontSize: 8.4, lineHeight: 1.25, marginTop: 4 }}>
                         {compareInterpretation.mode === "session"
-                          ? `Compared with the previous ${compareInterpretation.baselineCount} comparable sessions.`
+                          ? `vs previous ${compareInterpretation.baselineCount} comparable`
                           : compareInterpretation.mode === "overall"
-                            ? `Latest session vs the previous ${compareInterpretation.baselineCount} comparable session${compareInterpretation.baselineCount === 1 ? "" : "s"}.`
-                            : `Recent ${compareInterpretation.recentCount} vs earlier ${compareInterpretation.baselineCount} comparable sessions.`} Association, not proof of cause.
+                            ? `Latest vs previous ${compareInterpretation.baselineCount} comparable`
+                            : `Recent ${compareInterpretation.recentCount} vs earlier ${compareInterpretation.baselineCount}`} · association only
                       </div>
                     </div>
                   ) : (
-                    <div style={{ margin: "10px 0 12px", padding: "10px 11px", border: "1px solid #2C2C2E", borderRadius: 12, color: "#636366", fontSize: 10.5 }}>
+                    <div style={{ margin: "7px 0 8px", padding: "7px 9px", border: "1px solid #2C2C2E", borderRadius: 10, color: "#636366", fontSize: 9.4 }}>
                       Keep logging comparable sessions — the interpretation will appear once there is enough history to compare recent and earlier patterns.
                     </div>
                   )}
