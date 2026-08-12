@@ -4442,7 +4442,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: 4 }}>
                   {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
-                    <button key={v} onClick={() => setSwimTimeView(v)} className="pill" style={{
+                    <button key={v} onClick={() => setSwimTimeView(v)} className="pill swim-filter-pill" style={{
                       cursor: "pointer", background: swimTimeView === v ? "#27272A" : "transparent",
                       border: "1px solid " + (swimTimeView === v ? "#3A3A3C" : "#27272A"), color: swimTimeView === v ? "#FFFFFF" : "#8E8E93",
                       borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
@@ -4450,6 +4450,7 @@ function SwimmingTab({ isMobile, onExit }) {
                   ))}
                 </div>
                 <button
+                  className="swim-filter-pill"
                   onClick={() => setMetricValueMode((m) => (m === "avg6" ? "latest" : "avg6"))}
                   title="Toggle each card's big number between the latest value and the average of the previous 6 calendar weeks"
                   className="pill"
@@ -4462,7 +4463,7 @@ function SwimmingTab({ isMobile, onExit }) {
                   }}
                 >6-wk avg</button>
                 {metricCards.length > 0 && (
-                  <button onClick={toggleExpandAllMetrics} className="pill" style={{
+                  <button onClick={toggleExpandAllMetrics} className="pill swim-filter-pill" style={{
                     display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
                     background: allMetricsExpanded ? "#27272A" : "transparent",
                     border: "1px solid " + (allMetricsExpanded ? "#3A3A3C" : "#27272A"),
@@ -4575,7 +4576,7 @@ function SwimmingTab({ isMobile, onExit }) {
                         if (cur.includes(v)) return cur.length > 1 ? cur.filter((x) => x !== v) : cur;
                         return [...cur, v];
                       });
-                    }} className="pill compare-combo-pill" style={{
+                    }} className="pill compare-combo-pill swim-filter-pill" style={{
                       cursor: "pointer", background: selected ? c : "transparent",
                       border: `1.5px solid ${selected ? c : c + "44"}`,
                       color: selected ? "#000000" : c,
@@ -4815,7 +4816,7 @@ function SwimmingTab({ isMobile, onExit }) {
                         const visibleCount = radarVisibleProfile.length;
                         const locked = selected && visibleCount <= 3;
                         return (
-                          <button key={axis.key} onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} className="pill radar-axis-pill" style={{
+                          <button key={axis.key} className="pill radar-axis-pill swim-filter-pill" onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} style={{
                             cursor: locked ? "default" : "pointer", background: selected ? axis.color : "transparent",
                             border: `1.5px solid ${selected ? axis.color : axis.color + "55"}`, color: selected ? "#000000" : axis.color,
                             borderRadius: 9, padding: "5px 8px", fontSize: 10.3, fontWeight: 750, minHeight: 29, opacity: locked ? 0.82 : 1,
@@ -7002,7 +7003,8 @@ function TrainingLog() {
 
         /* Swim pills: final cascade override. Match the ACTUAL rendered Gym
            training-group/exercise controls on mobile, not merely their inline values. */
-        .pill.swim-filter-pill {
+        .pill.swim-filter-pill,
+        button.swim-filter-pill {
           min-height: 29px !important;
           padding: 5px 8px !important;
           font-size: 10.3px !important;
@@ -7010,8 +7012,9 @@ function TrainingLog() {
           border-radius: 9px !important;
         }
         @media (max-width: 560px) {
-          .pill.swim-filter-pill {
-            min-height: 40px !important; /* Gym buttons inherit the mobile 40px tap target */
+          .pill.swim-filter-pill,
+          button.swim-filter-pill {
+            min-height: 40px !important;
             padding: 5px 8px !important;
             font-size: 10.3px !important;
             line-height: 1.15 !important;
