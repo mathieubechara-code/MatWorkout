@@ -4797,45 +4797,55 @@ function SwimmingTab({ isMobile, onExit }) {
                   </div>
                 )}
 
+                {radarInterpretation && (
+                  <div style={{
+                    margin: "2px 0 8px",
+                    border: `1px solid ${radarLatestColor}44`,
+                    borderLeft: `3px solid ${radarInterpretation.category === "positive" ? "#30D158" : radarInterpretation.category === "warning" ? "#FF9F0A" : radarLatestColor}`,
+                    borderRadius: 11,
+                    background: "#18181B",
+                    padding: isMobile ? "8px 10px" : "9px 11px"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{
+                          fontSize: isMobile ? 12.5 : 13.5,
+                          fontWeight: 800,
+                          lineHeight: 1.2,
+                          color: radarInterpretation.category === "positive" ? "#30D158" : radarInterpretation.category === "warning" ? "#FF9F0A" : "#F5F5F7",
+                          marginBottom: 2
+                        }}>{radarInterpretation.headline}</div>
+                        <div style={{
+                          fontSize: isMobile ? 9.8 : 10.5,
+                          lineHeight: 1.3,
+                          color: "#AEAEB2",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden"
+                        }}>{radarInterpretation.story}</div>
+                      </div>
+                      <span className="mono" style={{
+                        flexShrink: 0,
+                        color: strokeFilter === "all" ? "#8E8E93" : (SWIM_STROKE_COLORS[strokeFilter] || "#64D2FF"),
+                        border: `1px solid ${strokeFilter === "all" ? "#8E8E9344" : (SWIM_STROKE_COLORS[strokeFilter] || "#64D2FF") + "44"}`,
+                        borderRadius: 999,
+                        padding: "2px 5px",
+                        fontSize: 8.2,
+                        fontWeight: 800,
+                        whiteSpace: "nowrap"
+                      }}>{radarProfileStrokeLabel}</span>
+                    </div>
+                  </div>
+                )}
+
                 {radarVisibleProfile.length < 3 ? (
                   <div style={{ padding: "30px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5, lineHeight: 1.55 }}>Pick at least 3 available axes to draw the profile. Missing axes are omitted rather than estimated.</div>
                 ) : (
                   <>
-                    <div className="radar-profile-chart" style={{ position: "relative", minHeight: isMobile ? 330 : 380 }}>
-                    {radarInterpretation && (
-                      <div style={{
-                        position: "absolute",
-                        zIndex: 4,
-                        top: isMobile ? 8 : 10,
-                        left: isMobile ? 8 : 12,
-                        right: isMobile ? 8 : "auto",
-                        maxWidth: isMobile ? "none" : 330,
-                        background: "rgba(20,20,22,0.88)",
-                        backdropFilter: "blur(10px)",
-                        WebkitBackdropFilter: "blur(10px)",
-                        border: `1px solid ${radarLatestColor}55`,
-                        borderRadius: 12,
-                        padding: isMobile ? "8px 10px" : "9px 11px",
-                        boxShadow: "0 6px 18px rgba(0,0,0,0.22)"
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                          <Info size={11} style={{ color: radarLatestColor, flexShrink: 0 }} />
-                          <span style={{ fontSize: 8.5, color: radarLatestColor, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 800 }}>{radarProfileStrokeLabel}</span>
-                        </div>
-                        <div style={{
-                          fontSize: isMobile ? 12.5 : 13.5,
-                          lineHeight: 1.25,
-                          fontWeight: 800,
-                          color: radarInterpretation.category === "positive" ? "#30D158" : radarInterpretation.category === "warning" ? "#FF9F0A" : "#F5F5F7",
-                          marginBottom: 3
-                        }}>{radarInterpretation.headline}</div>
-                        <div style={{ fontSize: isMobile ? 9.8 : 10.5, lineHeight: 1.35, color: "#C7C7CC" }}>
-                          {radarInterpretation.story}
-                        </div>
-                      </div>
-                    )}
-                    <ResponsiveContainer width="100%" height={isMobile ? 330 : 380}>
-                      <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "73%" : "76%"} margin={isMobile ? { top: 58, right: 8, bottom: 8, left: 8 } : { top: 34, right: 10, bottom: 10, left: 10 }}>
+                    <div className="radar-profile-chart" style={{ position: "relative" }}>
+                    <ResponsiveContainer width="100%" height={isMobile ? 455 : 420}>
+                      <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "82%" : "78%"} margin={isMobile ? { top: 18, right: 8, bottom: 16, left: 8 } : { top: 12, right: 10, bottom: 12, left: 10 }}>
                         <PolarGrid stroke="#8E8E93" strokeOpacity={0.62} />
                         <PolarAngleAxis dataKey="label" tick={radarAxisTick} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.58 }} />
                         <PolarRadiusAxis domain={[70, 130]} ticks={[70, 100, 130]} tick={{ fill: "#8E8E93", fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -4854,12 +4864,12 @@ function SwimmingTab({ isMobile, onExit }) {
                     </div>
 
                     <div style={{ fontSize: 9.2, color: "#636366", margin: "0 2px 8px", lineHeight: 1.3, textAlign: "center" }}>
-                      <strong style={{ color: "#8E8E93", fontWeight: 700 }}>100 = baseline</strong> · above 100 = above baseline · below 100 = below baseline
+                      <strong style={{ color: "#8E8E93", fontWeight: 700 }}>100 = baseline</strong> · higher/lower = relative to your normal
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(5, Math.max(1, radarVisibleProfile.length))}, minmax(0, 1fr))`, gap: 5, margin: "2px auto 0", maxWidth: 560 }}>
                       {radarVisibleProfile.map((axis) => (
-                        <div key={axis.key} style={{ minWidth: 0, border: `1px solid ${axis.color}55`, borderRadius: 8, padding: "5px 4px", background: "#18181B", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", minHeight: 50 }}>
+                        <div key={axis.key} style={{ minWidth: 0, border: `1px solid ${axis.color}55`, borderRadius: 8, padding: "5px 4px", background: "#18181B", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", minHeight: 44 }}>
                           <div style={{ fontSize: 7.6, lineHeight: 1.05, color: axis.color, fontWeight: 750, marginBottom: 3 }}>{axis.label}</div>
                           <div className="mono" style={{ fontSize: 11, lineHeight: 1, color: "#FFFFFF", fontWeight: 800 }}>{axis.score.toFixed(1)}</div>
                         </div>
