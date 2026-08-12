@@ -3875,7 +3875,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={s} onClick={() => setStrokeFilter(s)} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? color : "transparent",
                 border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#000000" : color,
-                borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, lineHeight: 1.0, minHeight: isMobile ? 32 : 34,
+                borderRadius: 9, padding: "5px 8px", fontSize: 10.3, fontWeight: 750, lineHeight: 1.0, minHeight: 29,
               }}>{s === "all" ? "All" : SWIM_STROKE_LABELS[s]}</button>
             );
           })}
@@ -3897,7 +3897,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={v} onClick={() => { setCategoryFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
                 background: selected ? c : "transparent", border: `1.5px solid ${selected ? c : c + "55"}`,
-                color: selected ? "#000000" : c, borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, minHeight: isMobile ? 32 : 34,
+                color: selected ? "#000000" : c, borderRadius: 9, padding: "5px 8px", fontSize: 10.3, fontWeight: 750, minHeight: 29,
               }}>{Ic && <Ic size={11} />}{l}</button>
             );
           })}
@@ -3910,7 +3910,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={v} onClick={() => { setEffortFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? c : "transparent",
                 border: `1.5px solid ${selected ? c : c + "55"}`, color: selected ? "#000000" : c,
-                borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, lineHeight: 1.0, minHeight: isMobile ? 32 : 34,
+                borderRadius: 9, padding: "5px 8px", fontSize: 10.3, fontWeight: 750, lineHeight: 1.0, minHeight: 29,
               }}>{l}</button>
             );
           })}
@@ -4579,7 +4579,7 @@ function SwimmingTab({ isMobile, onExit }) {
                       cursor: "pointer", background: selected ? c : "transparent",
                       border: `1.5px solid ${selected ? c : c + "44"}`,
                       color: selected ? "#000000" : c,
-                      borderRadius: 10, padding: "4px 9px", fontSize: 10.2, fontWeight: 750, lineHeight: 1.0, minHeight: 32,
+                      borderRadius: 9, padding: "5px 8px", fontSize: 10.3, fontWeight: 750, lineHeight: 1.0, minHeight: 29,
                     }}>{l}</button>
                   );
                 })}
@@ -4818,7 +4818,7 @@ function SwimmingTab({ isMobile, onExit }) {
                           <button key={axis.key} onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} className="pill radar-axis-pill" style={{
                             cursor: locked ? "default" : "pointer", background: selected ? axis.color : "transparent",
                             border: `1.5px solid ${selected ? axis.color : axis.color + "55"}`, color: selected ? "#000000" : axis.color,
-                            borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, minHeight: isMobile ? 32 : 34, opacity: locked ? 0.82 : 1,
+                            borderRadius: 9, padding: "5px 8px", fontSize: 10.3, fontWeight: 750, minHeight: 29, opacity: locked ? 0.82 : 1,
                           }}>{axis.label}</button>
                         );
                       })}
