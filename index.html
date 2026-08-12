@@ -4964,7 +4964,7 @@ function TrainingLog() {
   const [workoutSection, setWorkoutSection] = useState(() => {
     try {
       const saved = localStorage.getItem("workout-section-v1");
-      return ["dashboard", "stats"].includes(saved) ? saved : "dashboard";
+      return ["dashboard", "stats", "radar"].includes(saved) ? saved : "dashboard";
     } catch { return "dashboard"; }
   });
   useEffect(() => {
@@ -5015,6 +5015,8 @@ function TrainingLog() {
   const [selectedHeatDate, setSelectedHeatDate] = useState(null);
   const [chartFocus, setChartFocus] = useState(null);
   const [hiddenStatsExercises, setHiddenStatsExercises] = useState(() => new Set());
+  const [workoutRadarGroup, setWorkoutRadarGroup] = useState("All");
+  const [showWorkoutRadarMeaning, setShowWorkoutRadarMeaning] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   // Which exercises show up in the PR card. null = show all (default); array = only these.
   const [prSelection, setPrSelection] = useState(null);
@@ -6206,6 +6208,141 @@ function TrainingLog() {
     return GROUPS.map((g) => ({ group: g, kg: Math.round(totals[g] || 0), pct: Math.round(((totals[g] || 0) / grand) * 100) }));
   }, [latest, muscleGroupMap]);
 
+
+  // ---- Workout Radar ------------------------------------------------------------------
+  // A gym session is never compared globally by raw kilograms. Each exercise is first
+  // compared only with its own observations from the previous 6 weeks; exercise-level
+  // ratios are then averaged with equal exercise weight. This prevents a heavy movement
+  // (e.g. squat) from dominating a lighter movement (e.g. curl) simply because its kg are larger.
+  const workoutRadar = useMemo(() => {
+    if (!latest || !sessions || sessions.length < 2) return { axes: [], baselineSessions: 0, comparableExercises: 0, eligibleNames: [] };
+    const cutoff = new Date(latest.date + "T00:00:00");
+    cutoff.setDate(cutoff.getDate() - 42);
+    const cutoffStr = toISODate(cutoff);
+    const prior = sessions.filter((s) => s.date < latest.date && s.date >= cutoffStr);
+    const wantedGroup = workoutRadarGroup === "All" ? null : workoutRadarGroup;
+    const latestNames = Object.keys(latest.ex || {}).filter((name) => !wantedGroup || muscleGroupMap[name] === wantedGroup);
+    const median = (vals) => {
+      const a = vals.filter((v) => v != null && Number.isFinite(v) && v > 0).sort((x,y)=>x-y);
+      if (!a.length) return null;
+      const m = Math.floor(a.length/2);
+      return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+    };
+    const mean = (vals) => vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+    const clamp = (v, lo=70, hi=130) => Math.max(lo, Math.min(hi, v));
+
+    const comps = latestNames.map((name) => {
+      const hist = prior.filter((s) => s.ex && s.ex[name]);
+      // Two prior observations are required before an exercise can influence a baseline score.
+      if (hist.length < 2) return null;
+      const curStrength = exercise1RM(latest, name);
+      const curVolume = exerciseVolume(latest, name);
+      const curLoads = setLoadsFor(latest, name);
+      const curBestLoad = curLoads && curLoads.length ? Math.max(...curLoads) : null;
+
+      const baseStrength = median(hist.map((s) => exercise1RM(s, name)));
+      const baseVolume = median(hist.map((s) => exerciseVolume(s, name)));
+      // Intensity is actual system load relative to the exercise's recent estimated strength.
+      // This captures "how heavy were the sets?" without needing RPE, RIR, rest or time data.
+      const baseBestLoads = hist.map((s) => {
+        const ls = setLoadsFor(s, name);
+        return ls && ls.length ? Math.max(...ls) : null;
+      });
+      const baseBestLoad = median(baseBestLoads);
+      if (!(curStrength > 0) || !(baseStrength > 0)) return null;
+      return {
+        name,
+        strength: 100 * curStrength / baseStrength,
+        volume: curVolume > 0 && baseVolume > 0 ? 100 * curVolume / baseVolume : null,
+        intensity: curBestLoad > 0 && baseBestLoad > 0 ? 100 * curBestLoad / baseBestLoad : null,
+        strengthChange: curStrength / baseStrength - 1,
+        volumeChange: curVolume > 0 && baseVolume > 0 ? curVolume / baseVolume - 1 : null,
+        histCount: hist.length
+      };
+    }).filter(Boolean);
+
+    if (!comps.length) return { axes: [], baselineSessions: prior.length, comparableExercises: 0, eligibleNames: [] };
+
+    const strengthVals = comps.map((c)=>c.strength).filter(Number.isFinite);
+    const volumeVals = comps.map((c)=>c.volume).filter(Number.isFinite);
+    const intensityVals = comps.map((c)=>c.intensity).filter(Number.isFinite);
+
+    // Progression measures breadth, not magnitude: an exercise is "forward" when either
+    // rep-adjusted strength or volume clears its own baseline by >=2%; "back" uses <=-2%.
+    // Neutral exercises contribute zero. 100 is balanced; +/-30 is the visual cap.
+    const progressionSignals = comps.map((c) => {
+      const best = Math.max(c.strengthChange ?? -Infinity, c.volumeChange ?? -Infinity);
+      const worst = Math.min(c.strengthChange ?? Infinity, c.volumeChange ?? Infinity);
+      if (best >= 0.02) return 1;
+      if (worst <= -0.02) return -1;
+      return 0;
+    });
+    const progression = 100 + 30 * mean(progressionSignals);
+
+    const axes = [
+      { key:"strength", label:"Strength", color:"#64D2FF", score: clamp(mean(strengthVals)), raw: mean(strengthVals) },
+      { key:"volume", label:"Volume", color:"#30D158", score: clamp(mean(volumeVals)), raw: mean(volumeVals) },
+      { key:"intensity", label:"Intensity", color:"#FF9F0A", score: clamp(mean(intensityVals)), raw: mean(intensityVals) },
+      { key:"progression", label:"Progression", color:"#BF5AF2", score: clamp(progression), raw: progression },
+    ].filter((a)=>a.raw != null && Number.isFinite(a.raw));
+
+    return { axes, baselineSessions: prior.length, comparableExercises: comps.length, eligibleNames: comps.map((c)=>c.name), comps };
+  }, [latest, sessions, workoutRadarGroup, muscleGroupMap, bwMap]);
+
+  const workoutRadarInterpretation = useMemo(() => {
+    const get = (k) => workoutRadar.axes.find((a)=>a.key===k)?.raw;
+    const strength=get("strength"), volume=get("volume"), intensity=get("intensity"), progression=get("progression");
+    if ([strength,volume,intensity,progression].some((v)=>v==null)) return null;
+    const band=(v)=>v>=105?"up":v<=95?"down":"same";
+    const s=band(strength), v=band(volume), i=band(intensity), p=band(progression);
+    let headline="A balanced session.";
+    let story="Your strength, workload and loading pattern stayed close to your recent normal.";
+    let tone="#64D2FF";
+
+    if (s==="up" && v==="up") {
+      headline="Stronger with more productive work.";
+      story = i==="up"
+        ? "You lifted above your recent strength baseline, completed more volume, and used heavier loading than usual."
+        : "You lifted above your recent strength baseline while completing more volume. The improvement was not driven by unusually heavy loading alone.";
+      tone="#30D158";
+    } else if (s==="up" && v==="down" && i==="up") {
+      headline="A heavier, strength-focused session.";
+      story="Strength and relative loading were above normal while total volume was lower — a heavier, lower-volume profile.";
+      tone="#30D158";
+    } else if (s==="same" && v==="up" && i==="down") {
+      headline="More volume at lighter loads.";
+      story="Strength stayed near baseline, but you accumulated more work with lighter loading than usual — a volume-oriented session.";
+      tone="#FF9F0A";
+    } else if (s==="down" && v==="down" && i==="down") {
+      headline="A lighter session than usual.";
+      story="Strength, total work and relative loading were all below your recent baseline.";
+      tone="#FF9F0A";
+    } else if (s==="up" && p==="up") {
+      headline="Clear strength progression.";
+      story = v==="same"
+        ? "Overall workload stayed close to normal, but comparable exercises moved forward in rep-adjusted strength."
+        : "Comparable exercises moved forward in rep-adjusted strength, supporting a genuine progression signal.";
+      tone="#30D158";
+    } else if (p==="up") {
+      headline="Progress across your exercises.";
+      story="More of today's comparable exercises moved forward than backward versus their own recent baselines.";
+      tone="#30D158";
+    } else if (p==="down") {
+      headline="Below your recent exercise baseline.";
+      story="More comparable exercises moved backward than forward today. One session is context, not a trend.";
+      tone="#FF9F0A";
+    } else if (i==="up" && v==="same") {
+      headline="Heavier loading, similar workload.";
+      story="You used heavier loads than usual while keeping total work near your recent baseline.";
+      tone="#FF9F0A";
+    } else if (v==="up") {
+      headline="A higher-volume session.";
+      story="You completed more exercise-normalized work than your recent baseline while strength stayed broadly similar.";
+      tone="#30D158";
+    }
+    return { headline, story, tone };
+  }, [workoutRadar]);
+
   // PRs are tracked by TOTAL session volume (all sets for that exercise, summed) rather than a
   // single best set — one big set can flatter a session that was otherwise unremarkable, while
   // total volume reflects the actual work done. Each PR also carries the rep/set breakdown it
@@ -7250,7 +7387,7 @@ function TrainingLog() {
                 color: "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 11,
                 padding: isMobile ? "7px 5px" : "8px 7px", whiteSpace: "nowrap"
               }}>‹ Today</button>
-              {[["dashboard", "Dashboard", LayoutGrid], ["stats", "Stats", TrendingUp]].map(([v,l,Ic]) => {
+              {[["dashboard", "Dashboard", LayoutGrid], ["stats", "Stats", TrendingUp], ["radar", "Radar", RadarIcon]].map(([v,l,Ic]) => {
                 const selected = workoutSection === v;
                 return <button key={v} className="app-nav-pill" onClick={() => setWorkoutSection(v)} style={{
                   flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
@@ -7338,6 +7475,88 @@ function TrainingLog() {
               </div>
             </div>
 
+            </>
+            )}
+
+
+            {workoutSection === "radar" && (
+            <>
+              <div style={{ background:"#1C1C1E", border:"1px solid #27272A", borderRadius:18, padding:isMobile ? 10 : 12, marginBottom:12 }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:9 }}>
+                  <div>
+                    <div style={{ fontSize:11, color:"#8E8E93", textTransform:"uppercase", letterSpacing:"0.06em" }}>Current profile</div>
+                    <div style={{ fontSize:10, color:"#636366", marginTop:2 }}>
+                      {latest ? `${fmtDate(latest.date)} vs previous 6 weeks` : "Latest session vs previous 6 weeks"}
+                    </div>
+                  </div>
+                  <button onClick={()=>setShowWorkoutRadarMeaning((v)=>!v)} style={{
+                    cursor:"pointer", border:"1px solid #3A3A3C", background:"transparent", color:"#8E8E93",
+                    borderRadius:999, padding:"5px 8px", fontSize:9.5, fontWeight:750
+                  }}>Meaning</button>
+                </div>
+
+                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                  {["All", ...GROUPS.filter((g)=>chartExercises.some((n)=>muscleGroupMap[n]===g))].map((g)=>{
+                    const selected=workoutRadarGroup===g;
+                    const c=g==="All" ? "#F2F2F7" : GROUP_COLORS[g];
+                    return <button key={g} onClick={()=>setWorkoutRadarGroup(g)} style={{
+                      cursor:"pointer", minHeight:27, padding:"3px 8px", borderRadius:8, fontSize:9.8, fontWeight:800,
+                      border:`1px solid ${selected ? c : c+"66"}`, background:selected ? (g==="All" ? "#F2F2F7" : c+"22") : "transparent",
+                      color:selected && g==="All" ? "#000" : c
+                    }}>{g}</button>
+                  })}
+                </div>
+
+                {showWorkoutRadarMeaning && (
+                  <div style={{ marginTop:8, padding:"8px 9px", border:"1px solid #2C2C2E", borderRadius:10, background:"#18181B", fontSize:9.5, lineHeight:1.4, color:"#AEAEB2" }}>
+                    <div><strong style={{color:"#64D2FF"}}>Strength</strong> — rep-adjusted estimated strength vs the same exercises in your previous 6 weeks.</div>
+                    <div><strong style={{color:"#30D158"}}>Volume</strong> — exercise-normalized total work vs baseline; heavy exercises cannot dominate just because they use more kg.</div>
+                    <div><strong style={{color:"#FF9F0A"}}>Intensity</strong> — actual system load used vs your normal loading for those same exercises. No time, rest, RPE or RIR is assumed.</div>
+                    <div><strong style={{color:"#BF5AF2"}}>Progression</strong> — breadth of exercises moving forward vs backward. <strong style={{color:"#D1D1D6"}}>100 = your baseline.</strong></div>
+                  </div>
+                )}
+              </div>
+
+              {workoutRadar.axes.length >= 3 ? (
+                <div style={{ background:"#1C1C1E", border:"1px solid #27272A", borderRadius:18, padding:isMobile ? "10px 8px 12px" : 14, marginBottom:18 }}>
+                  {workoutRadarInterpretation && (
+                    <div style={{ margin:"0 4px 5px", padding:"7px 9px", border:`1px solid ${workoutRadarInterpretation.tone}44`, borderLeft:`3px solid ${workoutRadarInterpretation.tone}`, borderRadius:10, background:"#18181B" }}>
+                      <div style={{ color:workoutRadarInterpretation.tone, fontSize:11.5, fontWeight:800, lineHeight:1.2, marginBottom:2 }}>{workoutRadarInterpretation.headline}</div>
+                      <div style={{ color:"#C7C7CC", fontSize:9.6, lineHeight:1.3 }}>{workoutRadarInterpretation.story}</div>
+                    </div>
+                  )}
+
+                  <ResponsiveContainer width="100%" height={isMobile ? 440 : 420}>
+                    <RadarChart data={workoutRadar.axes} outerRadius={isMobile ? "80%" : "78%"} margin={isMobile ? {top:18,right:18,bottom:18,left:18}:{top:12,right:20,bottom:12,left:20}}>
+                      <PolarGrid stroke="#8E8E93" strokeOpacity={0.55} />
+                      <PolarAngleAxis dataKey="label" tick={({payload,x,y,textAnchor})=>{
+                        const a=workoutRadar.axes.find((z)=>z.label===payload.value);
+                        return <text x={x} y={y} textAnchor={textAnchor} fill={a?.color || "#D1D1D6"} fontSize={isMobile ? 11 : 12} fontWeight="700">{payload.value}</text>
+                      }} />
+                      <PolarRadiusAxis angle={90} domain={[70,130]} ticks={[70,100,130]} tick={{fill:"#636366",fontSize:9}} axisLine={false} />
+                      <Radar name="Baseline" dataKey={()=>100} stroke="#BF5AF2" strokeWidth={2} strokeDasharray="5 4" fill="#BF5AF2" fillOpacity={0.06} isAnimationActive={false} />
+                      <Radar name="Latest" dataKey="score" stroke="#F2F2F7" strokeWidth={3} fill="#F2F2F7" fillOpacity={0.20} isAnimationActive={false} />
+                    </RadarChart>
+                  </ResponsiveContainer>
+
+                  <div style={{ fontSize:9, color:"#636366", textAlign:"center", marginTop:-4, marginBottom:8 }}>
+                    <strong style={{color:"#8E8E93"}}>100 = baseline</strong> · previous 6 weeks · {workoutRadar.comparableExercises} comparable exercise{workoutRadar.comparableExercises===1?"":"s"}
+                  </div>
+
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(4,minmax(0,1fr))", gap:5 }}>
+                    {workoutRadar.axes.map((a)=>(
+                      <div key={a.key} style={{ minWidth:0, minHeight:48, border:`1px solid ${a.color}55`, borderRadius:8, padding:"5px 3px", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", background:"#18181B" }}>
+                        <div style={{ color:a.color, fontSize:7.8, fontWeight:750, lineHeight:1.05, marginBottom:3 }}>{a.label}</div>
+                        <div className="mono" style={{ color:"#FFF", fontSize:11.5, fontWeight:800 }}>{a.raw.toFixed(1)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background:"#1C1C1E", border:"1px solid #27272A", borderRadius:18, padding:16, marginBottom:18, color:"#8E8E93", fontSize:10.5, lineHeight:1.45 }}>
+                  Not enough comparable history yet. An exercise needs at least <strong style={{color:"#D1D1D6"}}>2 prior sessions within 6 weeks</strong> before it can contribute to the Workout Radar.
+                </div>
+              )}
             </>
             )}
 
