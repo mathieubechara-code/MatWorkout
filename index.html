@@ -3875,7 +3875,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={s} onClick={() => setStrokeFilter(s)} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? color : "transparent",
                 border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#000000" : color,
-                borderRadius: 7, padding: isMobile ? "1px 4px" : "2px 4px", fontSize: isMobile ? 7.7 : 8.2, fontWeight: 750, lineHeight: 1.0, minHeight: isMobile ? 19 : 20,
+                borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, lineHeight: 1.0, minHeight: isMobile ? 32 : 34,
               }}>{s === "all" ? "All" : SWIM_STROKE_LABELS[s]}</button>
             );
           })}
@@ -3897,7 +3897,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={v} onClick={() => { setCategoryFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
                 background: selected ? c : "transparent", border: `1.5px solid ${selected ? c : c + "55"}`,
-                color: selected ? "#000000" : c, borderRadius: 7, padding: isMobile ? "1px 4px" : "2px 4px", fontSize: isMobile ? 7.7 : 8.2, fontWeight: 750, minHeight: isMobile ? 19 : 20,
+                color: selected ? "#000000" : c, borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, minHeight: isMobile ? 32 : 34,
               }}>{Ic && <Ic size={11} />}{l}</button>
             );
           })}
@@ -3910,7 +3910,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={v} onClick={() => { setEffortFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? c : "transparent",
                 border: `1.5px solid ${selected ? c : c + "55"}`, color: selected ? "#000000" : c,
-                borderRadius: 7, padding: isMobile ? "1px 4px" : "2px 4px", fontSize: isMobile ? 7.7 : 8.2, fontWeight: 750, lineHeight: 1.0, minHeight: isMobile ? 19 : 20,
+                borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, lineHeight: 1.0, minHeight: isMobile ? 32 : 34,
               }}>{l}</button>
             );
           })}
@@ -4579,7 +4579,7 @@ function SwimmingTab({ isMobile, onExit }) {
                       cursor: "pointer", background: selected ? c : "transparent",
                       border: `1.5px solid ${selected ? c : c + "44"}`,
                       color: selected ? "#000000" : c,
-                      borderRadius: 7, padding: "1px 4px", fontSize: 8.0, fontWeight: 750, lineHeight: 1.0, minHeight: 19,
+                      borderRadius: 10, padding: "4px 9px", fontSize: 10.2, fontWeight: 750, lineHeight: 1.0, minHeight: 32,
                     }}>{l}</button>
                   );
                 })}
@@ -4818,7 +4818,7 @@ function SwimmingTab({ isMobile, onExit }) {
                           <button key={axis.key} onClick={() => toggleRadarAxis(axis.key)} title={locked ? "Keep at least 3 axes visible" : (selected ? "Hide axis" : "Show axis")} className="pill radar-axis-pill" style={{
                             cursor: locked ? "default" : "pointer", background: selected ? axis.color : "transparent",
                             border: `1.5px solid ${selected ? axis.color : axis.color + "55"}`, color: selected ? "#000000" : axis.color,
-                            borderRadius: 7, padding: isMobile ? "1px 4px" : "2px 4px", fontSize: isMobile ? 7.7 : 8.2, fontWeight: 750, minHeight: isMobile ? 19 : 20, opacity: locked ? 0.82 : 1,
+                            borderRadius: 10, padding: isMobile ? "4px 8px" : "5px 10px", fontSize: isMobile ? 10.0 : 10.8, fontWeight: 750, minHeight: isMobile ? 32 : 34, opacity: locked ? 0.82 : 1,
                           }}>{axis.label}</button>
                         );
                       })}
@@ -7551,11 +7551,16 @@ function TrainingLog() {
 
                 {showWorkoutRadarMeaning && (
                   <div style={{ marginTop:8, padding:"8px 9px", border:"1px solid #2C2C2E", borderRadius:10, background:"#18181B", fontSize:9.5, lineHeight:1.42, color:"#AEAEB2" }}>
-                    <div style={{marginBottom:6}}><strong style={{color:"#D1D1D6"}}>100 = your own recent baseline.</strong> Scores compare today's same exercises with your previous 6 weeks.</div>
-                    <div style={{marginBottom:5}}><strong style={{color:"#64D2FF"}}>Strength</strong> — how strong you performed after accounting for reps. <strong style={{color:"#D1D1D6"}}>Higher is better</strong>; lower means below your recent strength level.</div>
-                    <div style={{marginBottom:5}}><strong style={{color:"#30D158"}}>Volume</strong> — total work for the selected training group vs its recent sessions, even if the exercises changed. <strong style={{color:"#D1D1D6"}}>Higher means more work, not automatically better</strong>; lower means less work than usual.</div>
-                    <div style={{marginBottom:5}}><strong style={{color:"#FF9F0A"}}>Intensity</strong> — your reps-per-set profile for the selected training group. <strong style={{color:"#D1D1D6"}}>Higher means fewer reps per set / more strength-oriented</strong>; lower means more reps per set. Different exercises are never treated as kg-equivalent.</div>
-                    <div><strong style={{color:"#BF5AF2"}}>Progression</strong> — whether more comparable exercises moved forward than backward. <strong style={{color:"#D1D1D6"}}>Higher is favorable</strong>; lower means more exercises moved backward in this session.</div>
+                    <div style={{marginBottom:6}}><strong style={{color:"#D1D1D6"}}>100 = your own recent baseline.</strong> Only the axes currently available for this profile are explained below.</div>
+                    {workoutRadar.axes.map((axis) => {
+                      const copy = {
+                        strength: <>how strong you performed after accounting for reps. <strong style={{color:"#D1D1D6"}}>Higher is better</strong>; lower means below your recent strength level.</>,
+                        volume: <>total work for the selected training group vs its recent sessions, even if exercises changed. <strong style={{color:"#D1D1D6"}}>Higher means more work, not automatically better</strong>; lower means less work than usual.</>,
+                        intensity: <>your reps-per-set profile for the selected training group. <strong style={{color:"#D1D1D6"}}>Higher means fewer reps per set / more strength-oriented</strong>; lower means more reps per set. Different exercises are never treated as kg-equivalent.</>,
+                        progression: <>whether more comparable exercises moved forward than backward. <strong style={{color:"#D1D1D6"}}>Higher is favorable</strong>; lower means more exercises moved backward in this session.</>
+                      };
+                      return <div key={axis.key} style={{marginBottom:5}}><strong style={{color:axis.color}}>{axis.label}</strong> — {copy[axis.key]}</div>;
+                    })}
                   </div>
                 )}
               </div>
