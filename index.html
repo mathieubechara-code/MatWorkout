@@ -8039,7 +8039,15 @@ function TrainingLog() {
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
                   <div><div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Date</div><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }} /></div>
-                  <div><div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Bodyweight (kg)</div><input type="number" step="0.1" placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }} /></div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Bodyweight (kg)</div>
+                    <input type="number" step="0.1" placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }} />
+                    {!String(draft.bodyweight ?? "").trim() && (
+                      <div style={{ marginTop: 5, maxWidth: 190, color: "#FF9F0A", fontSize: 10.5, lineHeight: 1.3, fontWeight: 650 }}>
+                        ⚠ Add bodyweight for accurate volume. Bodyweight-based exercises cannot be calculated correctly without it.
+                      </div>
+                    )}
+                  </div>
                   <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Label (optional)</div><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} /></div>
                 </div>
 
