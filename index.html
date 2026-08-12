@@ -7824,7 +7824,7 @@ function TrainingLog() {
               </div>
               {filter === "All" && (
                 <div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>
-                  One line across all exercises: each exercise is normalized to its own typical {metric === "1rm" ? "estimated strength" : metric} first, then equally averaged. A different exercise mix cannot inflate the score by itself.
+                  One line across all exercises: each exercise is normalized to its own typical {metric === "1rm" ? "estimated strength" : metric} first, then equally averaged. The dashed line at <strong style={{color:"#8E8E93"}}>100</strong> is your typical level.
                 </div>
               )}
               {metric === "volume" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Volume = total reps × (bodyweight × exercise ratio + any added external weight) for that session. Ratios reflect how much of your bodyweight each exercise actually moves — see the exercise reference.</div>)}
@@ -7839,6 +7839,8 @@ function TrainingLog() {
                       formatter={(v) => [`${fmtNum(v, 1)}`, "Overall"]}
                       labelFormatter={(label, payload) => payload?.[0]?.payload?.exercises ? `${label} · ${payload[0].payload.exercises} exercises` : label}
                     />
+                    <ReferenceLine y={100} stroke="#8E8E93" strokeWidth={1.5} strokeDasharray="5 4"
+                      label={{ value: "Typical 100", position: "insideTopRight", fill: "#8E8E93", fontSize: 9 }} />
                     <Line type="monotone" dataKey="Overall" name="Overall" stroke="#FF9F0A" strokeWidth={3} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
