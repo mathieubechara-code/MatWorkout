@@ -2053,19 +2053,21 @@ function compareStoryFromChanges(changes, scopeLabel = "Recent swimming", allStr
 }
 
 function buildMultiMetricCompareInterpretation(selectedCfgs, trendDataView, allStrokesMode = false) {
-  if (!selectedCfgs?.length || !trendDataView || trendDataView.length < 4) return null;
+  if (!selectedCfgs?.length || !trendDataView) return null;
   const usableDates = trendDataView.filter((d) => selectedCfgs.every((cfg) => d[cfg.key] != null));
-  if (usableDates.length < 4) return null;
-  const splitAt = Math.max(2, Math.floor(usableDates.length / 2));
-  const baselineRows = usableDates.slice(0, splitAt);
-  const recentRows = usableDates.slice(splitAt);
-  if (recentRows.length < 2) return null;
-  const changes = selectedCfgs.map((cfg) => summarizeCompareMetricChange(
-    cfg.id, recentRows.map((d) => d[cfg.key]), baselineRows.map((d) => d[cfg.key])
-  )).filter(Boolean);
-  const story = compareStoryFromChanges(changes, "Recent swimming", allStrokesMode);
-  if (!story) return null;
-  return { ...story, baselineCount: baselineRows.length, recentCount: recentRows.length, mode: "trend" };
+  if (usableDates.length < 2) return null;
+  if (usableDates.length >= 4) {
+    const splitAt = Math.max(2, Math.floor(usableDates.length / 2));
+    const baselineRows = usableDates.slice(0, splitAt), recentRows = usableDates.slice(splitAt);
+    if (recentRows.length < 2) return null;
+    const changes = selectedCfgs.map((cfg) => summarizeCompareMetricChange(cfg.id, recentRows.map((d) => d[cfg.key]), baselineRows.map((d) => d[cfg.key]))).filter(Boolean);
+    const story = compareStoryFromChanges(changes, "Recent swimming", allStrokesMode);
+    return story ? { ...story, baselineCount: baselineRows.length, recentCount: recentRows.length, mode: "trend" } : null;
+  }
+  const latest = usableDates[usableDates.length - 1], priorRows = usableDates.slice(0, -1);
+  const changes = selectedCfgs.map((cfg) => summarizeCompareMetricChange(cfg.id, [latest[cfg.key]], priorRows.map((d) => d[cfg.key]))).filter(Boolean);
+  const story = compareStoryFromChanges(changes, "Latest session", allStrokesMode);
+  return story ? { ...story, baselineCount: priorRows.length, recentCount: 1, mode: "overall" } : null;
 }
 
 function buildMultiMetricSessionInterpretation(selectedCfgs, trendDataView, selectedKey, allStrokesMode = false) {
@@ -2483,6 +2485,7 @@ function SwimmingTab({ isMobile, onExit }) {
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "none", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
   const [compareMetrics, setCompareMetrics] = useState(["pace", "cadence"]); // freely selectable Compare metrics
   const [compareHelpOpen, setCompareHelpOpen] = useState(false);
+  const [radarHelpOpen, setRadarHelpOpen] = useState(false);
   const [selectedComparePoint, setSelectedComparePoint] = useState(null); // unique analysisKey of a tapped Compare session, or null for overall trend
   const [showCompareInfo, setShowCompareInfo] = useState(false); // toggles the Compare chart's "what is this" info popover
   const [editingDistanceFor, setEditingDistanceFor] = useState(null); // session id currently being corrected
@@ -2490,7 +2493,8 @@ function SwimmingTab({ isMobile, onExit }) {
   const [activityStrokeFilter, setActivityStrokeFilter] = useState({}); // { [sessionId]: strokeName | "all" } — per-session pace chart filter
   const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
   const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
-  const [metricValueMode, setMetricValueMode] = useState("latest"); // "latest" | "avg6" — headline number on each Trends card
+  const [metricValueMode, setMetricValueMode] = useState("avg6"); // "latest" | "avg6" — headline number on each Trends card
+  const [trendHelpOpen, setTrendHelpOpen] = useState(false);
   const [swimSection, setSwimSection] = useState(() => {
     try {
       const saved = localStorage.getItem("swim-section-v1");
@@ -3216,7 +3220,7 @@ function SwimmingTab({ isMobile, onExit }) {
     const cutoff = new Date(`${latestDate}T00:00:00`);
     cutoff.setDate(cutoff.getDate() - 42);
     const cutoffStr = toISODate(cutoff);
-    const vals = valid.filter((d) => d.date >= cutoffStr && d.date <= latestDate).map((d) => d[key]);
+    const vals = valid.filter((d) => d.date >= cutoffStr && d.date < latestDate).map((d) => d[key]);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
   const headlineOf = (series, dataKey = null, sourceRows = trendDataView) => (
@@ -3871,8 +3875,8 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={s} onClick={() => setStrokeFilter(s)} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? color : `${color}1a`,
                 border: `1.5px solid ${selected ? color : color + "55"}`, color: selected ? "#000000" : color,
-                borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
-              }}>{s === "all" ? "All strokes" : SWIM_STROKE_LABELS[s]}</button>
+                borderRadius: 8, padding: isMobile ? "2px 5px" : "3px 6px", fontSize: isMobile ? 8.8 : 9.6, fontWeight: 700, lineHeight: 1.05,
+              }}>{s === "all" ? "All" : SWIM_STROKE_LABELS[s]}</button>
             );
           })}
         </div>
@@ -3906,7 +3910,7 @@ function SwimmingTab({ isMobile, onExit }) {
               <button key={v} onClick={() => { setEffortFilter(v); setSelectedComparePoint(null); setRadarCurrentId(null); }} className="pill swim-filter-pill" style={{
                 cursor: "pointer", background: selected ? c : `${c}1a`,
                 border: `1.5px solid ${selected ? c : c + "55"}`, color: selected ? "#000000" : c,
-                borderRadius: 9, padding: isMobile ? "3px 6px" : "4px 8px", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700,
+                borderRadius: 8, padding: isMobile ? "2px 5px" : "3px 6px", fontSize: isMobile ? 8.8 : 9.6, fontWeight: 700, lineHeight: 1.05,
               }}>{l}</button>
             );
           })}
@@ -4434,7 +4438,7 @@ function SwimmingTab({ isMobile, onExit }) {
           {/* Trends — compact sparkline cards, tap to expand */}
           <div style={cardStyle}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-              <div style={labelStyle}>Trends</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ ...labelStyle, marginBottom: 0 }}>Trends</div><button onClick={() => setTrendHelpOpen((v) => !v)} title="What do these metrics mean?" style={{ cursor: "pointer", background: trendHelpOpen ? "#27272A" : "transparent", border: "1px solid " + (trendHelpOpen ? "#3A3A3C" : "#2C2C2E"), borderRadius: 999, padding: "3px 7px", color: trendHelpOpen ? "#FFFFFF" : "#8E8E93", fontSize: 9.5, fontWeight: 700 }}>Meaning</button></div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: 4 }}>
                   {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
@@ -4471,6 +4475,7 @@ function SwimmingTab({ isMobile, onExit }) {
                 )}
               </div>
             </div>
+            {trendHelpOpen && (<div style={{ marginBottom: 10, padding: "9px 11px", border: "1px solid #2C2C2E", borderRadius: 12, background: "#141416", fontSize: 10.5, lineHeight: 1.45 }}>{metricCards.filter((c) => c.key !== "css").map((c) => { const d = { pace: "Faster pace is better.", swolf: "Lower is generally better in the same pool and stroke context.", cadence: "Higher or lower is not inherently better; Pace shows whether turnover helped.", dps: "Higher means more metres covered per Garmin-counted stroke." }[c.key]; return d ? <div key={c.key} style={{ marginBottom: 4 }}><b style={{ color: c.color }}>{c.title.split(" (")[0]}</b><span style={{ color: "#AEAEB2" }}> — {d}</span></div> : null; })}</div>)}
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 10 }}>
               {metricCards.map((card) => {
                 const isOpen = expandedMetrics.has(card.key);
@@ -4558,6 +4563,7 @@ function SwimmingTab({ isMobile, onExit }) {
                 >
                   <Info size={12} style={{ color: showCompareInfo ? "#FFFFFF" : "#8E8E93" }} />
                 </button>
+                <button onClick={() => setCompareHelpOpen((v) => !v)} title="What do these metrics mean?" style={{ cursor: "pointer", background: compareHelpOpen ? "#27272A" : "transparent", border: "1px solid " + (compareHelpOpen ? "#3A3A3C" : "#2C2C2E"), borderRadius: 999, padding: "3px 7px", color: compareHelpOpen ? "#FFFFFF" : "#8E8E93", fontSize: 9.5, fontWeight: 700 }}>Meaning</button>
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
                 {[["pace","Pace","#F5F5F7"],["dps","Distance / Stroke","#30D158"],["cadence","Stroke Rate","#64D2FF"],["swolf","SWOLF","#BF5AF2"],["hr","Avg HR","#FF453A"]].map(([v,l,c]) => {
@@ -4573,20 +4579,12 @@ function SwimmingTab({ isMobile, onExit }) {
                       cursor: "pointer", background: selected ? c : `${c}12`,
                       border: `1.5px solid ${selected ? c : c + "44"}`,
                       color: selected ? "#000000" : c,
-                      borderRadius: 10, padding: "4px 8px", fontSize: 10.5, fontWeight: 700,
+                      borderRadius: 8, padding: "3px 6px", fontSize: 9.6, fontWeight: 700, lineHeight: 1.05,
                     }}>{l}</button>
                   );
                 })}
               </div>
-              <button onClick={() => setCompareHelpOpen((v) => !v)} style={{
-                marginTop: 8, padding: "5px 9px", border: "1px solid #64D2FF66",
-                background: compareHelpOpen ? "#64D2FF" : "#64D2FF18",
-                cursor: "pointer", color: compareHelpOpen ? "#000000" : "#64D2FF",
-                borderRadius: 9, fontSize: 10.5, fontWeight: 800,
-                display: "inline-flex", alignItems: "center", gap: 5
-              }}>
-                <Info size={11} /> What do these metrics mean?
-              </button>
+              
               {compareHelpOpen && <div style={{ marginTop: 8, padding: "11px 12px", border: "1px solid #2C2C2E", borderRadius: 12, background: "#141416", fontSize: 10.5, lineHeight: 1.5 }}>
                 <div style={{ color: "#AEAEB2", marginBottom: 9 }}>
                   <b style={{color:"#F5F5F7"}}>σ:</b> 0 = your typical level. Farther from 0 = more unusual for you.
@@ -4687,7 +4685,9 @@ function SwimmingTab({ isMobile, onExit }) {
                       <div style={{ color: "#8E8E93", fontSize: 9.5, lineHeight: 1.4 }}>
                         {compareInterpretation.mode === "session"
                           ? `Compared with the previous ${compareInterpretation.baselineCount} comparable sessions.`
-                          : `Recent ${compareInterpretation.recentCount} vs earlier ${compareInterpretation.baselineCount} comparable sessions.`} Association, not proof of cause.
+                          : compareInterpretation.mode === "overall"
+                            ? `Latest session vs the previous ${compareInterpretation.baselineCount} comparable session${compareInterpretation.baselineCount === 1 ? "" : "s"}.`
+                            : `Recent ${compareInterpretation.recentCount} vs earlier ${compareInterpretation.baselineCount} comparable sessions.`} Association, not proof of cause.
                       </div>
                     </div>
                   ) : (
@@ -4775,7 +4775,7 @@ function SwimmingTab({ isMobile, onExit }) {
 
                 {radarProfile.length >= 3 && (
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Axes · tap to show / hide</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}><div style={{ fontSize: 10, color: "#8E8E93", textTransform: "uppercase", letterSpacing: "0.05em" }}>Axes · tap to show / hide</div><button onClick={() => setRadarHelpOpen((v) => !v)} title="What do these metrics mean?" style={{ cursor: "pointer", background: radarHelpOpen ? "#27272A" : "transparent", border: "1px solid " + (radarHelpOpen ? "#3A3A3C" : "#2C2C2E"), borderRadius: 999, padding: "3px 7px", color: radarHelpOpen ? "#FFFFFF" : "#8E8E93", fontSize: 9.5, fontWeight: 700 }}>Meaning</button></div>{radarHelpOpen && (<div style={{ marginBottom: 7, padding: "8px 10px", border: "1px solid #2C2C2E", borderRadius: 11, background: "#141416", fontSize: 10.2, lineHeight: 1.4 }}>{radarVisibleProfile.map((axis) => { const d = { pace: "Faster pace is better.", efficiency: "Lower SWOLF and/or higher distance per stroke is favorable.", consistency: "Higher means steadier pacing than your normal variability.", endurance: "Higher means more qualifying distance than your normal session level.", aerobic: "Higher means more pace produced per heartbeat than your baseline." }[axis.key]; return d ? <div key={axis.key} style={{ marginBottom: 4 }}><b style={{ color: axis.color }}>{axis.label}</b><span style={{ color: "#AEAEB2" }}> — {d}</span></div> : null; })}</div>)}
                     <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                       {radarProfile.map((axis) => {
                         const selected = radarMetricKeys.has(axis.key);
