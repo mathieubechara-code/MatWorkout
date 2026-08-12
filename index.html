@@ -137,8 +137,9 @@ window.storage = {
   },
 };
 
-const GROUP_COLORS = { Pull: "#FF9F0A", Push: "#FF453A", Legs: "#64D2FF", Core: "#FF9F0A", Custom: "#BF5AF2" };
+const GROUP_COLORS = { Pull: "#FF9F0A", Push: "#FF453A", Legs: "#64D2FF", Core: "#30D158", "Full Body": "#BF5AF2", Custom: "#8E8E93" };
 const GROUPS = ["Pull", "Push", "Legs", "Core"];
+const VOLUME_GROUPS = ["Pull", "Push", "Legs", "Core", "Full Body"];
 // A rotating color palette so every exercise in the library (not just a handful of
 // hand-picked ones) gets a distinct, stable color in charts/tags — including any custom
 // exercise added later. No exercise is ever "missing" a color anymore.
@@ -165,11 +166,11 @@ const EXERCISE_LIBRARY = [
   { name: "Close Grip Pull-Ups", group: "Pull", ratio: 1.00, aliases: ["close grip pull ups", "close grip pullups"] },
   { name: "Neutral Grip Pull-Ups", group: "Pull", ratio: 1.00, aliases: ["neutral grip pull ups", "neutral grip pullups"] },
   { name: "Commando Pull-Ups", group: "Pull", ratio: 1.00, aliases: ["commando pull ups", "commando pullups"] },
-  { name: "Muscle-Ups", group: "Pull", ratio: 1.00, aliases: ["muscle ups", "muscle-ups", "muscleups"] },
+  { name: "Muscle-Ups", group: "Full Body", ratio: 1.00, aliases: ["muscle ups", "muscle-ups", "muscleups"] },
   { name: "Australian Rows", group: "Pull", ratio: 0.65, aliases: ["australian rows", "inverted rows", "body rows", "ring rows"] },
   { name: "Lat Pulldown", group: "Pull", ratio: 0, aliases: ["lat pulldown", "lat pull down"] },
   { name: "Barbell Row", group: "Pull", ratio: 0, aliases: ["barbell row", "bent over row"] },
-  { name: "Deadlift", group: "Pull", ratio: 0, aliases: ["deadlift", "deadlifts"] },
+  { name: "Deadlift", group: "Legs", ratio: 0, aliases: ["deadlift", "deadlifts"] },
   // -- Push --
   { name: "Chest Dips", group: "Push", ratio: 1.00, aliases: ["chest dips", "dips"] },
   { name: "Push-Ups", group: "Push", ratio: 0.64, aliases: ["push ups", "push-ups", "pushups"] },
@@ -207,7 +208,7 @@ const EXERCISE_LIBRARY = [
   { name: "Ab Wheel Rollout", group: "Core", ratio: 0.55, aliases: ["ab wheel rollout", "ab rollout", "ab wheel"] },
   { name: "Russian Twists", group: "Core", ratio: 0.30, aliases: ["russian twists", "russian twist"] },
   { name: "Plank", group: "Core", ratio: 0.35, aliases: ["plank", "planks", "forearm plank"] },
-  { name: "Burpees", group: "Core", ratio: 0.90, aliases: ["burpees", "burpee"] },
+  { name: "Burpees", group: "Full Body", ratio: 0.90, aliases: ["burpees", "burpee"] },
   // -- Generic catch-alls (kept distinct from the specific grip/stance variants above so a
   // plain paste like "Rows" or "Bicep Curls" — without a qualifier — still matches something) --
   { name: "Rows", group: "Pull", ratio: 0, aliases: ["rows", "row"] },
@@ -6168,8 +6169,8 @@ function TrainingLog() {
 
   const maxSets = useMemo(() => ((filter === "All" || filter.startsWith("group:") || timeView === "week") ? 0 : Math.max(0, ...rangedSessions.map((s) => (s.ex[filter] || []).length))), [rangedSessions, filter, timeView]);
 
-  // The muscle group tied to the currently selected exercise (or group filter), used to
-  // highlight the matching row in the "Volume by muscle group" panel.
+  // The training group tied to the currently selected exercise (or group filter), used to
+  // highlight the matching row in the "Volume by training group" panel.
   const activeGroup = filter === "All" ? null : filter.startsWith("group:") ? filter.slice(6) : muscleGroupMap[filter] || null;
 
   const latest = sessions && sessions.length ? sessions[sessions.length - 1] : null;
@@ -6194,19 +6195,28 @@ function TrainingLog() {
     return { latestVol, delta: latestVol - firstVol, cumulative };
   }, [sessions, latest, first]);
 
-  const groupVolumeLatest = useMemo(() => {
-    if (!latest) return [];
-    const totals = {}; GROUPS.forEach((g) => (totals[g] = 0));
-    Object.keys(latest.ex).forEach((name) => {
-      const v = exerciseVolume(latest, name);
-      if (v == null) return;
-      const group = muscleGroupMap[name] || "Custom";
-      if (totals[group] === undefined) totals[group] = 0;
-      totals[group] += v;
+  const groupVolumeRecent = useMemo(() => {
+    if (!latest || !sessions?.length) return [];
+    const cutoff = new Date(`${latest.date}T00:00:00`);
+    cutoff.setDate(cutoff.getDate() - 42);
+    const cutoffStr = toISODate(cutoff);
+    const recent = sessions.filter((s) => s.date >= cutoffStr && s.date <= latest.date);
+    const totals = {};
+    VOLUME_GROUPS.forEach((g) => (totals[g] = 0));
+    recent.forEach((s) => {
+      Object.keys(s.ex || {}).forEach((name) => {
+        const v = exerciseVolume(s, name);
+        if (v == null) return;
+        const group = muscleGroupMap[name] || "Custom";
+        if (totals[group] === undefined) return;
+        totals[group] += v;
+      });
     });
-    const grand = Object.values(totals).reduce((a, b) => a + b, 0) || 1;
-    return GROUPS.map((g) => ({ group: g, kg: Math.round(totals[g] || 0), pct: Math.round(((totals[g] || 0) / grand) * 100) }));
-  }, [latest, muscleGroupMap]);
+    const grand = VOLUME_GROUPS.reduce((sum, g) => sum + (totals[g] || 0), 0) || 1;
+    return VOLUME_GROUPS
+      .map((g) => ({ group: g, kg: Math.round(totals[g] || 0), pct: Math.round(((totals[g] || 0) / grand) * 100) }))
+      .filter((d) => d.kg > 0);
+  }, [latest, sessions, muscleGroupMap]);
 
 
   // ---- Workout Radar ------------------------------------------------------------------
@@ -7455,12 +7465,12 @@ function TrainingLog() {
             </div>
 
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 4 }}>Volume by muscle group — latest session ({latest ? fmtDate(latest.date) : ""})</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 4 }}>Volume by training group — last 6 weeks ({latest ? fmtDate(latest.date) : ""})</div>
               <div style={{ fontSize: 11, color: "#636366", marginBottom: 12 }}>
                 {GROUPS.map((g) => `${g}: ${chartExercises.filter((n) => muscleGroupMap[n] === g).join(" + ") || "—"}`).join(" · ")}
               </div>
               <div style={{ display: "grid", gap: 8 }}>
-                {groupVolumeLatest.map((g) => {
+                {groupVolumeRecent.map((g) => {
                   const isActive = activeGroup === g.group;
                   return (
                     <div key={g.group} onClick={() => changeFilter("group:" + g.group)} style={{ cursor: "pointer", borderRadius: 12, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
@@ -7495,6 +7505,7 @@ function TrainingLog() {
                   }}>Meaning</button>
                 </div>
 
+                <div style={{ fontSize:8.8, color:"#636366", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>Training group</div>
                 <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
                   {["All", ...GROUPS.filter((g)=>chartExercises.some((n)=>muscleGroupMap[n]===g))].map((g)=>{
                     const selected=workoutRadarGroup===g;
@@ -7508,11 +7519,12 @@ function TrainingLog() {
                 </div>
 
                 {showWorkoutRadarMeaning && (
-                  <div style={{ marginTop:8, padding:"8px 9px", border:"1px solid #2C2C2E", borderRadius:10, background:"#18181B", fontSize:9.5, lineHeight:1.4, color:"#AEAEB2" }}>
-                    <div><strong style={{color:"#64D2FF"}}>Strength</strong> — rep-adjusted estimated strength vs the same exercises in your previous 6 weeks.</div>
-                    <div><strong style={{color:"#30D158"}}>Volume</strong> — exercise-normalized total work vs baseline; heavy exercises cannot dominate just because they use more kg.</div>
-                    <div><strong style={{color:"#FF9F0A"}}>Intensity</strong> — actual system load used vs your normal loading for those same exercises. No time, rest, RPE or RIR is assumed.</div>
-                    <div><strong style={{color:"#BF5AF2"}}>Progression</strong> — breadth of exercises moving forward vs backward. <strong style={{color:"#D1D1D6"}}>100 = your baseline.</strong></div>
+                  <div style={{ marginTop:8, padding:"8px 9px", border:"1px solid #2C2C2E", borderRadius:10, background:"#18181B", fontSize:9.5, lineHeight:1.42, color:"#AEAEB2" }}>
+                    <div style={{marginBottom:6}}><strong style={{color:"#D1D1D6"}}>100 = your own recent baseline.</strong> Scores compare today's same exercises with your previous 6 weeks.</div>
+                    <div style={{marginBottom:5}}><strong style={{color:"#64D2FF"}}>Strength</strong> — how strong you performed after accounting for reps. <strong style={{color:"#D1D1D6"}}>Higher is better</strong>; lower means below your recent strength level.</div>
+                    <div style={{marginBottom:5}}><strong style={{color:"#30D158"}}>Volume</strong> — how much total work you completed, normalized exercise by exercise. <strong style={{color:"#D1D1D6"}}>Higher means more work, not automatically better</strong>; lower means less work than usual.</div>
+                    <div style={{marginBottom:5}}><strong style={{color:"#FF9F0A"}}>Intensity</strong> — how heavy today's loads were compared with your usual loads for those exercises. <strong style={{color:"#D1D1D6"}}>Higher means heavier, not automatically better</strong>; lower means lighter.</div>
+                    <div><strong style={{color:"#BF5AF2"}}>Progression</strong> — whether more comparable exercises moved forward than backward. <strong style={{color:"#D1D1D6"}}>Higher is favorable</strong>; lower means more exercises moved backward in this session.</div>
                   </div>
                 )}
               </div>
