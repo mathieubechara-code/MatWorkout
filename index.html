@@ -6007,6 +6007,37 @@ function TrainingLog() {
     return row;
   }), [rangedSessions, metric, chartExercises]);
 
+
+  // Overall Workout Stats trend ---------------------------------------------------------
+  // "All" is a normalized profile, not a raw sum. Each exercise is first compared with
+  // its own typical value for the selected range, then the available exercise scores are
+  // averaged with equal weight. This prevents exercise choice, raw kg scale, or simply
+  // logging more exercises from automatically making a session look better.
+  const overallDayTrend = useMemo(() => {
+    if (!chartData?.length || !chartExercises?.length) return [];
+    const median = (vals) => {
+      const a = vals.filter((v) => v != null && Number.isFinite(v) && v > 0).sort((x,y)=>x-y);
+      if (!a.length) return null;
+      const m = Math.floor(a.length/2);
+      return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+    };
+    const baselineByExercise = Object.fromEntries(
+      chartExercises.map((name) => [name, median(chartData.map((r) => r[name]))])
+    );
+    return chartData.map((row) => {
+      const scores = chartExercises.map((name) => {
+        const v = row[name], base = baselineByExercise[name];
+        return v != null && Number.isFinite(v) && base > 0 ? 100 * v / base : null;
+      }).filter((v) => v != null && Number.isFinite(v));
+      return {
+        date: row.date,
+        fullDate: row.fullDate,
+        Overall: scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null,
+        exercises: scores.length
+      };
+    }).filter((r) => r.Overall != null);
+  }, [chartData, chartExercises]);
+
   const perSetData = useMemo(() => {
     if (filter === "All" || filter.startsWith("group:")) return [];
     return rangedSessions.filter((s) => s.ex[filter]).map((s) => {
@@ -6101,6 +6132,32 @@ function TrainingLog() {
     return row;
   }), [weeklySessionGroups, chartExercises, metric]);
 
+
+  const overallWeekTrend = useMemo(() => {
+    if (!weeklyChartData?.length || !chartExercises?.length) return [];
+    const median = (vals) => {
+      const a = vals.filter((v) => v != null && Number.isFinite(v) && v > 0).sort((x,y)=>x-y);
+      if (!a.length) return null;
+      const m = Math.floor(a.length/2);
+      return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+    };
+    const baselineByExercise = Object.fromEntries(
+      chartExercises.map((name) => [name, median(weeklyChartData.map((r) => r[name]))])
+    );
+    return weeklyChartData.map((row) => {
+      const scores = chartExercises.map((name) => {
+        const v = row[name], base = baselineByExercise[name];
+        return v != null && Number.isFinite(v) && base > 0 ? 100 * v / base : null;
+      }).filter((v) => v != null && Number.isFinite(v));
+      return {
+        date: row.date,
+        fullDate: row.fullDate,
+        Overall: scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null,
+        exercises: scores.length
+      };
+    }).filter((r) => r.Overall != null);
+  }, [weeklyChartData, chartExercises]);
+
   const weeklyGroupChartData = useMemo(() => {
     if (!filter.startsWith("group:")) return [];
     const group = filter.slice(6);
@@ -6164,6 +6221,7 @@ function TrainingLog() {
 
   // The datasets actually handed to the charts below, switching on the Day/Week toggle.
   const chartDataView = timeView === "week" ? weeklyChartData : chartData;
+  const overallTrendView = timeView === "week" ? overallWeekTrend : overallDayTrend;
   const groupChartDataView = timeView === "week" ? weeklyGroupChartData : groupChartData;
   const bodyweightDataView = timeView === "week" ? weeklyBodyweightData : bodyweightData;
   const loadStepDataView = timeView === "week" ? weeklyLoadStepData : loadStepData;
@@ -7756,7 +7814,7 @@ function TrainingLog() {
                 {(() => {
                   const agg = metric === "1rm" ? "Peak" : "Total";
                   return filter === "All"
-                    ? `${agg} ${yLabel} per ${timeView === "week" ? "week" : "session"}, by exercise`
+                    ? `Overall ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend · 100 = typical`
                     : filter.startsWith("group:")
                     ? `${filter.slice(6)} — ${agg.toLowerCase()} ${yLabel} per ${timeView === "week" ? "week" : "session"} (${chartExercises.filter((n) => muscleGroupMap[n] === filter.slice(6)).join(" + ")})`
                     : timeView === "week"
@@ -7764,19 +7822,24 @@ function TrainingLog() {
                     : `${filter} — ${yLabel} per set across sessions`;
                 })()}
               </div>
+              {filter === "All" && (
+                <div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>
+                  One line across all exercises: each exercise is normalized to its own typical {metric === "1rm" ? "estimated strength" : metric} first, then equally averaged. A different exercise mix cannot inflate the score by itself.
+                </div>
+              )}
               {metric === "volume" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Volume = total reps × (bodyweight × exercise ratio + any added external weight) for that session. Ratios reflect how much of your bodyweight each exercise actually moves — see the exercise reference.</div>)}
               {metric === "1rm" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Estimated 1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), taken from the single best set of the session — reflects intensity rather than total work done.</div>)}
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
-                  <LineChart data={chartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
-                    <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
-                    {visibleStatsExercises.map((name) => (
-                      <Line key={name} type="monotone" dataKey={name} stroke={colorsMap[name]} strokeWidth={chartFocus === name ? 3 : 2.2} strokeOpacity={chartFocus && chartFocus !== name ? 0.18 : 1} dot={{ r: 3, fillOpacity: chartFocus && chartFocus !== name ? 0.18 : 1 }} connectNulls />
-                    ))}
-                    {metric === "volume" && (
-                      <Line dataKey="Total" type="monotone" stroke="#FFFFFF" strokeWidth={chartFocus === "Total" ? 3.4 : 2.8} strokeOpacity={chartFocus && chartFocus !== "Total" ? 0.15 : 1} dot={{ r: 3.5, fillOpacity: chartFocus && chartFocus !== "Total" ? 0.15 : 1 }} connectNulls />
-                    )}
+                  <LineChart data={overallTrendView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
+                    <XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} />
+                    <YAxis stroke="#636366" fontSize={11} domain={["auto", "auto"]} tickFormatter={(v) => Math.round(v)} />
+                    <Tooltip
+                      contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }}
+                      formatter={(v) => [`${fmtNum(v, 1)}`, "Overall"]}
+                      labelFormatter={(label, payload) => payload?.[0]?.payload?.exercises ? `${label} · ${payload[0].payload.exercises} exercises` : label}
+                    />
+                    <Line type="monotone" dataKey="Overall" name="Overall" stroke="#FF9F0A" strokeWidth={3} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
                   <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={10.5} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={10.5} tickFormatter={(v) => fmtNum(v, 2)} />
@@ -7802,7 +7865,7 @@ function TrainingLog() {
               </ResponsiveContainer>
             </div>
 
-            {chartFocus && (filter === "All" || !filter.startsWith("group:")) && (
+            {chartFocus && filter !== "All" && !filter.startsWith("group:") && (
               <div style={{ textAlign: "center", marginTop: -8, marginBottom: 10 }}>
                 <button onClick={() => setChartFocus(null)} className="mono" style={{ background: "none", border: "none", color: "#636366", fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>Show all lines</button>
               </div>
