@@ -226,6 +226,35 @@ const COLORS = Object.fromEntries(EXERCISE_LIBRARY.map((e, i) => [e.name, colorF
 const MUSCLE_GROUP = Object.fromEntries(EXERCISE_LIBRARY.map((e) => [e.name, e.group]));
 const normalizeExerciseName = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const exerciseTypeFromEntry = (entry) => (entry && entry.type) || "reps";
+const normalizeCustomLibrary = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  const builtInNames = new Set();
+  EXERCISE_LIBRARY.forEach((e) => {
+    builtInNames.add(normalizeExerciseName(e.name));
+    (e.aliases || []).forEach((a) => builtInNames.add(normalizeExerciseName(a)));
+  });
+  const seen = new Set();
+  const out = [];
+  raw.forEach((e) => {
+    if (!e || typeof e !== "object") return;
+    const name = String(e.name || "").trim();
+    const key = normalizeExerciseName(name);
+    const ratio = Number(e.ratio);
+    if (!name || !key || builtInNames.has(key) || seen.has(key)) return;
+    if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1.5) return;
+    seen.add(key);
+    out.push({
+      ...e,
+      name,
+      group: GROUPS.includes(e.group) ? e.group : "Full Body",
+      ratio: Math.round(ratio * 100) / 100,
+      type: e.type === "static" ? "static" : "reps",
+      archived: !!e.archived,
+      aliases: Array.isArray(e.aliases) && e.aliases.length ? e.aliases.map(String) : [name.toLowerCase()]
+    });
+  });
+  return out;
+};
 
 
 function levenshtein(a, b) {
@@ -291,12 +320,16 @@ function parseFreeform(text, library) {
   const results = {};
   const matchedEntries = [];
   const unmatched = [];
+  const parseErrors = [];
   let current = null; // matched library entry | null
 
   const applySetMatch = (name, setMatch) => {
     const reps = parseInt(setMatch[1], 10);
     const setsCount = parseInt(setMatch[2], 10);
-    if (!Number.isFinite(reps) || reps <= 0 || !Number.isFinite(setsCount) || setsCount <= 0) return;
+    if (!Number.isFinite(reps) || reps <= 0 || !Number.isFinite(setsCount) || setsCount <= 0) {
+      parseErrors.push(`${name}: reps and sets must both be greater than 0.`);
+      return false;
+    }
     const rest = setMatch[3] || "";
     const kgMatch = rest.match(/(\d+(?:\.\d+)?)\s*kg/i);
     const weight = kgMatch ? parseFloat(kgMatch[1]) : 0;
@@ -305,6 +338,7 @@ function parseFreeform(text, library) {
     // line for the same exercise (e.g. a drop set at a different weight) doesn't overwrite
     // an earlier line's weight — every set keeps the weight it was actually logged at.
     for (let i = 0; i < setsCount; i++) { results[name].reps.push(reps); results[name].weights.push(weight); }
+    return true;
   };
 
   const matchAndApply = (name, setMatch) => {
@@ -360,7 +394,7 @@ function parseFreeform(text, library) {
       if (header) unmatched.push(header);
     }
   });
-  return { results, matchedEntries, unmatched };
+  return { results, matchedEntries, unmatched, parseErrors };
 }
 
 // All previously embedded sample logs have been removed — the log starts empty.
@@ -5517,7 +5551,11 @@ function TrainingLog() {
         const res = await window.storage.get(CUSTOM_LIB_KEY, false);
         {
           const parsed = res && res.value ? JSON.parse(res.value) : [];
-          setCustomExercises(Array.isArray(parsed) ? parsed.map((e) => ({ ...e, type: e?.type || "reps", archived: !!e?.archived })) : []);
+          const clean = normalizeCustomLibrary(parsed);
+          setCustomExercises(clean);
+          if (JSON.stringify(clean) !== JSON.stringify(parsed)) {
+            try { await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(clean), false); } catch (_) {}
+          }
         }
       } catch (e) {
         setCustomExercises([]);
@@ -5552,8 +5590,9 @@ function TrainingLog() {
   };
 
   const persistCustom = async (next) => {
-    setCustomExercises(next);
-    try { await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(next), false); } catch (_) {}
+    const clean = normalizeCustomLibrary(next);
+    setCustomExercises(clean);
+    try { await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(clean), false); } catch (_) {}
   };
 
   const saveOwnerName = async () => {
@@ -5719,6 +5758,9 @@ function TrainingLog() {
       if (trackedExercises.includes(entry.name)) await persistTracked(trackedExercises.filter((n) => n !== entry.name));
     }
   };
+  const restoreCustomExercise = async (entry) => {
+    await persistCustom(customExercises.map((e) => e.name === entry.name ? { ...e, archived: false } : e));
+  };
 
   // Opens the "Add exercise" modal prefilled with a name the paste-parser couldn't match at
   // all, so fixing an unmatched entry is one click instead of retyping it.
@@ -5808,9 +5850,9 @@ function TrainingLog() {
   const cancelForm = () => { setFormError(""); setShowForm(false); setEditingId(null); setDraft(emptyDraft(trackedExercises)); setPasteText(""); setParseNote(""); };
 
   const handleParseFill = async () => {
-    const { results, matchedEntries, unmatched } = parseFreeform(pasteText, activeLibrary);
+    const { results, matchedEntries, unmatched, parseErrors } = parseFreeform(pasteText, activeLibrary);
     const matchedNames = Object.keys(results);
-    if (!matchedNames.length && !matchedEntries.length && !unmatched.length) {
+    if (!matchedNames.length && !matchedEntries.length && !unmatched.length && !parseErrors.length) {
       setParseNote('Couldn\'t parse anything — check the format (e.g. "12 rep x 3 sets body weight").');
       setUnmatchedNames([]);
       return;
@@ -5835,6 +5877,7 @@ function TrainingLog() {
     const notes = [];
     if (newlyTracked.length) notes.push(`Now tracking: ${newlyTracked.join(", ")}.`);
     if (unmatched.length) notes.push(`Couldn't match at all: ${unmatched.join(", ")} — tap "Add" below to fill in muscle group & ratio, or enter it manually.`);
+    if (parseErrors.length) notes.push(`Check: ${parseErrors.join(" ")}`);
     setParseNote(notes.join(" ") || "Filled in below — review before saving.");
     setUnmatchedNames(unmatched);
     setPasteText("");
@@ -5910,6 +5953,10 @@ function TrainingLog() {
           return;
         }
         const weightsRaw = weightTokens.map(Number);
+        if (weightsRaw.length > parsed.length) {
+          validationErrors.push(`${name}: more load values than rep sets were entered.`);
+          return;
+        }
         if (ratioForExercise === 0 && !weightsRaw.some((w) => w > 0)) {
           validationErrors.push(`${name}: enter a load greater than 0 kg.`);
           return;
@@ -5981,9 +6028,10 @@ function TrainingLog() {
     };
     const swimTargetSettings = await readSettingJSON("swim-target-settings-v1");
     const freshSwimSessions = viewMode === "workout" ? null : await readSwimSessionsFresh();
-    if (viewMode === "workout") { payload = { sessions, weightLog, settings: workoutSettings }; suffix = "workout"; }
-    else if (viewMode === "swim") { payload = { swimSessions: freshSwimSessions, settings: { swimTargetSettings } }; suffix = "swim"; }
-    else { payload = { sessions, swimSessions: freshSwimSessions, weightLog, settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
+    const meta = { schemaVersion: 2, exportedAt: new Date().toISOString() };
+    if (viewMode === "workout") { payload = { ...meta, sessions, weightLog, settings: workoutSettings }; suffix = "workout"; }
+    else if (viewMode === "swim") { payload = { ...meta, swimSessions: freshSwimSessions, settings: { swimTargetSettings } }; suffix = "swim"; }
+    else { payload = { ...meta, sessions, swimSessions: freshSwimSessions, weightLog, settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -6024,21 +6072,33 @@ function TrainingLog() {
         const weightArr = isObj && Array.isArray(parsed.weightLog) ? parsed.weightLog : null;
         if (!workoutArr && !swimArr && !weightArr) throw new Error("unrecognized shape");
 
+        const isWorkoutBackup = !!(isObj && workoutArr && parsed.settings && typeof parsed.settings === "object");
+        const restoreWorkoutBackup = isWorkoutBackup
+          ? window.confirm("Restore the workout backup exactly?\n\nOK = replace current workout sessions, workout weight log and workout settings with this backup.\nCancel = merge only new workout sessions/weights and keep current workout settings.")
+          : false;
+
         let workoutMsg = "";
         if (workoutArr) {
-          const existingIds = new Set(sessions.map((s) => s.id).filter(Boolean));
-          const existingLegacyFingerprints = new Set(sessions.map((s) => `${s.date}|${s.label || ""}|${JSON.stringify(s.ex || {})}`));
-          const rawToAdd = workoutArr.filter((s) => {
-            if (!s || !s.date || !s.ex) return false;
-            if (s.id && existingIds.has(s.id)) return false;
-            if (!s.id && existingLegacyFingerprints.has(`${s.date}|${s.label || ""}|${JSON.stringify(s.ex || {})}`)) return false;
-            return true;
-          });
-          const toAdd = migrate(rawToAdd);
-          const skipped = workoutArr.length - rawToAdd.length;
-          const next = sortWorkoutSessions([...sessions, ...toAdd]);
-          await persist(next);
-          workoutMsg = `Imported ${toAdd.length} workout session(s)${skipped ? `, skipped ${skipped} duplicate/invalid` : ""}.`;
+          const validRaw = workoutArr.filter((s) => s && s.date && s.date <= todayStr && s.ex && typeof s.ex === "object");
+          if (restoreWorkoutBackup) {
+            const restored = migrate(validRaw);
+            await persist(restored);
+            const invalid = workoutArr.length - validRaw.length;
+            workoutMsg = `Restored ${restored.length} workout session(s)${invalid ? `, skipped ${invalid} invalid/future` : ""}.`;
+          } else {
+            const existingIds = new Set(sessions.map((s) => s.id).filter(Boolean));
+            const existingLegacyFingerprints = new Set(sessions.map((s) => `${s.date}|${s.label || ""}|${JSON.stringify(s.ex || {})}`));
+            const rawToAdd = validRaw.filter((s) => {
+              if (s.id && existingIds.has(s.id)) return false;
+              if (!s.id && existingLegacyFingerprints.has(`${s.date}|${s.label || ""}|${JSON.stringify(s.ex || {})}`)) return false;
+              return true;
+            });
+            const toAdd = migrate(rawToAdd);
+            const skipped = workoutArr.length - rawToAdd.length;
+            const next = sortWorkoutSessions([...sessions, ...toAdd]);
+            await persist(next);
+            workoutMsg = `Imported ${toAdd.length} workout session(s)${skipped ? `, skipped ${skipped} duplicate/invalid/future` : ""}.`;
+          }
         }
 
         let swimMsg = "";
@@ -6054,26 +6114,36 @@ function TrainingLog() {
 
         let weightMsg = "";
         if (weightArr) {
-          const existingWeightDates = new Set((weightLog || []).map((e) => e.date));
-          const cleanWeights = weightArr
-            .filter((e) => e && e.date && Number.isFinite(Number(e.kg)) && Number(e.kg) > 0 && !existingWeightDates.has(e.date))
+          const validWeights = weightArr
+            .filter((e) => e && e.date && e.date <= todayStr && Number.isFinite(Number(e.kg)) && Number(e.kg) > 0)
             .map((e) => ({ id: e.id || `w-${e.date}`, date: e.date, kg: Number(e.kg) }));
-          const skippedWeight = weightArr.length - cleanWeights.length;
-          await persistWeightLog([...(weightLog || []), ...cleanWeights]);
-          weightMsg = ` Imported ${cleanWeights.length} weight entr${cleanWeights.length === 1 ? "y" : "ies"}${skippedWeight ? `, skipped ${skippedWeight} duplicate/invalid` : ""}.`;
+          if (restoreWorkoutBackup) {
+            const byDate = {};
+            validWeights.forEach((e) => { byDate[e.date] = e; });
+            const restoredWeights = Object.values(byDate);
+            await persistWeightLog(restoredWeights);
+            const skippedWeight = weightArr.length - validWeights.length;
+            weightMsg = ` Restored ${restoredWeights.length} weight entr${restoredWeights.length === 1 ? "y" : "ies"}${skippedWeight ? `, skipped ${skippedWeight} invalid/future` : ""}.`;
+          } else {
+            const existingWeightDates = new Set((weightLog || []).map((e) => e.date));
+            const cleanWeights = validWeights.filter((e) => !existingWeightDates.has(e.date));
+            const skippedWeight = weightArr.length - cleanWeights.length;
+            await persistWeightLog([...(weightLog || []), ...cleanWeights]);
+            weightMsg = ` Imported ${cleanWeights.length} weight entr${cleanWeights.length === 1 ? "y" : "ies"}${skippedWeight ? `, skipped ${skippedWeight} duplicate/invalid/future` : ""}.`;
+          }
         }
 
         // Restore settings (target names/header, PR-card selection, tracked/custom exercises,
         // weight + swim targets) if the export included them — overwrites whatever's currently
         // saved, since importing a backup is an intentional restore.
         let settingsMsg = "";
-        if (parsed && isObj && parsed.settings && typeof parsed.settings === "object") {
+        if (parsed && isObj && parsed.settings && typeof parsed.settings === "object" && (restoreWorkoutBackup || !workoutArr)) {
           const st = parsed.settings;
           try {
             if (Object.prototype.hasOwnProperty.call(st, "ownerName")) { const v = typeof st.ownerName === "string" ? st.ownerName : ""; setOwnerName(v); await window.storage.set(OWNER_KEY, v, false); }
             if (Object.prototype.hasOwnProperty.call(st, "targetSettings")) { const v = st.targetSettings && typeof st.targetSettings === "object" ? st.targetSettings : {}; setTargetSettings(v); await window.storage.set(TARGET_KEY, JSON.stringify(v), false); }
             if (Object.prototype.hasOwnProperty.call(st, "trackedExercises")) { const v = Array.isArray(st.trackedExercises) ? st.trackedExercises : []; setTrackedExercises(v); await window.storage.set(TRACKED_KEY, JSON.stringify(v), false); }
-            if (Object.prototype.hasOwnProperty.call(st, "customExercises")) { const v = Array.isArray(st.customExercises) ? st.customExercises.map((e)=>({ ...e, type:e?.type||"reps", archived:!!e?.archived })) : []; setCustomExercises(v); await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(v), false); }
+            if (Object.prototype.hasOwnProperty.call(st, "customExercises")) { const v = normalizeCustomLibrary(st.customExercises); setCustomExercises(v); await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(v), false); }
             if (Object.prototype.hasOwnProperty.call(st, "prSelection")) { const v = Array.isArray(st.prSelection) ? st.prSelection : null; setPrSelection(v); await window.storage.set(PR_SELECTION_KEY, JSON.stringify(v), false); }
             if (Object.prototype.hasOwnProperty.call(st, "weightTargetSettings")) { const v = st.weightTargetSettings && typeof st.weightTargetSettings === "object" ? st.weightTargetSettings : {}; setWeightTargetSettings(v); await window.storage.set(WEIGHT_TARGET_KEY, JSON.stringify(v), false); }
             if (Object.prototype.hasOwnProperty.call(st, "swimTargetSettings")) { const v = st.swimTargetSettings && typeof st.swimTargetSettings === "object" ? st.swimTargetSettings : {}; setSwimTargetSettingsView(v); await window.storage.set("swim-target-settings-v1", JSON.stringify(v), false); }
@@ -8895,7 +8965,10 @@ function TrainingLog() {
                           <span className="mono" style={{ color: "#636366" }}>{e.type === "static" ? "static" : e.ratio === 0 ? "load only" : `${Math.round(e.ratio * 100)}% BW`}</span>
                           {customExercises.some((c)=>c.name===e.name) && !e.archived && <button onClick={() => editCustomExercise(e)} className="mono" style={{fontSize:9.5,color:"#64D2FF",background:"transparent",border:"1px solid #64D2FF44",borderRadius:999,padding:"2px 6px",cursor:"pointer"}}>edit</button>}
                           {customExercises.some((c)=>c.name===e.name) && !e.archived && <button onClick={() => archiveCustomExercise(e)} className="mono" style={{fontSize:9.5,color:"#FF9F0A",background:"transparent",border:"1px solid #FF9F0A44",borderRadius:999,padding:"2px 6px",cursor:"pointer"}}>{sessions.some((s)=>s.ex?.[e.name]) ? "archive" : "delete"}</button>}
-                          {isTracked ? (
+                          {e.archived && <button onClick={() => restoreCustomExercise(e)} className="mono" style={{fontSize:9.5,color:"#30D158",background:"transparent",border:"1px solid #30D15844",borderRadius:999,padding:"2px 6px",cursor:"pointer"}}>restore</button>}
+                          {e.archived ? (
+                            <span className="mono" style={{fontSize:9.5,color:"#636366"}}>history only</span>
+                          ) : isTracked ? (
                             <button onClick={() => untrackExercise(e.name)} className="mono" style={{ fontSize: 10, fontWeight: 700, color: "#FF9F0A", background: "transparent", border: "1px solid #FF9F0A55", borderRadius: 999, padding: "2px 8px", cursor: "pointer" }}>✕ tracked</button>
                           ) : (
                             <button onClick={() => trackLibraryExercise(e.name)} className="mono" style={{ fontSize: 10, fontWeight: 700, color: "#8E8E93", background: "transparent", border: "1px solid #2C2C2E", borderRadius: 999, padding: "2px 8px", cursor: "pointer" }}>+ track</button>
