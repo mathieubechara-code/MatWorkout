@@ -138,7 +138,7 @@ window.storage = {
 };
 
 const GROUP_COLORS = { Pull: "#FF9F0A", Push: "#FF453A", Legs: "#64D2FF", Core: "#30D158", "Full Body": "#BF5AF2", Custom: "#8E8E93" };
-const GROUPS = ["Pull", "Push", "Legs", "Core"];
+const GROUPS = ["Pull", "Push", "Legs", "Core", "Full Body"];
 const VOLUME_GROUPS = ["Pull", "Push", "Legs", "Core", "Full Body"];
 // A rotating color palette so every exercise in the library (not just a handful of
 // hand-picked ones) gets a distinct, stable color in charts/tags — including any custom
@@ -224,6 +224,9 @@ const BW_RATIO = Object.fromEntries(EXERCISE_LIBRARY.map((e) => [e.name, e.ratio
 // Custom exercises added at runtime get merged in on top of these inside the component.
 const COLORS = Object.fromEntries(EXERCISE_LIBRARY.map((e, i) => [e.name, colorForIndex(i)]));
 const MUSCLE_GROUP = Object.fromEntries(EXERCISE_LIBRARY.map((e) => [e.name, e.group]));
+const normalizeExerciseName = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const exerciseTypeFromEntry = (entry) => (entry && entry.type) || "reps";
+
 
 function levenshtein(a, b) {
   if (a === b) return 0;
@@ -292,7 +295,8 @@ function parseFreeform(text, library) {
 
   const applySetMatch = (name, setMatch) => {
     const reps = parseInt(setMatch[1], 10);
-    const setsCount = parseInt(setMatch[2], 10) || 1;
+    const setsCount = parseInt(setMatch[2], 10);
+    if (!Number.isFinite(reps) || reps <= 0 || !Number.isFinite(setsCount) || setsCount <= 0) return;
     const rest = setMatch[3] || "";
     const kgMatch = rest.match(/(\d+(?:\.\d+)?)\s*kg/i);
     const weight = kgMatch ? parseFloat(kgMatch[1]) : 0;
@@ -383,18 +387,25 @@ const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 const mondayOf = (dateStr) => { const d = new Date(dateStr + "T00:00:00"); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return d; };
 const emptyDraft = (trackedList) => ({ date: new Date().toISOString().slice(0, 10), label: "", bodyweight: "", notes: "", ex: Object.fromEntries((trackedList || []).map((e) => [e, ""])), load: Object.fromEntries((trackedList || []).map((e) => [e, ""])) });
 
-const migrate = (loaded) =>
-  loaded.map((s) => {
-    let out = s;
-    if (out.bodyweight === undefined) out = { ...out, bodyweight: null, load: out.load || {} };
-    if (out.notes === undefined) out = { ...out, notes: "" };
-    // Legacy sessions stored one added-weight number per exercise for the whole session
-    // (`load[name] = 15`). Weight is now tracked per set, aligned with `ex[name]`
-    // (`load[name] = [15,15,5,5]`). Expand any legacy scalar into an array of that same
-    // value repeated for every set the exercise has, so old data keeps working unchanged.
-    // Already-migrated sessions (load[name] already an array) pass through untouched.
-    const ex = out.ex || {};
-    const oldLoad = out.load || {};
+const sessionSortKey = (s) => `${s?.date || ""}|${String(s?.createdAt || s?.id || "").padStart(24, "0")}`;
+const sortWorkoutSessions = (arr) => [...(arr || [])].sort((a, b) => {
+  const dc = String(a?.date || "").localeCompare(String(b?.date || ""));
+  if (dc) return dc;
+  return sessionSortKey(a).localeCompare(sessionSortKey(b));
+});
+
+const migrate = (loaded) => {
+  const arr = Array.isArray(loaded) ? loaded : [];
+  const migrated = arr.map((s, idx) => {
+    let out = s && typeof s === "object" ? { ...s } : {};
+    if (out.bodyweight === undefined) out.bodyweight = null;
+    if (out.notes === undefined) out.notes = "";
+    if (!out.id) out.id = `legacy-${out.date || "unknown"}-${idx}`;
+    // createdAt is ordering metadata only. Legacy records get a deterministic fallback;
+    // we do not pretend to know their actual clock time.
+    if (!out.createdAt) out.createdAt = `legacy:${String(idx).padStart(8, "0")}`;
+    const ex = out.ex && typeof out.ex === "object" ? out.ex : {};
+    const oldLoad = out.load && typeof out.load === "object" ? out.load : {};
     const migratedLoad = {};
     Object.keys(oldLoad).forEach((name) => {
       const v = oldLoad[name];
@@ -402,9 +413,11 @@ const migrate = (loaded) =>
       const setsCount = (ex[name] || []).length || 1;
       migratedLoad[name] = Array.from({ length: setsCount }, () => v);
     });
-    out = { ...out, load: migratedLoad };
+    out = { ...out, ex, load: migratedLoad };
     return out;
   });
+  return sortWorkoutSessions(migrated);
+};
 
 const TABS = [
   { id: "dashboard", label: "Today", Icon: LayoutGrid },
@@ -4974,6 +4987,7 @@ function TrainingLog() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmDeleteAllScope, setConfirmDeleteAllScope] = useState(null); // null | "workout" | "swim" | "all"
   const [trackedExercises, setTrackedExercises] = useState([]);
@@ -4982,7 +4996,9 @@ function TrainingLog() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [showAddExercise, setShowAddExercise] = useState(false);
-  const [addExDraft, setAddExDraft] = useState({ name: "", group: "Pull", ratio: "1.0", target: "" });
+  const [editingCustomName, setEditingCustomName] = useState(null);
+  const [customExerciseError, setCustomExerciseError] = useState("");
+  const [addExDraft, setAddExDraft] = useState({ name: "", group: "Pull", ratio: "1.0", target: "", type: "reps" });
   const [draft, setDraft] = useState(() => emptyDraft([]));
   const [pasteText, setPasteText] = useState("");
   const [parseNote, setParseNote] = useState("");
@@ -5489,7 +5505,10 @@ function TrainingLog() {
     (async () => {
       try {
         const res = await window.storage.get(CUSTOM_LIB_KEY, false);
-        setCustomExercises(res && res.value ? JSON.parse(res.value) : []);
+        {
+          const parsed = res && res.value ? JSON.parse(res.value) : [];
+          setCustomExercises(Array.isArray(parsed) ? parsed.map((e) => ({ ...e, type: e?.type || "reps", archived: !!e?.archived })) : []);
+        }
       } catch (e) {
         setCustomExercises([]);
       }
@@ -5537,6 +5556,7 @@ function TrainingLog() {
   // Full matchable library = built-in reference exercises + anything the user has added
   // manually that isn't in the built-in list.
   const fullLibrary = useMemo(() => [...EXERCISE_LIBRARY, ...customExercises], [customExercises]);
+  const activeLibrary = useMemo(() => fullLibrary.filter((e) => !e.archived), [fullLibrary]);
   const colorsMap = useMemo(() => {
     const map = { ...COLORS };
     customExercises.forEach((e, i) => { map[e.name] = e.color || colorForIndex(EXERCISE_LIBRARY.length + i); });
@@ -5552,6 +5572,13 @@ function TrainingLog() {
     customExercises.forEach((e) => { map[e.name] = e.ratio; });
     return map;
   }, [customExercises]);
+  const exerciseTypeMap = useMemo(() => {
+    const map = Object.fromEntries(EXERCISE_LIBRARY.map((e) => [e.name, exerciseTypeFromEntry(e)]));
+    customExercises.forEach((e) => { map[e.name] = e.type || "reps"; });
+    return map;
+  }, [customExercises]);
+  const isRepExercise = (name) => (exerciseTypeMap[name] || "reps") === "reps";
+
 
   // Exercises to actually draw on the charts/summary tiles/PR list. Deliberately derived
   // ONLY from what's currently present in your saved sessions — not from `trackedExercises`
@@ -5584,28 +5611,106 @@ function TrainingLog() {
   };
 
   const addCustomExercise = async () => {
+    setCustomExerciseError("");
     const name = addExDraft.name.trim();
-    if (!name) return;
+    const normalized = normalizeExerciseName(name);
+    if (!name) { setCustomExerciseError("Exercise name is required."); return; }
+
     const ratioNum = parseFloat(addExDraft.ratio);
+    if (!Number.isFinite(ratioNum) || ratioNum < 0 || ratioNum > 1.5) {
+      setCustomExerciseError("BW ratio must be between 0 and 1.5.");
+      return;
+    }
+
+    const builtInCollision = EXERCISE_LIBRARY.some((e) =>
+      normalizeExerciseName(e.name) === normalized ||
+      (e.aliases || []).some((a) => normalizeExerciseName(a) === normalized)
+    );
+    if (builtInCollision) {
+      setCustomExerciseError("That name matches a built-in exercise. Track the built-in exercise instead.");
+      return;
+    }
+
+    const customCollision = customExercises.some((e) =>
+      e.name !== editingCustomName &&
+      (normalizeExerciseName(e.name) === normalized ||
+       (e.aliases || []).some((a) => normalizeExerciseName(a) === normalized))
+    );
+    if (customCollision) {
+      setCustomExerciseError("A custom exercise with that name/alias already exists.");
+      return;
+    }
+
     const entry = {
       name,
       group: addExDraft.group,
-      ratio: Number.isFinite(ratioNum) ? ratioNum : 1.0,
+      ratio: Math.round(ratioNum * 100) / 100,
       target: addExDraft.target.trim(),
+      type: addExDraft.type || "reps",
       aliases: [name.toLowerCase()],
+      archived: false,
     };
-    const nextCustom = [...customExercises.filter((e) => e.name !== name), entry];
+
+    let nextCustom;
+    if (editingCustomName) {
+      const logged = sessions.some((s) => s.ex && s.ex[editingCustomName]);
+      const previous = customExercises.find((e) => e.name === editingCustomName);
+      if (logged && previous && (previous.group !== entry.group || Number(previous.ratio) !== Number(entry.ratio) || previous.type !== entry.type)) {
+        const ok = window.confirm("Changing group, BW ratio, or exercise type recalculates historical analytics for this custom exercise. Continue?");
+        if (!ok) return;
+      }
+      nextCustom = customExercises.map((e) => e.name === editingCustomName ? entry : e);
+      if (editingCustomName !== name) {
+        // Historical session keys intentionally keep the old name; renaming a logged custom
+        // definition would orphan that history, so only permit renaming before first use.
+        if (logged) {
+          setCustomExerciseError("A logged custom exercise cannot be renamed. Change its metadata or archive it instead.");
+          return;
+        }
+        await persistTracked(trackedExercises.map((n) => n === editingCustomName ? name : n));
+      }
+    } else {
+      nextCustom = [...customExercises, entry];
+    }
+
     await persistCustom(nextCustom);
-    if (!trackedExercises.includes(name)) await persistTracked([...trackedExercises, name]);
+    if (!trackedExercises.includes(name)) await persistTracked([...trackedExercises.filter((n) => n !== editingCustomName), name]);
     setDraft((d) => ({ ...d, ex: { ...d.ex, [name]: d.ex[name] ?? "" }, load: { ...d.load, [name]: d.load[name] ?? "" } }));
-    setAddExDraft({ name: "", group: "Pull", ratio: "1.0", target: "" });
+    setAddExDraft({ name: "", group: "Pull", ratio: "1.0", target: "", type: "reps" });
+    setEditingCustomName(null);
     setShowAddExercise(false);
+  };
+
+  const editCustomExercise = (entry) => {
+    setCustomExerciseError("");
+    setEditingCustomName(entry.name);
+    setAddExDraft({
+      name: entry.name,
+      group: entry.group || "Pull",
+      ratio: String(entry.ratio ?? 1),
+      target: entry.target || "",
+      type: entry.type || "reps"
+    });
+    setShowAddExercise(true);
+  };
+
+  const archiveCustomExercise = async (entry) => {
+    const logged = sessions.some((s) => s.ex && s.ex[entry.name]);
+    if (logged) {
+      await persistCustom(customExercises.map((e) => e.name === entry.name ? { ...e, archived: true } : e));
+      if (trackedExercises.includes(entry.name)) await persistTracked(trackedExercises.filter((n) => n !== entry.name));
+    } else {
+      await persistCustom(customExercises.filter((e) => e.name !== entry.name));
+      if (trackedExercises.includes(entry.name)) await persistTracked(trackedExercises.filter((n) => n !== entry.name));
+    }
   };
 
   // Opens the "Add exercise" modal prefilled with a name the paste-parser couldn't match at
   // all, so fixing an unmatched entry is one click instead of retyping it.
   const openAddExerciseFor = (name) => {
-    setAddExDraft({ name, group: "Pull", ratio: "1.0", target: "" });
+    setAddExDraft({ name, group: "Pull", ratio: "1.0", target: "", type: "reps" });
+    setEditingCustomName(null);
+    setCustomExerciseError("");
     setShowAddExercise(true);
   };
 
@@ -5672,6 +5777,7 @@ function TrainingLog() {
   };
 
   const startEdit = (s) => {
+    setFormError("");
     setEditingId(s.id);
     // Include every exercise the session actually has data for (even if it's since been
     // untracked) plus all currently tracked fields, so nothing gets silently dropped on save.
@@ -5684,10 +5790,10 @@ function TrainingLog() {
     setShowForm(true);
   };
 
-  const cancelForm = () => { setShowForm(false); setEditingId(null); setDraft(emptyDraft(trackedExercises)); setPasteText(""); setParseNote(""); };
+  const cancelForm = () => { setFormError(""); setShowForm(false); setEditingId(null); setDraft(emptyDraft(trackedExercises)); setPasteText(""); setParseNote(""); };
 
   const handleParseFill = async () => {
-    const { results, matchedEntries, unmatched } = parseFreeform(pasteText, fullLibrary);
+    const { results, matchedEntries, unmatched } = parseFreeform(pasteText, activeLibrary);
     const matchedNames = Object.keys(results);
     if (!matchedNames.length && !matchedEntries.length && !unmatched.length) {
       setParseNote('Couldn\'t parse anything — check the format (e.g. "12 rep x 3 sets body weight").');
@@ -5721,30 +5827,89 @@ function TrainingLog() {
 
   const saveSession = async () => {
     if (!sessions) return;
-    setSaving(true);
+    setFormError("");
+
+    const today = toISODate(new Date());
+    if (!draft.date || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) {
+      setFormError("Date is required.");
+      return;
+    }
+    if (draft.date > today) {
+      setFormError("Workout date cannot be in the future.");
+      return;
+    }
+    const bw = parseFloat(draft.bodyweight);
+    if (!Number.isFinite(bw) || bw <= 0) {
+      setFormError("Bodyweight is required and must be greater than 0 kg.");
+      return;
+    }
+
     const exData = {}; const loadData = {};
+    const validationErrors = [];
+
     Object.keys(draft.ex).forEach((name) => {
-      const parsed = draft.ex[name].split(",").map((v) => parseInt(v.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
-      if (parsed.length) exData[name] = parsed;
-      // Weight is entered as a comma list aligned to the sets above (e.g. "15,15,5,5" next to
-      // "12,12,10,10"). A single value ("15") still works and applies to every set — if fewer
-      // weights than sets are given, the last one entered is repeated for the remaining sets.
-      const weightsRaw = (draft.load[name] || "").split(",").map((v) => v.trim()).filter((v) => v !== "").map((v) => parseFloat(v)).filter((n) => Number.isFinite(n) && n >= 0);
-      if (parsed.length && weightsRaw.length) {
+      const repText = String(draft.ex[name] || "").trim();
+      const loadText = String((draft.load || {})[name] || "").trim();
+      if (!repText && !loadText) return;
+
+      if (!isRepExercise(name)) {
+        // Static/duration movements remain loggable for history, but until duration is
+        // explicitly supported they are excluded from rep/volume/1RM analytics.
+        if (repText) {
+          const vals = repText.split(",").map((v) => v.trim());
+          if (vals.some((v) => v === "" || !Number.isFinite(Number(v)) || Number(v) <= 0)) {
+            validationErrors.push(`${name}: enter positive values only.`);
+            return;
+          }
+          exData[name] = vals.map(Number);
+        }
+        return;
+      }
+
+      const repTokens = repText ? repText.split(",").map((v) => v.trim()) : [];
+      if (!repTokens.length) {
+        if (loadText) validationErrors.push(`${name}: load was entered without reps.`);
+        return;
+      }
+      if (repTokens.some((v) => v === "" || !/^\d+$/.test(v) || Number(v) <= 0)) {
+        validationErrors.push(`${name}: reps must be positive whole numbers separated by commas.`);
+        return;
+      }
+      const parsed = repTokens.map(Number);
+      exData[name] = parsed;
+
+      if (loadText) {
+        const weightTokens = loadText.split(",").map((v) => v.trim());
+        if (weightTokens.some((v) => v === "" || !Number.isFinite(Number(v)) || Number(v) < 0)) {
+          validationErrors.push(`${name}: loads must be numbers ≥ 0 separated by commas.`);
+          return;
+        }
+        const weightsRaw = weightTokens.map(Number);
         loadData[name] = parsed.map((_, i) => (i < weightsRaw.length ? weightsRaw[i] : weightsRaw[weightsRaw.length - 1]));
       }
     });
-    const bw = parseFloat(draft.bodyweight);
+
+    if (validationErrors.length) {
+      setFormError(validationErrors[0] + (validationErrors.length > 1 ? ` (+${validationErrors.length - 1} more)` : ""));
+      return;
+    }
+    if (!Object.keys(exData).length) {
+      setFormError("Add at least one valid working set before saving.");
+      return;
+    }
+
+    setSaving(true);
+    const nowCreatedAt = new Date().toISOString();
     let next;
     if (editingId) {
       next = sessions.map((s) => s.id === editingId
-        ? { ...s, date: draft.date, label: draft.label.trim() || "Session", bodyweight: Number.isFinite(bw) ? bw : null, load: loadData, ex: exData, notes: draft.notes.trim() }
+        ? { ...s, date: draft.date, label: draft.label.trim() || "Session", bodyweight: bw, load: loadData, ex: exData, notes: draft.notes.trim(), createdAt: s.createdAt || nowCreatedAt }
         : s);
     } else {
-      const newSession = { id: "s" + Date.now(), date: draft.date, label: draft.label.trim() || "Session", bodyweight: Number.isFinite(bw) ? bw : null, load: loadData, ex: exData, notes: draft.notes.trim() };
+      const newSession = { id: "s" + Date.now(), createdAt: nowCreatedAt, date: draft.date, label: draft.label.trim() || "Session", bodyweight: bw, load: loadData, ex: exData, notes: draft.notes.trim() };
       next = [...sessions, newSession];
     }
-    next = next.sort((a, b) => a.date.localeCompare(b.date));
+    next = sortWorkoutSessions(next);
     await persist(next);
     cancelForm();
     setSaving(false);
@@ -5832,12 +5997,19 @@ function TrainingLog() {
 
         let workoutMsg = "";
         if (workoutArr) {
-          const existingDates = new Set(sessions.map((s) => s.date));
-          const toAdd = migrate(workoutArr.filter((s) => s && s.date && s.ex && !existingDates.has(s.date)));
-          const skipped = workoutArr.length - toAdd.length;
-          const next = [...sessions, ...toAdd].sort((a, b) => a.date.localeCompare(b.date));
+          const existingIds = new Set(sessions.map((s) => s.id).filter(Boolean));
+          const existingLegacyFingerprints = new Set(sessions.map((s) => `${s.date}|${s.label || ""}|${JSON.stringify(s.ex || {})}`));
+          const rawToAdd = workoutArr.filter((s) => {
+            if (!s || !s.date || !s.ex) return false;
+            if (s.id && existingIds.has(s.id)) return false;
+            if (!s.id && existingLegacyFingerprints.has(`${s.date}|${s.label || ""}|${JSON.stringify(s.ex || {})}`)) return false;
+            return true;
+          });
+          const toAdd = migrate(rawToAdd);
+          const skipped = workoutArr.length - rawToAdd.length;
+          const next = sortWorkoutSessions([...sessions, ...toAdd]);
           await persist(next);
-          workoutMsg = `Imported ${toAdd.length} workout session(s)${skipped ? `, skipped ${skipped} duplicate date(s)` : ""}.`;
+          workoutMsg = `Imported ${toAdd.length} workout session(s)${skipped ? `, skipped ${skipped} duplicate/invalid` : ""}.`;
         }
 
         let swimMsg = "";
@@ -5869,13 +6041,13 @@ function TrainingLog() {
         if (parsed && isObj && parsed.settings && typeof parsed.settings === "object") {
           const st = parsed.settings;
           try {
-            if (st.ownerName) { setOwnerName(st.ownerName); await window.storage.set(OWNER_KEY, st.ownerName, false); }
-            if (st.targetSettings != null) { setTargetSettings(st.targetSettings); await window.storage.set(TARGET_KEY, JSON.stringify(st.targetSettings), false); }
-            if (st.trackedExercises != null) { setTrackedExercises(st.trackedExercises); await window.storage.set(TRACKED_KEY, JSON.stringify(st.trackedExercises), false); }
-            if (st.customExercises != null) { setCustomExercises(st.customExercises); await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(st.customExercises), false); }
-            if (st.prSelection != null) { setPrSelection(st.prSelection); await window.storage.set(PR_SELECTION_KEY, JSON.stringify(st.prSelection), false); }
-            if (st.weightTargetSettings != null) { setWeightTargetSettings(st.weightTargetSettings); await window.storage.set(WEIGHT_TARGET_KEY, JSON.stringify(st.weightTargetSettings), false); }
-            if (st.swimTargetSettings != null) { setSwimTargetSettingsView(st.swimTargetSettings); await window.storage.set("swim-target-settings-v1", JSON.stringify(st.swimTargetSettings), false); }
+            if (Object.prototype.hasOwnProperty.call(st, "ownerName")) { const v = typeof st.ownerName === "string" ? st.ownerName : ""; setOwnerName(v); await window.storage.set(OWNER_KEY, v, false); }
+            if (Object.prototype.hasOwnProperty.call(st, "targetSettings")) { const v = st.targetSettings && typeof st.targetSettings === "object" ? st.targetSettings : {}; setTargetSettings(v); await window.storage.set(TARGET_KEY, JSON.stringify(v), false); }
+            if (Object.prototype.hasOwnProperty.call(st, "trackedExercises")) { const v = Array.isArray(st.trackedExercises) ? st.trackedExercises : []; setTrackedExercises(v); await window.storage.set(TRACKED_KEY, JSON.stringify(v), false); }
+            if (Object.prototype.hasOwnProperty.call(st, "customExercises")) { const v = Array.isArray(st.customExercises) ? st.customExercises.map((e)=>({ ...e, type:e?.type||"reps", archived:!!e?.archived })) : []; setCustomExercises(v); await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(v), false); }
+            if (Object.prototype.hasOwnProperty.call(st, "prSelection")) { const v = Array.isArray(st.prSelection) ? st.prSelection : null; setPrSelection(v); await window.storage.set(PR_SELECTION_KEY, JSON.stringify(v), false); }
+            if (Object.prototype.hasOwnProperty.call(st, "weightTargetSettings")) { const v = st.weightTargetSettings && typeof st.weightTargetSettings === "object" ? st.weightTargetSettings : {}; setWeightTargetSettings(v); await window.storage.set(WEIGHT_TARGET_KEY, JSON.stringify(v), false); }
+            if (Object.prototype.hasOwnProperty.call(st, "swimTargetSettings")) { const v = st.swimTargetSettings && typeof st.swimTargetSettings === "object" ? st.swimTargetSettings : {}; setSwimTargetSettingsView(v); await window.storage.set("swim-target-settings-v1", JSON.stringify(v), false); }
             settingsMsg = " Settings restored.";
           } catch (_) {}
         }
@@ -5925,12 +6097,15 @@ function TrainingLog() {
   // math has to look at each set's own weight instead of assuming one value for all of them.
   // Returns null (session-wide) if bodyweight is unknown, same as before.
   const setLoadsFor = (s, name) => {
-    const bw = bwMap[s.id];
-    if (bw == null) return null;
-    const ratio = bwRatioMap[name] != null ? bwRatioMap[name] : 1;
+    if (!isRepExercise(name)) return null;
+    const ratio = bwRatioMap[name] != null ? Number(bwRatioMap[name]) : 1;
     const reps = s.ex[name] || [];
     const weights = (s.load || {})[name] || [];
-    return reps.map((_, i) => bw * ratio + (weights[i] || 0));
+    // Pure-load exercises do not require bodyweight.
+    if (ratio === 0) return reps.map((_, i) => Number(weights[i] || 0));
+    const bw = bwMap[s.id];
+    if (bw == null) return null;
+    return reps.map((_, i) => bw * ratio + Number(weights[i] || 0));
   };
 
   // Total volume for one exercise within one session: sum of each set's reps × that set's
@@ -5955,8 +6130,10 @@ function TrainingLog() {
     const weights = (s.load || {})[name] || [];
     let best = null;
     reps.forEach((r, i) => {
-      const oneRM = loads[i] * (1 + r / 30);
-      if (!best || oneRM > best.oneRM) best = { oneRM, reps: r, weight: weights[i] || 0 };
+      if (!Number.isFinite(Number(r)) || Number(r) < 1 || Number(r) > 12) return;
+      if (!(loads[i] > 0)) return;
+      const oneRM = loads[i] * (1 + Number(r) / 30);
+      if (!best || oneRM > best.oneRM) best = { oneRM, reps: Number(r), weight: weights[i] || 0 };
     });
     return best;
   };
@@ -5969,7 +6146,7 @@ function TrainingLog() {
     if (!sessions) return [];
     if (range === "all") return sessions;
     const days = range === "30" ? 30 : 90;
-    return sessions.filter((s) => dayDiff(s.date, todayStr) <= days);
+    return sessions.filter((s) => { const ago = dayDiff(s.date, todayStr); return ago >= 0 && ago <= days; });
   }, [sessions, range]);
 
   const chartData = useMemo(() => rangedSessions.map((s) => {
@@ -5988,35 +6165,53 @@ function TrainingLog() {
   }), [rangedSessions, metric, chartExercises]);
 
 
-  // Overall Workout Stats trend ---------------------------------------------------------
-  // "All" is a normalized profile, not a raw sum. Each exercise is first compared with
-  // its own typical value for the selected range, then the available exercise scores are
-  // averaged with equal weight. This prevents exercise choice, raw kg scale, or simply
-  // logging more exercises from automatically making a session look better.
-  const overallDayTrend = useMemo(() => {
-    if (!chartData?.length || !chartExercises?.length) return [];
-    const median = (vals) => {
-      const a = vals.filter((v) => v != null && Number.isFinite(v) && v > 0).sort((x,y)=>x-y);
-      if (!a.length) return null;
-      const m = Math.floor(a.length/2);
-      return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
-    };
-    const baselineByExercise = Object.fromEntries(
-      chartExercises.map((name) => [name, median(chartData.map((r) => r[name]))])
-    );
-    return chartData.map((row) => {
-      const scores = chartExercises.map((name) => {
-        const v = row[name], base = baselineByExercise[name];
-        return v != null && Number.isFinite(v) && base > 0 ? 100 * v / base : null;
-      }).filter((v) => v != null && Number.isFinite(v));
-      return {
-        date: row.date,
-        fullDate: row.fullDate,
-        Overall: scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null,
-        exercises: scores.length
-      };
-    }).filter((r) => r.Overall != null);
-  }, [chartData, chartExercises]);
+  // Rolling Workout performance trend ---------------------------------------------------
+  // Every point compares the session with the PREVIOUS six calendar weeks, excluding the
+  // current session. 100 = the user's own recent normal at that point in time.
+  const workoutMetricValue = (s, name, metricName = metric) => {
+    if (!s?.ex?.[name] || !isRepExercise(name)) return null;
+    if (metricName === "reps") return total(s.ex[name]);
+    if (metricName === "1rm") return exercise1RM(s, name);
+    return exerciseVolume(s, name);
+  };
+  const meanFinite = (vals) => {
+    const a = vals.filter((v) => v != null && Number.isFinite(v) && v > 0);
+    return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+  };
+  const rollingExerciseScore = (s, name, metricName = metric) => {
+    const cur = workoutMetricValue(s, name, metricName);
+    if (!(cur > 0)) return null;
+    const cutoff = new Date(`${s.date}T00:00:00`);
+    cutoff.setDate(cutoff.getDate() - 42);
+    const cutoffStr = toISODate(cutoff);
+    const priorVals = sessions
+      .filter((p) => p.date < s.date && p.date >= cutoffStr && p.ex?.[name])
+      .map((p) => workoutMetricValue(p, name, metricName));
+    const base = meanFinite(priorVals);
+    return base > 0 ? 100 * cur / base : null;
+  };
+  const normalizedSessionScore = (s, names, metricName = metric) => {
+    const scores = (names || []).map((name) => rollingExerciseScore(s, name, metricName)).filter(Number.isFinite);
+    return scores.length ? { score: scores.reduce((a,b)=>a+b,0)/scores.length, count: scores.length } : null;
+  };
+
+  const overallDayTrend = useMemo(() => rangedSessions.map((s) => {
+    const names = chartExercises.filter((name) => s.ex?.[name] && isRepExercise(name));
+    const out = normalizedSessionScore(s, names, metric);
+    return out ? { date: fmtDate(s.date), fullDate: s.date, Overall: out.score, exercises: out.count } : null;
+  }).filter(Boolean), [rangedSessions, sessions, chartExercises, metric, exerciseTypeMap]);
+
+  const groupNormalizedDayTrend = useMemo(() => {
+    if (!filter.startsWith("group:")) return [];
+    const group = filter.slice(6);
+    const allowed = chartExercises.filter((name) => muscleGroupMap[name] === group && !hiddenStatsExercises.has(name) && isRepExercise(name));
+    return rangedSessions.map((s) => {
+      const names = allowed.filter((name) => s.ex?.[name]);
+      const out = normalizedSessionScore(s, names, metric);
+      return out ? { date: fmtDate(s.date), fullDate: s.date, value: out.score, exercises: out.count } : null;
+    }).filter(Boolean);
+  }, [rangedSessions, sessions, filter, metric, chartExercises, muscleGroupMap, hiddenStatsExercises, exerciseTypeMap]);
+
 
   const perSetData = useMemo(() => {
     if (filter === "All" || filter.startsWith("group:")) return [];
@@ -6113,30 +6308,24 @@ function TrainingLog() {
   }), [weeklySessionGroups, chartExercises, metric]);
 
 
-  const overallWeekTrend = useMemo(() => {
-    if (!weeklyChartData?.length || !chartExercises?.length) return [];
-    const median = (vals) => {
-      const a = vals.filter((v) => v != null && Number.isFinite(v) && v > 0).sort((x,y)=>x-y);
-      if (!a.length) return null;
-      const m = Math.floor(a.length/2);
-      return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
-    };
-    const baselineByExercise = Object.fromEntries(
-      chartExercises.map((name) => [name, median(weeklyChartData.map((r) => r[name]))])
-    );
-    return weeklyChartData.map((row) => {
-      const scores = chartExercises.map((name) => {
-        const v = row[name], base = baselineByExercise[name];
-        return v != null && Number.isFinite(v) && base > 0 ? 100 * v / base : null;
-      }).filter((v) => v != null && Number.isFinite(v));
-      return {
-        date: row.date,
-        fullDate: row.fullDate,
-        Overall: scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null,
-        exercises: scores.length
-      };
-    }).filter((r) => r.Overall != null);
-  }, [weeklyChartData, chartExercises]);
+  const weeklyAverageScores = (rows, key) => {
+    const byWeek = new Map();
+    (rows || []).forEach((r) => {
+      const wk = weekKeyOf(r.fullDate);
+      if (!byWeek.has(wk)) byWeek.set(wk, []);
+      if (Number.isFinite(r[key])) byWeek.get(wk).push(r[key]);
+    });
+    return Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([wk, vals]) => ({
+      date: "Wk of " + fmtDate(wk),
+      fullDate: wk,
+      [key]: vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null,
+      sessions: vals.length
+    })).filter((r) => r[key] != null);
+  };
+
+  const overallWeekTrend = useMemo(() => weeklyAverageScores(overallDayTrend, "Overall"), [overallDayTrend]);
+  const groupNormalizedWeekTrend = useMemo(() => weeklyAverageScores(groupNormalizedDayTrend, "value"), [groupNormalizedDayTrend]);
+
 
   const weeklyGroupChartData = useMemo(() => {
     if (!filter.startsWith("group:")) return [];
@@ -6202,7 +6391,8 @@ function TrainingLog() {
   // The datasets actually handed to the charts below, switching on the Day/Week toggle.
   const chartDataView = timeView === "week" ? weeklyChartData : chartData;
   const overallTrendView = timeView === "week" ? overallWeekTrend : overallDayTrend;
-  const groupChartDataView = timeView === "week" ? weeklyGroupChartData : groupChartData;
+  const groupPerformanceView = timeView === "week" ? groupNormalizedWeekTrend : groupNormalizedDayTrend;
+  const groupChartDataView = groupPerformanceView;
   const bodyweightDataView = timeView === "week" ? weeklyBodyweightData : bodyweightData;
   const loadStepDataView = timeView === "week" ? weeklyLoadStepData : loadStepData;
 
@@ -6220,11 +6410,17 @@ function TrainingLog() {
     return total(latest.ex[name]) - total(first.ex[name]);
   };
 
-  const sessionVolume = (s) => Object.keys(s.ex).reduce((sum, name) => {
-    if (!s.ex[name]) return sum;
-    const v = exerciseVolume(s, name);
-    return v == null ? sum : sum + v;
-  }, 0);
+  const sessionVolumeInfo = (s) => {
+    let totalKg = 0, included = 0, excluded = 0;
+    Object.keys(s?.ex || {}).forEach((name) => {
+      if (!s.ex[name] || !isRepExercise(name)) return;
+      const v = exerciseVolume(s, name);
+      if (v == null || !Number.isFinite(v)) { excluded++; return; }
+      totalKg += v; included++;
+    });
+    return { kg: totalKg, included, excluded, complete: excluded === 0 };
+  };
+  const sessionVolume = (s) => sessionVolumeInfo(s).kg;
 
   const volumeKpi = useMemo(() => {
     if (!sessions || !latest || !first) return null;
@@ -6267,11 +6463,11 @@ function TrainingLog() {
   const workoutRadar = useMemo(() => {
     if (!latest || !sessions || sessions.length < 2) return { axes: [], baselineSessions: 0, comparableExercises: 0, groupBaselineSessions: 0, eligibleNames: [], profileSession: null };
     const wantedGroup = workoutRadarGroup === "All" ? null : workoutRadarGroup;
-    const namesFor = (s) => Object.keys(s?.ex || {}).filter((name) => !wantedGroup || muscleGroupMap[name] === wantedGroup);
 
-    // "All" uses the latest workout overall. A selected training group uses the most recent
-    // workout that actually contains that group. Otherwise a Pull-only latest workout would
-    // incorrectly blank the Legs/Push/Core profiles even when those groups have recent data.
+    const namesFor = (s, group = wantedGroup) => Object.keys(s?.ex || {}).filter((name) =>
+      isRepExercise(name) && (!group || muscleGroupMap[name] === group)
+    );
+
     const profileSession = wantedGroup
       ? [...sessions].reverse().find((s) => namesFor(s).length > 0) || null
       : latest;
@@ -6281,86 +6477,96 @@ function TrainingLog() {
     cutoff.setDate(cutoff.getDate() - 42);
     const cutoffStr = toISODate(cutoff);
     const prior = sessions.filter((s) => s.date < profileSession.date && s.date >= cutoffStr);
-    const latestNames = namesFor(profileSession);
-    const median = (vals) => {
-      const a = vals.filter((v) => v != null && Number.isFinite(v) && v > 0).sort((x,y)=>x-y);
-      if (!a.length) return null;
-      const m = Math.floor(a.length/2);
-      return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+    const mean = (vals) => {
+      const a = vals.filter((v)=>v!=null && Number.isFinite(v));
+      return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
     };
-    const mean = (vals) => vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+    const median = (vals) => {
+      const a = vals.filter((v)=>v!=null && Number.isFinite(v) && v>0).sort((x,y)=>x-y);
+      if (!a.length) return null;
+      const m=Math.floor(a.length/2); return a.length%2?a[m]:(a[m-1]+a[m])/2;
+    };
     const clamp = (v, lo=70, hi=130) => Math.max(lo, Math.min(hi, v));
 
-    // Same-exercise layer: only these observations may claim Strength or Progression.
+    const latestNames = namesFor(profileSession);
     const comps = latestNames.map((name) => {
-      const hist = prior.filter((s) => s.ex && s.ex[name]);
+      const hist = prior.filter((s)=>s.ex?.[name]);
       if (hist.length < 2) return null;
-      const curStrength = exercise1RM(profileSession, name);
-      const curVolume = exerciseVolume(profileSession, name);
-      const baseStrength = median(hist.map((s) => exercise1RM(s, name)));
-      const baseVolume = median(hist.map((s) => exerciseVolume(s, name)));
-      if (!(curStrength > 0) || !(baseStrength > 0)) return null;
+      const curStrength=exercise1RM(profileSession,name), curVolume=exerciseVolume(profileSession,name);
+      const baseStrength=median(hist.map((s)=>exercise1RM(s,name)));
+      const baseVolume=median(hist.map((s)=>exerciseVolume(s,name)));
+      if (!(curStrength>0) || !(baseStrength>0)) return null;
       return {
         name,
-        strength: 100 * curStrength / baseStrength,
-        strengthChange: curStrength / baseStrength - 1,
-        volumeChange: curVolume > 0 && baseVolume > 0 ? curVolume / baseVolume - 1 : null,
-        histCount: hist.length
+        strength:100*curStrength/baseStrength,
+        strengthChange:curStrength/baseStrength-1,
+        volumeChange:curVolume>0 && baseVolume>0 ? curVolume/baseVolume-1 : null,
+        histCount:hist.length
       };
     }).filter(Boolean);
 
-    // Group/session layer: supports exercise rotation.
-    const sessionGroupStats = (s) => {
-      const names = namesFor(s);
+    const groupStats = (s, group) => {
+      const names = namesFor(s, group);
       if (!names.length) return null;
-      let volume = 0, reps = 0, sets = 0;
-      names.forEach((name) => {
-        const v = exerciseVolume(s, name);
-        if (v != null && Number.isFinite(v) && v > 0) volume += v;
-        (s.ex?.[name] || []).forEach((set) => {
-          const r = Number(set?.reps);
-          if (Number.isFinite(r) && r > 0) { reps += r; sets += 1; }
-        });
+      let volume=0, reps=0, sets=0;
+      names.forEach((name)=>{
+        const v=exerciseVolume(s,name);
+        if (v>0) volume+=v;
+        (s.ex?.[name]||[]).forEach((r)=>{ const n=Number(r); if(n>0){reps+=n;sets++;} });
       });
-      return volume > 0 || sets > 0 ? { volume: volume || null, avgReps: sets > 0 ? reps / sets : null, exerciseCount: names.length } : null;
+      return { volume: volume>0?volume:null, avgReps:sets?reps/sets:null, names };
     };
-    const curGroup = sessionGroupStats(profileSession);
-    const priorGroup = prior.map((s) => sessionGroupStats(s)).filter(Boolean);
-    const baseGroupVolume = median(priorGroup.map((x)=>x.volume));
-    const baseAvgReps = median(priorGroup.map((x)=>x.avgReps));
 
-    const strengthVals = comps.map((c)=>c.strength).filter(Number.isFinite);
-    const groupVolume = curGroup?.volume > 0 && baseGroupVolume > 0 ? 100 * curGroup.volume / baseGroupVolume : null;
-    // Rep-profile intensity: 100 = normal reps/set, < normal reps means heavier-strength profile.
-    // It intentionally does NOT claim load equivalence between different exercises.
-    const groupIntensity = curGroup?.avgReps > 0 && baseAvgReps > 0 ? 100 * baseAvgReps / curGroup.avgReps : null;
+    const groupsPresent = wantedGroup ? [wantedGroup] : Array.from(new Set(latestNames.map((n)=>muscleGroupMap[n]).filter(Boolean)));
+    const groupScores = groupsPresent.map((group)=>{
+      const cur=groupStats(profileSession,group);
+      if(!cur) return null;
+      const hist=prior.map((s)=>groupStats(s,group)).filter(Boolean);
+      const bv=median(hist.map((x)=>x.volume));
+      const br=median(hist.map((x)=>x.avgReps));
+      return {
+        group,
+        volume:cur.volume>0 && bv>0 ? 100*cur.volume/bv : null,
+        repIntensity:cur.avgReps>0 && br>0 ? 100*br/cur.avgReps : null,
+        baselineSessions:hist.length
+      };
+    }).filter(Boolean);
 
-    const progressionSignals = comps.map((c) => {
-      const best = Math.max(c.strengthChange ?? -Infinity, c.volumeChange ?? -Infinity);
-      const worst = Math.min(c.strengthChange ?? Infinity, c.volumeChange ?? Infinity);
-      if (best >= 0.02) return 1;
-      if (worst <= -0.02) return -1;
+    const strengthVals=comps.map((c)=>c.strength);
+    const groupVolume=mean(groupScores.map((g)=>g.volume));
+    const groupIntensity=mean(groupScores.map((g)=>g.repIntensity));
+
+    // Progression: strength is primary. Volume may break a near-flat strength tie, but it
+    // cannot call progression when strength clearly moved backward.
+    const progressionSignals=comps.map((c)=>{
+      const s=c.strengthChange;
+      const v=c.volumeChange;
+      if(s>=0.02) return 1;
+      if(s<=-0.02) return -1;
+      if(v!=null && v>=0.05) return 0.5;
+      if(v!=null && v<=-0.05) return -0.5;
       return 0;
     });
-    const progression = progressionSignals.length ? 100 + 30 * mean(progressionSignals) : null;
+    const progression=progressionSignals.length ? 100+30*mean(progressionSignals) : null;
 
-    const axes = [
-      { key:"strength", label:"Strength", color:"#64D2FF", score: clamp(mean(strengthVals)), raw: mean(strengthVals), basis:"same exercise" },
-      { key:"volume", label:"Volume", color:"#30D158", score: clamp(groupVolume), raw: groupVolume, basis:"training group" },
-      { key:"intensity", label:"Intensity", color:"#FF9F0A", score: clamp(groupIntensity), raw: groupIntensity, basis:"rep profile" },
-      { key:"progression", label:"Progression", color:"#BF5AF2", score: clamp(progression), raw: progression, basis:"same exercise" },
-    ].filter((a)=>a.raw != null && Number.isFinite(a.raw));
+    const axes=[
+      {key:"strength",label:"Strength",color:"#64D2FF",score:clamp(mean(strengthVals)),raw:mean(strengthVals),basis:"same exercise"},
+      {key:"volume",label:"Volume",color:"#30D158",score:clamp(groupVolume),raw:groupVolume,basis:"group-normalized"},
+      {key:"intensity",label:"Rep Intensity",color:"#FF9F0A",score:clamp(groupIntensity),raw:groupIntensity,basis:"reps/set profile"},
+      {key:"progression",label:"Progression",color:"#BF5AF2",score:clamp(progression),raw:progression,basis:"same exercise"},
+    ].filter((a)=>a.raw!=null && Number.isFinite(a.raw));
 
     return {
       axes,
-      baselineSessions: prior.length,
-      groupBaselineSessions: priorGroup.length,
-      comparableExercises: comps.length,
-      eligibleNames: comps.map((c)=>c.name),
+      baselineSessions:prior.length,
+      groupBaselineSessions:Math.max(0,...groupScores.map((g)=>g.baselineSessions||0)),
+      comparableExercises:comps.length,
+      eligibleNames:comps.map((c)=>c.name),
       profileSession,
-      comps
+      comps,
+      groupScores
     };
-  }, [latest, sessions, workoutRadarGroup, muscleGroupMap, bwMap]);
+  }, [latest, sessions, workoutRadarGroup, muscleGroupMap, bwMap, exerciseTypeMap]);
 
   const workoutRadarInterpretation = useMemo(() => {
     const get = (k) => workoutRadar.axes.find((a)=>a.key===k)?.raw ?? null;
@@ -6435,28 +6641,37 @@ function TrainingLog() {
     if (!sessions) return {};
     const map = {};
     chartExercises.forEach((name) => {
-      let best = null; // { oneRM, reps, weight, date }
+      if (!isRepExercise(name)) return;
+      const exerciseSessions = sessions.filter((s)=>s.ex?.[name]);
+      let best = null;
       let priorBest = -1;
-      sessions.forEach((s) => {
-        if (!s.ex[name]) return;
+      exerciseSessions.forEach((s) => {
         const sessionBest = bestSet1RM(s, name);
-        if (sessionBest == null) return; // no bodyweight logged for this session — 1RM unknown, skip
-        if (!latest || s.id !== latest.id) { if (sessionBest.oneRM > priorBest) priorBest = sessionBest.oneRM; }
-        if (!best || sessionBest.oneRM > best.oneRM) best = { ...sessionBest, date: s.date };
+        if (!sessionBest) return;
+        if (!best || sessionBest.oneRM > best.oneRM) best = { ...sessionBest, date:s.date, sessionId:s.id };
       });
-      const latestBest = latest && latest.ex[name] ? bestSet1RM(latest, name) : null;
-      const latestVal = latestBest ? latestBest.oneRM : -1;
+      const latestForExercise = exerciseSessions.length ? exerciseSessions[exerciseSessions.length-1] : null;
+      exerciseSessions.forEach((s)=>{
+        if (!latestForExercise || s.id === latestForExercise.id) return;
+        const b=bestSet1RM(s,name);
+        if (b && b.oneRM>priorBest) priorBest=b.oneRM;
+      });
+      const latestBest = latestForExercise ? bestSet1RM(latestForExercise,name) : null;
+      const isFreshExercisePR = !!best && !!latestBest &&
+        latestBest.oneRM === best.oneRM &&
+        latestBest.oneRM > priorBest &&
+        dayDiff(latestForExercise.date, todayStr) <= 13;
       map[name] = {
-        best1RM: best ? best.oneRM : -1,
-        bestDate: best ? best.date : null,
-        bestReps: best ? best.reps : null,
-        bestWeight: best ? best.weight : null,
-        daysAgo: best ? dayDiff(best.date, todayStr) : null,
-        isNewPR: latest && !!best && latestVal > priorBest && latestVal === best.oneRM,
+        best1RM:best?best.oneRM:-1,
+        bestDate:best?best.date:null,
+        bestReps:best?best.reps:null,
+        bestWeight:best?best.weight:null,
+        daysAgo:best?dayDiff(best.date,todayStr):null,
+        isNewPR:isFreshExercisePR
       };
     });
     return map;
-  }, [sessions, latest, todayStr, chartExercises]);
+  }, [sessions, todayStr, chartExercises, exerciseTypeMap]);
 
   // Fresh (<=13d), aging (14-45d), or stale (46d+) — a quick-glance color for how long ago a
   // PR was actually set, so a shiny "all-time best" number doesn't hide that it's 4 months old.
@@ -7367,7 +7582,7 @@ function TrainingLog() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <Dumbbell size={13} color="#FF9F0A" />
-                    <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{twelveWeekTarget ? twelveWeekTarget.goalWeeks : 12}-Week Workout Target</span>
+                    <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{twelveWeekTarget ? twelveWeekTarget.goalWeeks : 12} Training Weeks Goal</span>
                   </div>
                   <Settings2 size={13} color="#48484A" style={{ cursor: "pointer" }} onClick={() => {
                     setTargetDraft({ startDate: (targetSettings && targetSettings.startDate) || (first ? first.date : ""), weeks: String((targetSettings && targetSettings.weeks) || 12) });
@@ -7395,7 +7610,7 @@ function TrainingLog() {
                   ) : (
                     <>
                       <div className="disp" style={{ fontSize: 32, fontWeight: 700, color: "#FFFFFF" }}>{twelveWeekTarget.daysRemaining} <span className="mono" style={{ fontSize: 11, color: "#636366" }}>days left</span></div>
-                      <div className="mono" style={{ fontSize: 11, color: "#636366", marginTop: 2 }}>{twelveWeekTarget.trainedWeeks}/{twelveWeekTarget.goalWeeks} weeks trained <span style={{ color: "#48484A" }}>· by {fmtDate(twelveWeekTarget.targetDate)}</span></div>
+                      <div className="mono" style={{ fontSize: 11, color: "#636366", marginTop: 2 }}>{twelveWeekTarget.trainedWeeks}/{twelveWeekTarget.goalWeeks} training weeks completed <span style={{ color: "#48484A" }}>· by {fmtDate(twelveWeekTarget.targetDate)}</span></div>
                       <div style={{ background: "#27272A", borderRadius: 4, height: 7, overflow: "hidden", marginTop: 6 }}><div style={{ width: Math.min(100, (twelveWeekTarget.trainedWeeks / twelveWeekTarget.goalWeeks) * 100) + "%", height: "100%", background: "#FF9F0A" }} /></div>
                     </>
                   )
@@ -7571,11 +7786,12 @@ function TrainingLog() {
               </div>
               <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Volume — latest</div>
-                <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#FFFFFF" }}>{volumeKpi ? Math.round(volumeKpi.latestVol).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#636366" }}> kg</span></div>
+                <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#FFFFFF" }}>{volumeKpi ? Math.round(volumeKpi.latestVol).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#636366" }}> kg workload</span></div>
+                {latest && sessionVolumeInfo(latest).excluded > 0 && <div style={{fontSize:9.5,color:"#FF9F0A",marginTop:2}}>Estimated · {sessionVolumeInfo(latest).excluded} exercise(s) excluded</div>}
               </div>
               <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Lifetime volume</div>
-                <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#FFFFFF" }}>{volumeKpi ? Math.round(volumeKpi.cumulative).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#636366" }}> kg</span></div>
+                <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#FFFFFF" }}>{volumeKpi ? Math.round(volumeKpi.cumulative).toLocaleString() : "—"}<span className="mono" style={{ fontSize: 10, color: "#636366" }}> kg workload</span></div>
               </div>
             </div>
 
@@ -7796,19 +8012,19 @@ function TrainingLog() {
                   return filter === "All"
                     ? `Overall ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend · 100 = typical`
                     : filter.startsWith("group:")
-                    ? `${filter.slice(6)} — ${agg.toLowerCase()} ${yLabel} per ${timeView === "week" ? "week" : "session"} (${chartExercises.filter((n) => muscleGroupMap[n] === filter.slice(6)).join(" + ")})`
+                    ? `${filter.slice(6)} ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend · rolling 6-wk baseline · 100 = typical`
                     : timeView === "week"
                     ? `${filter} — ${yLabel} per week`
                     : `${filter} — ${yLabel} per set across sessions`;
                 })()}
               </div>
-              {filter === "All" && (
+              {(filter === "All" || filter.startsWith("group:")) && (
                 <div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>
-                  One line across all exercises: each exercise is normalized to its own typical {metric === "1rm" ? "estimated strength" : metric} first, then equally averaged. The dashed line at <strong style={{color:"#8E8E93"}}>100</strong> is your typical level.
+                  Rolling 6-wk baseline · each exercise is compared with its own previous six weeks, excluding the current session, then equally combined. <strong style={{color:"#8E8E93"}}>100 = typical</strong>.
                 </div>
               )}
               {metric === "volume" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Volume = total reps × (bodyweight × exercise ratio + any added external weight) for that session. Ratios reflect how much of your bodyweight each exercise actually moves — see the exercise reference.</div>)}
-              {metric === "1rm" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Estimated 1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), taken from the single best set of the session — reflects intensity rather than total work done.</div>)}
+              {metric === "1rm" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Estimated 1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), taken from the single best eligible 1–12 rep set of the session — reflects estimated strength rather than total work done.</div>)}
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
                   <LineChart data={overallTrendView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
@@ -7824,8 +8040,9 @@ function TrainingLog() {
                     <Line type="monotone" dataKey="Overall" name="Overall" stroke="#FF9F0A" strokeWidth={3} dot={{ r: 3.5 }} connectNulls />
                   </LineChart>
                 ) : filter.startsWith("group:") ? (
-                  <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={10.5} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={10.5} tickFormatter={(v) => fmtNum(v, 2)} />
-                    <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 11 }} formatter={(v) => [`${fmtNum(v, 2)} ${yLabel}`, filter.slice(6)]} />
+                  <LineChart data={groupChartDataView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={10.5} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={10.5} tickFormatter={(v) => Math.round(v)} />
+                    <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 11 }} formatter={(v) => [`${fmtNum(v, 1)}`, filter.slice(6)]} />
+                    <ReferenceLine y={100} stroke="#8E8E93" strokeWidth={1.5} strokeDasharray="5 4" label={{ value: "Typical 100", position: "insideTopRight", fill: "#8E8E93", fontSize: 9 }} />
                     <Line type="monotone" dataKey="value" name={filter.slice(6)} stroke={GROUP_COLORS[filter.slice(6)]} strokeWidth={2.7} dot={{ r: 3.2 }} connectNulls />
                   </LineChart>
                 ) : timeView === "week" ? (
@@ -7867,7 +8084,7 @@ function TrainingLog() {
             )}
 
             <div style={{ background: "#000000", border: "1px dashed #27272A", borderRadius: 16, padding: "10px 14px", fontSize: 11, color: "#636366", marginBottom: 8 }}>
-              "First logged session" ({first ? fmtDateFull(first.date) : ""}) is just your earliest entry — used only as a fixed reference point for comparisons, not a training assumption.
+              Rolling performance scores use only the previous six calendar weeks before each point. Raw workload cards remain workload quantities, not performance grades.
             </div>
             </>
             )}
@@ -8018,13 +8235,13 @@ function TrainingLog() {
                   <X size={18} style={{ cursor: "pointer", color: "#8E8E93" }} onClick={cancelForm} />
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-                  <div><div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Date</div><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }} /></div>
+                  <div><div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Date</div><input type="date" max={todayStr} required value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }} /></div>
                   <div>
                     <div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Bodyweight (kg)</div>
-                    <input type="number" step="0.1" placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }} />
+                    <input type="number" step="0.1" min="1" required placeholder="e.g. 75.0" value={draft.bodyweight} onChange={(e) => setDraft({ ...draft, bodyweight: e.target.value })} className="mono" style={{ width: 90, background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }} />
                     {!String(draft.bodyweight ?? "").trim() && (
                       <div style={{ marginTop: 5, maxWidth: 190, color: "#FF9F0A", fontSize: 10.5, lineHeight: 1.3, fontWeight: 650 }}>
-                        ⚠ Add bodyweight for accurate volume. Bodyweight-based exercises cannot be calculated correctly without it.
+                        Required · bodyweight is needed to save a workout and keep workload/strength calculations consistent.
                       </div>
                     )}
                   </div>
@@ -8085,6 +8302,7 @@ function TrainingLog() {
                 </div>
                 <div style={{ marginBottom: 4, fontSize: 11, color: "#8E8E93" }}>Notes (optional — soreness, sleep, how it felt)</div>
                 <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} />
+                {formError && <div style={{marginTop:10,padding:"8px 10px",border:"1px solid #FF453A55",background:"#FF453A10",borderRadius:10,color:"#FF6961",fontSize:11.5,fontWeight:650,lineHeight:1.35}}>⚠ {formError}</div>}
                 <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: "#1C1C1E", color: "#101214", border: "none", borderRadius: 12, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
               </div>
             )}
@@ -8656,10 +8874,14 @@ function TrainingLog() {
                       <div key={e.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "5px 0", borderBottom: "1px solid #27272A" }}>
                         <span style={{ color: isTracked ? "#FFFFFF" : "#8E8E93" }}>
                           {e.name}
+                          {customExercises.some((c)=>c.name===e.name) && <span style={{marginLeft:5,fontSize:9,fontWeight:800,color:"#BF5AF2",border:"1px solid #BF5AF255",borderRadius:999,padding:"1px 5px"}}>Custom</span>}
+                          {e.archived && <span style={{marginLeft:5,fontSize:9,fontWeight:800,color:"#8E8E93",border:"1px solid #3A3A3C",borderRadius:999,padding:"1px 5px"}}>Archived</span>}
                           {e.target && <span style={{ color: "#48484A", fontSize: 10.5 }}> · {e.target}</span>}
                         </span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                          <span className="mono" style={{ color: "#636366" }}>{e.ratio === 0 ? "load only" : `${Math.round(e.ratio * 100)}% BW`}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                          <span className="mono" style={{ color: "#636366" }}>{e.type === "static" ? "static" : e.ratio === 0 ? "load only" : `${Math.round(e.ratio * 100)}% BW`}</span>
+                          {customExercises.some((c)=>c.name===e.name) && !e.archived && <button onClick={() => editCustomExercise(e)} className="mono" style={{fontSize:9.5,color:"#64D2FF",background:"transparent",border:"1px solid #64D2FF44",borderRadius:999,padding:"2px 6px",cursor:"pointer"}}>edit</button>}
+                          {customExercises.some((c)=>c.name===e.name) && !e.archived && <button onClick={() => archiveCustomExercise(e)} className="mono" style={{fontSize:9.5,color:"#FF9F0A",background:"transparent",border:"1px solid #FF9F0A44",borderRadius:999,padding:"2px 6px",cursor:"pointer"}}>{sessions.some((s)=>s.ex?.[e.name]) ? "archive" : "delete"}</button>}
                           {isTracked ? (
                             <button onClick={() => untrackExercise(e.name)} className="mono" style={{ fontSize: 10, fontWeight: 700, color: "#FF9F0A", background: "transparent", border: "1px solid #FF9F0A55", borderRadius: 999, padding: "2px 8px", cursor: "pointer" }}>✕ tracked</button>
                           ) : (
@@ -8711,8 +8933,8 @@ function TrainingLog() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setShowAddExercise(false)}>
           <div style={{ background: "#1C1C1E", border: "1px solid #2C2C2E", borderRadius: 20, boxShadow: "none", padding: 20, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <span style={{ fontWeight: 700, fontSize: 15, color: "#FFFFFF" }}>Add an exercise</span>
-              <X size={18} style={{ cursor: "pointer", color: "#8E8E93" }} onClick={() => setShowAddExercise(false)} />
+              <span style={{ fontWeight: 700, fontSize: 15, color: "#FFFFFF" }}>{editingCustomName ? "Edit custom exercise" : "Add an exercise"}</span>
+              <X size={18} style={{ cursor: "pointer", color: "#8E8E93" }} onClick={() => { setShowAddExercise(false); setEditingCustomName(null); setCustomExerciseError(""); }} />
             </div>
             <div style={{ fontSize: 11.5, color: "#636366", marginBottom: 14, lineHeight: 1.5 }}>
               For anything not in the built-in reference library. It's added to the entry form immediately and remembered for future paste-parsing.
@@ -8735,11 +8957,19 @@ function TrainingLog() {
                 </div>
               </div>
               <div>
+                <div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Exercise type</div>
+                <select value={addExDraft.type || "reps"} onChange={(e) => setAddExDraft({ ...addExDraft, type: e.target.value })} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13 }}>
+                  <option value="reps">Reps / sets</option>
+                  <option value="static">Static / duration (log only for now)</option>
+                </select>
+              </div>
+              <div>
                 <div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Target muscle(s) — optional</div>
                 <input type="text" placeholder="e.g. Lats, Biceps" value={addExDraft.target} onChange={(e) => setAddExDraft({ ...addExDraft, target: e.target.value })} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} />
               </div>
-              <div style={{ fontSize: 10.5, color: "#48484A" }}>Ratio = fraction of bodyweight lifted per rep. Use 0 for a pure-load exercise (barbell/machine).</div>
-              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "#1C1C1E", color: "#101214", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Add exercise</button>
+              <div style={{ fontSize: 10.5, color: "#48484A" }}>Ratio = fraction of bodyweight lifted per rep. Use 0 for a pure-load exercise (barbell/machine). Static exercises are preserved in the log but excluded from rep/volume/e1RM analytics until duration is supported.</div>
+              {customExerciseError && <div style={{fontSize:10.5,color:"#FF6961",padding:"7px 8px",border:"1px solid #FF453A55",borderRadius:9}}>{customExerciseError}</div>}
+              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "#FF9F0A", color: "#000000", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{editingCustomName ? "Save custom exercise" : "Add exercise"}</button>
             </div>
           </div>
         </div>
@@ -8769,6 +8999,8 @@ function TrainingLog() {
                 const volBRaw = b.ex[name] ? exerciseVolume(b, name) : null;
                 const volA = volARaw != null ? Math.round(volARaw) : null;
                 const volB = volBRaw != null ? Math.round(volBRaw) : null;
+                const rmA = a.ex[name] ? exercise1RM(a, name) : null;
+                const rmB = b.ex[name] ? exercise1RM(b, name) : null;
                 return (
                   <div key={name} style={{ padding: "10px 0", borderBottom: "1px solid #27272A" }}>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: colorsMap[name] || "#D1D1D6", marginBottom: 6 }}>{name}</div>
@@ -8777,7 +9009,8 @@ function TrainingLog() {
                       <span className="mono">{repsA != null && repsB != null ? ((repsB - repsA >= 0 ? "+" : "") + (repsB - repsA) + " reps") : ""}</span>
                       <span>{b.ex[name] ? b.ex[name].join("-") : "—"}</span>
                     </div>
-                    {volA != null && volB != null && (<div style={{ fontSize: 11, color: "#636366", textAlign: "right" }}>{volA}kg → {volB}kg ({(volB - volA >= 0 ? "+" : "") + (volB - volA)}kg)</div>)}
+                    {rmA != null && rmB != null && (<div style={{ fontSize: 11, color: "#64D2FF", textAlign: "right", marginBottom: 2 }}>Est. strength: {Math.round(rmA)}kg → {Math.round(rmB)}kg ({rmB-rmA>=0?"+":""}{fmtNum(rmB-rmA,1)}kg)</div>)}
+                    {volA != null && volB != null && (<div style={{ fontSize: 11, color: "#636366", textAlign: "right" }}>Workload: {volA}kg → {volB}kg ({(volB - volA >= 0 ? "+" : "") + (volB - volA)}kg)</div>)}
                   </div>
                 );
               })}
