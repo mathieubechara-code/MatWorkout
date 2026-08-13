@@ -464,7 +464,7 @@ const migrate = (loaded) => {
 };
 
 const TABS = [
-  { id: "dashboard", label: "Today", Icon: LayoutGrid },
+  { id: "dashboard", label: "Status", Icon: LayoutGrid },
   { id: "workout", label: "Workout", Icon: TrendingUp },
   { id: "swim", label: "Swim", Icon: Waves },
   { id: "history", label: "Training Log", Icon: Dumbbell },
@@ -2534,7 +2534,7 @@ function buildDashboardStrokeAwareInsights({ workoutSessions, allSwimSessions, t
 }
 
 
-function SwimmingTab({ isMobile, onExit }) {
+function SwimmingTab({ isMobile, onExit, onOpenLog }) {
   const [sessions, setSessions] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [strokeFilter, setStrokeFilter] = useState("all");
@@ -4296,25 +4296,12 @@ function SwimmingTab({ isMobile, onExit }) {
           {/* Swim section tabs — Dashboard / Trend / Compare / Radar. Segmented control styled
               like the floating filter bars elsewhere in this tab (solid warm-dark background,
               pill buttons), sticky so it stays reachable while scrolling a long tab's content.
-              top is tuned near 0 now that the OUTER nav (Today/Workout/Swim/History & Log) is
-              no longer sticky itself — this inner switcher is now the only thing floating above
-              this content, so it no longer needs to reserve space for the outer nav above it
+              the main Status / Workout / Swim / Training Log bar is now sticky, so this inner
+              sport-specific switcher sits directly beneath it with an explicit offset
               (item 5). Dashboard holds everything that isn't Trend or Compare (PRs, streak,
               distance breakdown, insights) — Radar keeps its own tab as before. */}
-          <div className="swim-subnav swim-primary-nav" style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 3, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 5, marginBottom: 14, boxShadow: "none" }}>
-            <button
-              className="app-nav-pill app-nav-back"
-              onClick={() => onExit && onExit()}
-              title="Back to Today"
-              style={{
-                flex: "0 0 auto", display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
-                cursor: "pointer", background: "transparent", border: "none", borderRadius: 9,
-                color: "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 11,
-                padding: isMobile ? "7px 5px" : "8px 7px", whiteSpace: "nowrap"
-              }}
-            >
-              ‹ Today
-            </button>
+          <div className="swim-subnav swim-primary-nav" style={{ position: "sticky", top: isMobile ? 54 : 58, zIndex: 31, display: "flex", gap: 3, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 5, marginBottom: 14, boxShadow: "none" }}>
+            <button className="app-nav-pill app-nav-back" onClick={()=>onOpenLog&&onOpenLog()} title="Open swim training log" style={{flex:"0 0 auto",display:"flex",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer",background:"transparent",border:"1px solid #3A3A3C",borderRadius:9,color:"#D1D1D6",fontWeight:700,fontSize:isMobile?9.5:10.5,padding:isMobile?"7px 6px":"8px 8px",whiteSpace:"nowrap"}}><Waves size={11}/> Log</button>
             {[["dashboard", "Dashboard", LayoutGrid], ["trends", "Trend", TrendingUp], ["compare", "Compare", GitCompare], ["radar", "Radar", RadarIcon]].map(([v, l, Ic]) => {
               const selected = swimSection === v;
               return (
@@ -5011,18 +4998,13 @@ function TrainingLog() {
   }, [workoutSection]);
 
   const enterMainTab = (id) => {
-    if (id === "workout") {
-      setWorkoutSection("dashboard");
-      try { localStorage.setItem("workout-section-v1", "dashboard"); } catch {}
-    }
-    if (id === "swim") {
-      // SwimmingTab remounts when entering Swim, so resetting its stored subsection here
-      // gives a fresh Dashboard entry. A browser refresh does not call this function and
-      // therefore still restores the user's current Swim subsection.
-      try { localStorage.setItem("swim-section-v1", "dashboard"); } catch {}
-    }
+    if (id === "workout") { setWorkoutSection("dashboard"); try { localStorage.setItem("workout-section-v1", "dashboard"); } catch {} }
+    if (id === "swim") { try { localStorage.setItem("swim-section-v1", "dashboard"); } catch {} }
+    if (id === "history") setViewMode(tab === "workout" ? "workout" : tab === "swim" ? "swim" : "all");
+    if (id === "dashboard") setViewMode("all");
     setTab(id);
   };
+  const openTrainingLog = (mode = "all") => { setViewMode(mode); setTab("history"); };
 
   const [filter, setFilter] = useState("All");
   const [metric, setMetric] = useState("reps");
@@ -5047,6 +5029,9 @@ function TrainingLog() {
   const [pasteText, setPasteText] = useState("");
   const [parseNote, setParseNote] = useState("");
   const [unmatchedNames, setUnmatchedNames] = useState([]);
+  const [parsedReviewActive, setParsedReviewActive] = useState(false);
+  const [parseResolved, setParseResolved] = useState([]);
+  const [pendingUnmatchedSource, setPendingUnmatchedSource] = useState(null);
   const [selectedCompare, setSelectedCompare] = useState([]);
   const [showCompare, setShowCompare] = useState(false);
   const [importMsg, setImportMsg] = useState("");
@@ -5059,6 +5044,9 @@ function TrainingLog() {
   const [hiddenStatsExercises, setHiddenStatsExercises] = useState(() => new Set());
   const [workoutRadarGroup, setWorkoutRadarGroup] = useState("All");
   const [showWorkoutRadarMeaning, setShowWorkoutRadarMeaning] = useState(false);
+  const [showWorkoutPrMeaning, setShowWorkoutPrMeaning] = useState(false);
+  const [showGroupIncludes, setShowGroupIncludes] = useState(false);
+  const [showWorkoutStatsMeaning, setShowWorkoutStatsMeaning] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   // Which exercises show up in the PR card. null = show all (default); array = only these.
   const [prSelection, setPrSelection] = useState(null);
@@ -5085,8 +5073,8 @@ function TrainingLog() {
   // what the Import button expects (JSON vs. .FIT). Logging itself lives here now; the
   // Swimming tab is dashboard-only and simply re-reads SWIM_KEY whenever it mounts.
   const [viewMode, setViewMode] = useState(() => {
-    try { return localStorage.getItem("athlete-mode-v1") === "swim" ? "swim" : "workout"; }
-    catch { return "workout"; }
+    try { const mode=localStorage.getItem("athlete-mode-v1"); return mode==="swim"?"swim":mode==="workout"?"workout":"all"; }
+    catch { return "all"; }
   }); // "workout" | "swim" | "all"
   useEffect(() => {
     if (!athleteMode) return;
@@ -5724,6 +5712,12 @@ function TrainingLog() {
 
     await persistCustom(nextCustom);
     if (!trackedExercises.includes(name)) await persistTracked([...trackedExercises.filter((n) => n !== editingCustomName), name]);
+    if (pendingUnmatchedSource) {
+      setUnmatchedNames((xs)=>xs.filter((x)=>x!==pendingUnmatchedSource));
+      setParseResolved((xs)=>[...xs.filter((x)=>x.source!==pendingUnmatchedSource),{source:pendingUnmatchedSource,name,status:"Added"}]);
+      setPendingUnmatchedSource(null);
+      setParsedReviewActive(true);
+    }
     setDraft((d) => {
       const ex = { ...d.ex }, load = { ...d.load };
       if (editingCustomName && editingCustomName !== name) { delete ex[editingCustomName]; delete load[editingCustomName]; }
@@ -5765,6 +5759,7 @@ function TrainingLog() {
   // Opens the "Add exercise" modal prefilled with a name the paste-parser couldn't match at
   // all, so fixing an unmatched entry is one click instead of retyping it.
   const openAddExerciseFor = (name) => {
+    setPendingUnmatchedSource(name);
     setAddExDraft({ name, group: "Pull", ratio: "1.0", target: "", type: "reps" });
     setEditingCustomName(null);
     setCustomExerciseError("");
@@ -5780,6 +5775,11 @@ function TrainingLog() {
   // untouched (history, charts, and PRs are driven live off actual session data — see
   // `chartExercises` — so they're unaffected either way), but it stops showing up as a
   // field to log going forward, in both the entry form and the library "tracked" list.
+  const removeDraftExercise = (name) => {
+    setDraft((d)=>{const ex={...d.ex},load={...d.load};delete ex[name];delete load[name];return {...d,ex,load};});
+    setParseResolved((xs)=>xs.filter((x)=>x.name!==name));
+  };
+
   const untrackExercise = async (name) => {
     await persistTracked(trackedExercises.filter((n) => n !== name));
     setDraft((d) => {
@@ -5847,38 +5847,34 @@ function TrainingLog() {
     setShowForm(true);
   };
 
-  const cancelForm = () => { setFormError(""); setShowForm(false); setEditingId(null); setDraft(emptyDraft(trackedExercises)); setPasteText(""); setParseNote(""); };
+  const cancelForm = () => { setFormError(""); setShowForm(false); setEditingId(null); setDraft(emptyDraft(trackedExercises)); setPasteText(""); setParseNote(""); setUnmatchedNames([]); setParsedReviewActive(false); setParseResolved([]); setPendingUnmatchedSource(null); };
 
   const handleParseFill = async () => {
     const { results, matchedEntries, unmatched, parseErrors } = parseFreeform(pasteText, activeLibrary);
-    const matchedNames = Object.keys(results);
-    if (!matchedNames.length && !matchedEntries.length && !unmatched.length && !parseErrors.length) {
-      setParseNote('Couldn\'t parse anything — check the format (e.g. "12 rep x 3 sets body weight").');
-      setUnmatchedNames([]);
-      return;
+    const matchedNames=Object.keys(results);
+    if(!matchedNames.length&&!matchedEntries.length&&!unmatched.length&&!parseErrors.length){
+      setParseNote("Couldn't parse anything — check the format (e.g. \"12 rep x 3 sets body weight\").");
+      setUnmatchedNames([]);setParseResolved([]);return;
     }
-    // Any recognized exercise — from the full library, not just your prior tracked fields —
-    // is added to the tracked list automatically so it gets a real field going forward.
-    const newlyTracked = matchedEntries.map((e) => e.name).filter((name) => !trackedExercises.includes(name));
-    if (newlyTracked.length) await persistTracked([...trackedExercises, ...newlyTracked]);
-    setDraft((d) => {
-      const nextEx = { ...d.ex };
-      const nextLoad = { ...d.load };
-      matchedNames.forEach((name) => {
-        nextEx[name] = results[name].reps.join(",");
-        if (results[name].weights.some((w) => w > 0)) nextLoad[name] = results[name].weights.join(",");
+    const recognizedNames=Array.from(new Set([...matchedNames,...matchedEntries.map((e)=>e.name)]));
+    const newlyTracked=recognizedNames.filter((name)=>!trackedExercises.includes(name));
+    if(newlyTracked.length)await persistTracked([...trackedExercises,...newlyTracked]);
+
+    setDraft((d)=>{
+      const nextEx={},nextLoad={};
+      recognizedNames.forEach((name)=>{
+        nextEx[name]=results[name]?results[name].reps.join(","):"";
+        nextLoad[name]=results[name]&&results[name].weights.some((w)=>w>0)?results[name].weights.join(","):"";
       });
-      matchedEntries.forEach((e) => {
-        if (nextEx[e.name] === undefined) nextEx[e.name] = "";
-        if (nextLoad[e.name] === undefined) nextLoad[e.name] = "";
-      });
-      return { ...d, ex: nextEx, load: nextLoad };
+      return {...d,ex:nextEx,load:nextLoad};
     });
-    const notes = [];
-    if (newlyTracked.length) notes.push(`Now tracking: ${newlyTracked.join(", ")}.`);
-    if (unmatched.length) notes.push(`Couldn't match at all: ${unmatched.join(", ")} — tap "Add" below to fill in muscle group & ratio, or enter it manually.`);
-    if (parseErrors.length) notes.push(`Check: ${parseErrors.join(" ")}`);
-    setParseNote(notes.join(" ") || "Filled in below — review before saving.");
+    setParsedReviewActive(true);
+    setParseResolved(recognizedNames.map((name)=>({source:name,name,status:"Matched"})));
+    const notes=[];
+    if(recognizedNames.length)notes.push(`Parsed ${recognizedNames.length} exercise${recognizedNames.length===1?"":"s"} for this session.`);
+    if(unmatched.length)notes.push(`Needs review: ${unmatched.join(", ")}.`);
+    if(parseErrors.length)notes.push(`Check: ${parseErrors.join(" ")}`);
+    setParseNote(notes.join(" ")||"Review the parsed session below before saving.");
     setUnmatchedNames(unmatched);
     setPasteText("");
   };
@@ -6036,23 +6032,6 @@ function TrainingLog() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `training-log-${suffix}-` + new Date().toISOString().slice(0, 10) + ".json";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  };
-
-  const exportCSV = () => {
-    const rows = [["date", "label", "bodyweight_kg", "exercise", "reps_per_set", "added_kg_per_set", "total_reps", "notes"]];
-    sessions.forEach((s) => {
-      Object.keys(s.ex).forEach((name) => {
-        if (!s.ex[name]) return;
-        const weights = (s.load || {})[name] || [];
-        rows.push([s.date, s.label, s.bodyweight ?? "", name, s.ex[name].join("-"), weights.length ? weights.join("-") : 0, total(s.ex[name]), s.notes || ""]);
-      });
-    });
-    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "training-log-" + new Date().toISOString().slice(0, 10) + ".csv";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
@@ -6453,6 +6432,23 @@ function TrainingLog() {
   const overallWeekTrend = useMemo(() => weeklyAverageScores(overallDayTrend, "Overall"), [overallDayTrend]);
   const groupNormalizedWeekTrend = useMemo(() => weeklyAverageScores(groupNormalizedDayTrend, "value"), [groupNormalizedDayTrend]);
 
+  const workoutTrendTag = useMemo(() => {
+    let scores=[];
+    if(filter==="All") scores=overallDayTrend.map((r)=>r.Overall);
+    else if(filter.startsWith("group:")) scores=groupNormalizedDayTrend.map((r)=>r.value);
+    else scores=rangedSessions.filter((s)=>s.ex?.[filter]).map((s)=>rollingExerciseScore(s,filter,metric)).filter(Number.isFinite);
+    scores=scores.filter(Number.isFinite);
+    if(scores.length<4) return {label:"Not enough history",tone:"#636366",detail:"Need at least 4 comparable points."};
+    const n=Math.min(3,Math.floor(scores.length/2)),avg=(a)=>a.reduce((x,y)=>x+y,0)/a.length;
+    const previous=avg(scores.slice(-(n*2),-n)),recent=avg(scores.slice(-n));
+    if(!(previous>0)) return {label:"Not enough history",tone:"#636366",detail:"No usable prior comparison window."};
+    const change=(recent-previous)/previous,threshold=metric==="1rm"?0.02:0.035,pct=Math.abs(change*100).toFixed(1);
+    if(Math.abs(change)<threshold) return {label:"Stable",tone:"#8E8E93",detail:`Recent ${n} vs previous ${n}: ${pct}% change`};
+    if(metric==="1rm") return change>0?{label:"Improving",tone:"#30D158",detail:`Recent strength window +${pct}%`}:{label:"Softening",tone:"#FF9F0A",detail:`Recent strength window −${pct}%`};
+    if(metric==="volume") return change>0?{label:"Building workload",tone:"#30D158",detail:`Recent workload window +${pct}%`}:{label:"Lower workload",tone:"#FF9F0A",detail:`Recent workload window −${pct}%`};
+    return change>0?{label:"Building reps",tone:"#30D158",detail:`Recent reps window +${pct}%`}:{label:"Fewer reps",tone:"#FF9F0A",detail:`Recent reps window −${pct}%`};
+  },[filter,metric,rangedSessions,overallDayTrend,groupNormalizedDayTrend,sessions]);
+
 
   const weeklyGroupChartData = useMemo(() => {
     if (!filter.startsWith("group:")) return [];
@@ -6520,6 +6516,7 @@ function TrainingLog() {
   const overallTrendView = timeView === "week" ? overallWeekTrend : overallDayTrend;
   const groupPerformanceView = timeView === "week" ? groupNormalizedWeekTrend : groupNormalizedDayTrend;
   const groupChartDataView = groupPerformanceView;
+  const workoutStatsMeaning=(()=>{const scope=filter==="All"?"Overall combines comparable exercises equally after each is normalized to its own recent history.":filter.startsWith("group:")?`${filter.slice(6)} combines comparable exercises in that training group equally after normalization.`:`${filter} shows that exercise directly; Day is per session and Week summarizes the week.`;const metricText=metric==="1rm"?"1RM is estimated strength from the best eligible 1–12 rep set. In All/group views, 100 is the previous 6-week strength average.":metric==="volume"?"Volume is workload: reps × effective load. Higher means more work, not automatically better. In All/group views, 100 is the previous 6-week workload average.":"Reps tracks completed repetitions. More reps can mean more work, not automatically better strength. In All/group views, 100 is the previous 6-week reps average.";return `${scope} ${metricText} The current session is excluded from its own baseline.`;})();
   const bodyweightDataView = timeView === "week" ? weeklyBodyweightData : bodyweightData;
   const loadStepDataView = timeView === "week" ? weeklyLoadStepData : loadStepData;
 
@@ -7012,30 +7009,48 @@ function TrainingLog() {
     return { targetDate: targetISO, daysRemaining, trainedWeeks: Math.min(goalWeeks, trainedWeeks), goalWeeks, reached: trainedWeeks >= goalWeeks };
   }, [swimSessions, todayStr, swimTargetSettingsView]);
 
-  // A plain-language, rule-based read of "how's it going" — not an AI summary, just the
-  // consistency numbers put into a sentence so the Dashboard has something to say at a glance.
-  const statusBlurb = useMemo(() => {
-    const bits = [];
-    if (combinedConsistency) {
-      bits.push(`Trained ${combinedConsistency.trainedLast7}/7 days this past week${combinedConsistency.dayStreak >= 2 ? `, on a ${combinedConsistency.dayStreak}-day streak` : ""}.`);
+  const workoutStatusProfile = useMemo(() => {
+    if(!latest)return null;
+    const names=Object.keys(latest.ex||{}).filter((n)=>isRepExercise(n));
+    return {strength:normalizedSessionScore(latest,names,"1rm")?.score??null,workload:normalizedSessionScore(latest,names,"volume")?.score??null,date:latest.date};
+  },[latest,sessions,exerciseTypeMap,bwMap]);
+
+  const swimStatusProfile = useMemo(() => {
+    const valid=[...(swimSessions||[])].filter((s)=>s?.date&&s.pace100Overall!=null&&Number.isFinite(s.pace100Overall)&&!s.isCssTest&&!s.sourceDistanceCorrection&&s.poolLength!=null).sort((x,y)=>x.date.localeCompare(y.date));
+    if(!valid.length)return null;
+    const cur=valid[valid.length-1],d=new Date(`${cur.date}T00:00:00`);d.setDate(d.getDate()-42);const cut=toISODate(d);
+    const prior=valid.filter((s)=>s.date>=cut&&s.date<cur.date&&poolLengthsMatch(s.poolLength,cur.poolLength)).map((s)=>s.pace100Overall);
+    if(prior.length<2)return {date:cur.date,paceScore:null};
+    const base=prior.reduce((x,y)=>x+y,0)/prior.length;
+    return {date:cur.date,paceScore:base>0?100*base/cur.pace100Overall:null};
+  },[swimSessions]);
+
+  const trainingStatus = useMemo(() => {
+    if(visibleSessionCount===0)return {headline:"Start building your training profile",story:athleteMode==="swim"?"Upload a swim to establish a baseline.":athleteMode==="workout"?"Log a workout to establish a baseline.":"Log a workout or upload a swim to establish your baselines.",tone:"#64D2FF",signals:[]};
+    const s=athleteMode==="swim"?null:workoutStatusProfile?.strength;
+    const w=athleteMode==="swim"?null:workoutStatusProfile?.workload;
+    const p=athleteMode==="workout"?null:swimStatusProfile?.paceScore;
+    const signals=[];
+    if(athleteMode!=="swim"&&s!=null)signals.push({label:"Strength",value:s>=105?"Above":s<=95?"Below":"Typical",tone:s>=105?"#30D158":s<=95?"#FF9F0A":"#8E8E93"});
+    if(athleteMode!=="swim"&&w!=null)signals.push({label:"Workload",value:w>=110?"High":w<=90?"Light":"Typical",tone:w>=110?"#30D158":w<=90?"#FF9F0A":"#8E8E93"});
+    if(athleteMode!=="workout"&&p!=null)signals.push({label:"Swim pace",value:p>=103?"Faster":p<=97?"Slower":"Typical",tone:p>=103?"#30D158":p<=97?"#FF9F0A":"#8E8E93"});
+    if(combinedConsistency)signals.push({label:"7-day activity",value:`${combinedConsistency.trainedLast7}/7`,tone:"#64D2FF"});
+    let headline="Training is broadly stable.",story="Recent signals are close to your own baselines.",tone="#64D2FF";
+    if(s!=null&&s>=105&&w!=null&&w<110){headline="Strength is moving well.";story="Your latest workout strength was above its recent 6-week norm without an unusually high workload.";tone="#30D158";}
+    else if(s!=null&&s>=105&&w!=null&&w>=110){headline="A strong, high-workload phase.";story="Strength and workload are both above recent norms. Workload is context, not a performance grade.";tone="#30D158";}
+    else if(s!=null&&s<=95&&w!=null&&w<=90){headline="A lighter workout patch.";story="Latest strength and workload were both below recent norms. One session is context; watch whether the next sessions confirm it.";tone="#FF9F0A";}
+    else if(s!=null&&s>=97&&s<=103&&w!=null&&w<=90){headline="Strength held with less work.";story="Estimated strength stayed near normal while workload was lighter than your recent baseline.";tone="#64D2FF";}
+    else if(p!=null&&p>=103){headline=athleteMode==="swim"?"Swimming is moving faster.":"Swim pace is a positive signal.";story="Your latest regular same-pool swim pace was faster than the previous 6-week average.";tone="#30D158";}
+    else if(p!=null&&p<=97){headline=athleteMode==="swim"?"A slower swim patch.":"Swim pace is currently softer.";story="Your latest regular same-pool swim pace was slower than the previous 6-week average. One swim is context, not a trend.";tone="#FF9F0A";}
+    const gaps=[];if(athleteMode!=="swim"&&consistency?.daysSinceLast>5)gaps.push(`last workout ${consistency.daysSinceLast}d ago`);if(athleteMode!=="workout"&&swimConsistencyMini?.daysSinceLast>7)gaps.push(`last swim ${swimConsistencyMini.daysSinceLast}d ago`);
+    if(athleteMode==="hybrid"&&p!=null&&!headline.toLowerCase().includes("swim")){
+      story+=p>=103?" Swim pace is also faster than its same-pool 6-week norm.":p<=97?" Swim pace is also slower than its same-pool 6-week norm.":" Swim pace is close to its same-pool 6-week norm.";
     }
-    if (athleteMode !== "swim" && consistency) {
-      bits.push(consistency.daysSinceLast <= 3
-        ? `Workouts on pace — last session ${consistency.daysSinceLast === 0 ? "today" : consistency.daysSinceLast + "d ago"}.`
-        : `Workouts have slipped — last session was ${consistency.daysSinceLast}d ago.`);
-    }
-    if (athleteMode !== "workout" && swimConsistencyMini) {
-      bits.push(swimConsistencyMini.daysSinceLast <= 4
-        ? `Swimming steady — last swim ${swimConsistencyMini.daysSinceLast === 0 ? "today" : swimConsistencyMini.daysSinceLast + "d ago"}.`
-        : `Swimming's gone quiet — last swim was ${swimConsistencyMini.daysSinceLast}d ago.`);
-    }
-    if (visibleSessionCount === 0) {
-      if (athleteMode === "swim") return "Upload a swim to start building your swim profile.";
-      if (athleteMode === "workout") return "Log a workout to start building your training profile.";
-      return "Log a workout or upload a swim to see your status here.";
-    }
-    return bits.join(" ");
-  }, [combinedConsistency, consistency, swimConsistencyMini, athleteMode, visibleSessionCount]);
+    if(gaps.length)story+=` Activity gap: ${gaps.join(", ")}.`;
+    return {headline,story,tone,signals};
+  },[visibleSessionCount,athleteMode,workoutStatusProfile,swimStatusProfile,combinedConsistency,consistency,swimConsistencyMini]);
+
+  const statusBlurb=trainingStatus.story;
 
   const combinedWeightTimeline = useMemo(() => {
     const byDate = {};
@@ -7487,9 +7502,7 @@ function TrainingLog() {
           Trends/Compare/Web chart switcher is the one that floats while scrolling now; having
           both float at once meant this bar's sticky region could sit on top of and hide the
           inner switcher depending on scroll position, which is what item 5 fixes. */}
-      {tab !== "swim" && tab !== "workout" && (
-        <>
-      <div style={{ background: FLOATING_BAR_BG_SOFT, borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
+      <div style={{ position:"sticky", top:0, zIndex:40, background: FLOATING_BAR_BG_SOFT, borderBottom: `1px solid ${FLOATING_BAR_BORDER}` }}>
         <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "8px 12px" : "10px 16px" }}>
           <div style={{ display: "flex", gap: 4, overflowX: "auto", background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 18, padding: 4 }}>
             {visibleTabs.map(({ id, label, Icon }) => (
@@ -7507,16 +7520,15 @@ function TrainingLog() {
         </div>
       </div>
 
-        </>
-      )}
-
       <div style={{ maxWidth: 1060, margin: "0 auto", padding: isMobile ? "14px 12px" : "18px 16px" }}>
 
         {tab === "dashboard" && (
           <>
-            <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Status</div>
-              <div style={{ fontSize: 13.5, color: "#FFFFFF", lineHeight: 1.5 }}>{statusBlurb}</div>
+            <div style={{background:"#1C1C1E",border:`1px solid ${trainingStatus.tone}44`,borderLeft:`3px solid ${trainingStatus.tone}`,borderRadius:20,padding:16,marginBottom:12}}>
+              <div style={{fontSize:10.5,color:"#8E8E93",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:5}}>Training Status</div>
+              <div style={{fontSize:16,fontWeight:850,color:trainingStatus.tone,marginBottom:4}}>{trainingStatus.headline}</div>
+              <div style={{fontSize:12.5,color:"#D1D1D6",lineHeight:1.45}}>{statusBlurb}</div>
+              {trainingStatus.signals.length>0&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:9}}>{trainingStatus.signals.map((x)=><span key={x.label} style={{fontSize:9.5,fontWeight:750,color:x.tone,border:`1px solid ${x.tone}44`,borderRadius:999,padding:"3px 7px"}}>{x.label}: {x.value}</span>)}</div>}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: athleteMode === "hybrid" || !athleteMode ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 12 }}>
@@ -7829,13 +7841,8 @@ function TrainingLog() {
 
         {tab === "workout" && (
           <>
-            <div className="swim-subnav workout-subnav" style={{ position: "sticky", top: isMobile ? 0 : 2, zIndex: 31, display: "flex", gap: 3, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 5, marginBottom: 14 }}>
-              <button className="app-nav-pill app-nav-back" onClick={() => setTab("dashboard")} title="Back to Today" style={{
-                flex: "0 0 auto", display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
-                cursor: "pointer", background: "transparent", border: "none", borderRadius: 9,
-                color: "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 11,
-                padding: isMobile ? "7px 5px" : "8px 7px", whiteSpace: "nowrap"
-              }}>‹ Today</button>
+            <div className="swim-subnav workout-subnav" style={{ position: "sticky", top: isMobile ? 54 : 58, zIndex: 31, display: "flex", gap: 3, background: FLOATING_BAR_BG, border: `1px solid ${FLOATING_BAR_BORDER}`, borderRadius: 16, padding: 5, marginBottom: 14 }}>
+              <button className="app-nav-pill app-nav-back" onClick={()=>openTrainingLog("workout")} title="Open workout training log" style={{flex:"0 0 auto",display:"flex",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer",background:"transparent",border:"1px solid #3A3A3C",borderRadius:9,color:"#D1D1D6",fontWeight:700,fontSize:isMobile?9.5:10.5,padding:isMobile?"7px 6px":"8px 8px",whiteSpace:"nowrap"}}><Dumbbell size={11}/> Log</button>
               {[["dashboard", "Dashboard", LayoutGrid], ["stats", "Stats", TrendingUp], ["radar", "Radar", RadarIcon]].map(([v,l,Ic]) => {
                 const selected = workoutSection === v;
                 return <button key={v} className="app-nav-pill" onClick={() => setWorkoutSection(v)} style={{
@@ -7856,7 +7863,7 @@ function TrainingLog() {
                   <Award size={14} color="#FF9F0A" />
                   <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>PRs (estimated 1RM, eligible 1–12 rep sets)</span>
                 </div>
-                <Settings2 size={14} onClick={() => setShowPrPicker(true)} title="Choose which exercises to show" style={{ cursor: "pointer", color: "#48484A", flexShrink: 0 }} />
+                <div style={{display:"flex",alignItems:"center",gap:6}}><button className="meaning-btn" onClick={()=>setShowWorkoutPrMeaning(v=>!v)} style={{cursor:"pointer",background:showWorkoutPrMeaning?"#64D2FF18":"transparent",border:"1px solid #64D2FF66",borderRadius:999,padding:"3px 7px",color:"#64D2FF",fontSize:9.5,fontWeight:800}}>Meaning</button><Settings2 size={14} onClick={()=>setShowPrPicker(true)} title="Choose which exercises to show" style={{cursor:"pointer",color:"#48484A",flexShrink:0}}/></div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 10 }}>
                 {chartExercises.filter((name) => prSelection == null || prSelection.includes(name)).map((name) => {
@@ -7880,7 +7887,7 @@ function TrainingLog() {
                   <div style={{ fontSize: 11.5, color: "#48484A", fontStyle: "italic" }}>No exercises selected — tap <Settings2 size={10} style={{ verticalAlign: "-1px" }} /> above to choose some.</div>
                 )}
               </div>
-              <div style={{ fontSize: 10, color: "#48484A", marginTop: 8 }} className="mono">1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), best set of each session</div>
+              {showWorkoutPrMeaning&&<div style={{fontSize:10.5,color:"#8E8E93",marginTop:9,padding:"8px 9px",border:"1px solid #2C2C2E",borderRadius:10,lineHeight:1.4}}><strong style={{color:"#D1D1D6"}}>Estimated 1RM</strong> uses your best eligible 1–12 rep set with the Epley formula. Effective load includes the exercise bodyweight ratio plus added weight. It is for comparing your own strength over time, not a measured true 1RM.</div>}
             </div>
 
             {/* Streak + Volume — small, secondary to PR */}
@@ -7905,10 +7912,8 @@ function TrainingLog() {
             </div>
 
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 4 }}>Volume by training group — last 6 weeks ({latest ? fmtDate(latest.date) : ""})</div>
-              <div style={{ fontSize: 11, color: "#636366", marginBottom: 12 }}>
-                {GROUPS.map((g) => `${g}: ${chartExercises.filter((n) => muscleGroupMap[n] === g && isRepExercise(n)).join(" + ") || "—"}`).join(" · ")}
-              </div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:showGroupIncludes?8:12}}><div style={{fontSize:13,fontWeight:600,color:"#D1D1D6"}}>Volume by training group — last 6 weeks ({latest ? fmtDate(latest.date) : ""})</div><button className="meaning-btn" onClick={()=>setShowGroupIncludes(v=>!v)} style={{cursor:"pointer",background:showGroupIncludes?"#64D2FF18":"transparent",border:"1px solid #64D2FF66",borderRadius:999,padding:"3px 7px",color:"#64D2FF",fontSize:9.5,fontWeight:800}}>What's included?</button></div>
+              {showGroupIncludes&&<div style={{fontSize:10.5,color:"#636366",marginBottom:12,lineHeight:1.45}}>{GROUPS.map((g)=>`${g}: ${chartExercises.filter((n)=>muscleGroupMap[n]===g&&isRepExercise(n)).join(", ")||"—"}`).join(" · ")}</div>}
               <div style={{ display: "grid", gap: 8 }}>
                 {groupVolumeRecent.map((g) => {
                   const isActive = activeGroup === g.group;
@@ -8058,9 +8063,10 @@ function TrainingLog() {
                       border: "none", background: range === v ? "#FF9F0A" : "transparent", color: range === v ? "#000000" : "#8E8E93"
                     }}>{l}</button>
                   ))}
-                </div>
+                </div><button className="meaning-btn" onClick={()=>setShowWorkoutStatsMeaning(v=>!v)} style={{flexShrink:0,cursor:"pointer",height:30,padding:"0 8px",borderRadius:9,background:showWorkoutStatsMeaning?"#64D2FF18":"transparent",border:"1px solid #64D2FF66",color:"#64D2FF",fontSize:9.5,fontWeight:800}}>Meaning</button>
               </div>
 
+              {showWorkoutStatsMeaning&&<div style={{marginTop:8,padding:"8px 9px",border:"1px solid #2C2C2E",borderRadius:10,color:"#8E8E93",fontSize:10.5,lineHeight:1.45}}>{workoutStatsMeaning}</div>}
               <div style={{ height: 1, background: "#27272A", margin: "10px 0 9px" }} />
 
               <div style={{ display: "grid", gap: 8 }}>
@@ -8115,25 +8121,22 @@ function TrainingLog() {
             </div>
 
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, padding: "18px 14px 8px", marginBottom: 14 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#D1D1D6", marginBottom: 2, paddingLeft: 4 }}>
-                {(() => {
-                  const agg = metric === "1rm" ? "Peak" : "Total";
-                  return filter === "All"
-                    ? `Overall ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend · rolling 6-wk baseline · 100 = typical`
-                    : filter.startsWith("group:")
-                    ? `${filter.slice(6)} ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend · rolling 6-wk baseline · 100 = typical`
-                    : timeView === "week"
-                    ? `${filter} — ${yLabel} per week`
-                    : `${filter} — ${yLabel} per set across sessions`;
-                })()}
-              </div>
-              {(filter === "All" || filter.startsWith("group:")) && (
-                <div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>
-                  Rolling 6-wk baseline · each exercise is compared with its own previous six weeks, excluding the current session, then equally combined. <strong style={{color:"#8E8E93"}}>100 = typical</strong>.
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:3,paddingLeft:4}}>
+                <div style={{fontSize:11.5,fontWeight:700,color:"#D1D1D6"}}>
+                  {(() => {
+                    const agg = metric === "1rm" ? "Peak" : "Total";
+                    return filter === "All"
+                      ? `Overall ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend`
+                      : filter.startsWith("group:")
+                      ? `${filter.slice(6)} ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend`
+                      : timeView === "week"
+                      ? `${filter} — ${yLabel} per week`
+                      : `${filter} — ${yLabel} per set across sessions`;
+                  })()}
                 </div>
-              )}
-              {metric === "volume" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Volume = total reps × (bodyweight × exercise ratio + any added external weight) for that session. Ratios reflect how much of your bodyweight each exercise actually moves — see the exercise reference.</div>)}
-              {metric === "1rm" && (<div style={{ fontSize: 10, color: "#636366", marginBottom: 6, paddingLeft: 4 }}>Estimated 1RM (Epley) = (bodyweight × exercise ratio + added weight) × (1 + reps ÷ 30), taken from the single best eligible 1–12 rep set of the session — reflects estimated strength rather than total work done.</div>)}
+                <span title={`Session-based trend · ${workoutTrendTag.detail}`} style={{flexShrink:0,fontSize:9.5,fontWeight:800,color:workoutTrendTag.tone,border:`1px solid ${workoutTrendTag.tone}55`,borderRadius:999,padding:"3px 7px"}}>{workoutTrendTag.label}</span>
+              </div>
+
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
                   <LineChart data={overallTrendView} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}>
@@ -8192,24 +8195,22 @@ function TrainingLog() {
               </div>
             )}
 
-            <div style={{ background: "#000000", border: "1px dashed #27272A", borderRadius: 16, padding: "10px 14px", fontSize: 11, color: "#636366", marginBottom: 8 }}>
-              Rolling performance scores use only the previous six calendar weeks before each point. Raw workload cards remain workload quantities, not performance grades.
-            </div>
             </>
             )}
           </>
         )}
 
-        {tab === "swim" && <SwimmingTab isMobile={isMobile} onExit={() => setTab("dashboard")} />}
+        {tab === "swim" && <SwimmingTab isMobile={isMobile} onExit={() => setTab("dashboard")} onOpenLog={() => openTrainingLog("swim")} />}
 
         {tab === "history" && (
           <>
+            <div style={{marginBottom:12}}><div className="disp" style={{fontSize:20,fontWeight:800,color:"#FFFFFF"}}>Training Log</div><div style={{fontSize:11.5,color:"#636366",marginTop:2}}>Review, add, edit, compare and back up your activity history.</div></div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
               <div style={{ display: "flex", background: "#000000", border: "1px solid #27272A", borderRadius: 16, padding: 3 }}>
                 {[
+                  ...((athleteMode === "hybrid" || !athleteMode) ? [{ id: "all", label: "All", Icon: LayoutGrid }] : []),
                   ...(athleteMode !== "swim" ? [{ id: "workout", label: "Workout", Icon: Dumbbell }] : []),
                   ...(athleteMode !== "workout" ? [{ id: "swim", label: "Swim", Icon: Waves }] : []),
-                  ...((athleteMode === "hybrid" || !athleteMode) ? [{ id: "all", label: "All", Icon: LayoutGrid }] : []),
                 ].map(({ id, label, Icon }) => (
                   <button key={id} onClick={() => setViewMode(id)} style={{
                     display: "flex", alignItems: "center", gap: 6, cursor: "pointer", border: "none", borderRadius: 12,
@@ -8219,19 +8220,16 @@ function TrainingLog() {
                   }}><Icon size={13} /> {label}</button>
                 ))}
               </div>
-              <span style={{ fontSize: 11, color: "#48484A" }}>Export/Import follow this filter — Workout, Swim, or both.</span>
+              <span style={{ fontSize: 11, color: "#48484A" }}>Backup / restore follows this view — All, Workout, or Swim.</span>
             </div>
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
               {viewMode === "workout" && !showForm && (
-                <button className="log-session-primary" onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#FF9F0A", color: "#000000", border: "1px solid #FF9F0A", borderRadius: 16, padding: "10px 16px", fontWeight: 800, fontSize: 13 }}><Plus size={16} /> Log new session</button>
+                <button className="log-session-primary" onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setParsedReviewActive(false); setParseResolved([]); setUnmatchedNames([]); setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#FF9F0A", color: "#000000", border: "1px solid #FF9F0A", borderRadius: 16, padding: "10px 16px", fontWeight: 800, fontSize: 13 }}><Plus size={16} /> Add workout</button>
               )}
-              <button onClick={exportJSON} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", color: "#D1D1D6", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export {viewMode === "workout" ? "workout" : viewMode === "swim" ? "swim" : "all"} JSON</button>
-              {viewMode === "workout" && (
-                <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", color: "#D1D1D6", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Download size={14} /> Export CSV</button>
-              )}
-              <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #27272A", color: "#D1D1D6", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
-                <Upload size={14} /> Import JSON
+              <button onClick={exportJSON} title="Create a complete backup for this view" style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",background:"#1C1C1E",border:"1px solid #27272A",color:"#D1D1D6",borderRadius:16,padding:"10px 14px",fontWeight:600,fontSize:13}}><Download size={14}/> Back up {viewMode==="workout"?"workout":viewMode==="swim"?"swim":"all"} data</button>
+              <label className="file-btn" title="Restore a backup or merge exported training data" style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",background:"#1C1C1E",border:"1px solid #27272A",color:"#D1D1D6",borderRadius:16,padding:"10px 14px",fontWeight:600,fontSize:13}}>
+                <Upload size={14}/> Restore / import data
                 <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImport} />
               </label>
               {viewMode === "swim" && (
@@ -8261,7 +8259,7 @@ function TrainingLog() {
               <div style={{ background: "#1C1C1E", border: "1px solid #2C2C2E", borderRadius: 20, boxShadow: "none", padding: 18, marginBottom: 22 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: "#FFFFFF", marginBottom: 3 }}>Log new swim session</div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "#FFFFFF", marginBottom: 3 }}>Add swim</div>
                     <div style={{ fontSize: 12, color: "#636366" }}>Upload Garmin <span className="mono">.FIT</span> files (pool swims) — pool length is detected from FIT when available and must be supplied if missing. Everything is parsed locally in your browser.</div>
                   </div>
                   <label className="file-btn" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#64D2FF", color: "#000000", border: "none", borderRadius: 16, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
@@ -8340,7 +8338,7 @@ function TrainingLog() {
             {viewMode === "workout" && showForm && (
               <div style={{ background: "#1C1C1E", border: "1px solid #2C2C2E", borderRadius: 20, boxShadow: "none", padding: 18, marginBottom: 22 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <span style={{ fontWeight: 700, fontSize: 15 }}>{editingId ? "Edit session" : "New session"}</span>
+                  <span style={{ fontWeight: 700, fontSize: 15 }}>{editingId ? "Edit workout" : "Add workout"}</span>
                   <X size={18} style={{ cursor: "pointer", color: "#8E8E93" }} onClick={cancelForm} />
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
@@ -8370,26 +8368,23 @@ function TrainingLog() {
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button onClick={handleParseFill} style={{ marginTop: 8, background: "#2C2C2E", color: "#FFFFFF", border: "none", borderRadius: 12, padding: "8px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Parse & fill</button>
                     <button onClick={() => setShowLibrary(true)} style={{ marginTop: 8, background: "transparent", color: "#8E8E93", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>Exercise reference</button>
-                    <button onClick={() => { setEditingCustomName(null); setCustomExerciseError(""); setAddExDraft({ name:"", group:"Pull", ratio:"1.0", target:"", type:"reps" }); setShowAddExercise(true); }} style={{ marginTop: 8, background: "transparent", color: "#8E8E93", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>+ Add exercise</button>
+                    <button onClick={() => { setPendingUnmatchedSource(null); setEditingCustomName(null); setCustomExerciseError(""); setAddExDraft({ name:"", group:"Pull", ratio:"1.0", target:"", type:"reps" }); setShowAddExercise(true); }} style={{ marginTop: 8, background: "transparent", color: "#8E8E93", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>+ Add exercise</button>
                   </div>
-                  {parseNote && <div style={{ fontSize: 11.5, color: "#FF9F0A", marginTop: 8, lineHeight: 1.5 }}>{parseNote}</div>}
-                  {unmatchedNames.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                      {unmatchedNames.map((name) => (
-                        <button key={name} onClick={() => openAddExerciseFor(name)} className="mono" style={{ fontSize: 11, fontWeight: 600, color: "#FF9F0A", background: "transparent", border: "1px solid #FF9F0A55", borderRadius: 999, padding: "4px 10px", cursor: "pointer" }}>+ Add "{name}"</button>
-                      ))}
-                    </div>
-                  )}
+                  {parseNote && <div style={{fontSize:11.5,color:unmatchedNames.length?"#FF9F0A":"#8E8E93",marginTop:8,lineHeight:1.5}}>{parseNote}</div>}
+                  {(parseResolved.length>0||unmatchedNames.length>0)&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
+                    {parseResolved.map((r)=><span key={`${r.source}-${r.name}`} className="mono" style={{fontSize:10.5,fontWeight:700,color:r.status==="Added"?"#30D158":"#64D2FF",border:`1px solid ${r.status==="Added"?"#30D15855":"#64D2FF55"}`,borderRadius:999,padding:"4px 9px"}}>✓ {r.status}: {r.name}</span>)}
+                    {unmatchedNames.map((name)=><button key={name} onClick={()=>openAddExerciseFor(name)} className="mono" style={{fontSize:10.5,fontWeight:700,color:"#FF9F0A",background:"transparent",border:"1px solid #FF9F0A55",borderRadius:999,padding:"4px 9px",cursor:"pointer"}}>Needs mapping · Add "{name}"</button>)}
+                  </div>}
                 </div>
 
                 <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: "160px 1fr 90px", gap: 8, marginBottom: 4, fontSize: 10, color: "#48484A", textTransform: "uppercase", letterSpacing: "0.04em" }}><span></span><span>Reps per set</span><span>Kg per set</span></div>
                 <div style={{ display: "grid", gap: isMobile ? 14 : 10, marginBottom: 14 }}>
-                  {(editingId ? Object.keys(draft.ex) : trackedExercises.filter((name) => !RETIRED.includes(name))).map((name) => (
+                  {(editingId || parsedReviewActive ? Object.keys(draft.ex) : trackedExercises.filter((name) => !RETIRED.includes(name))).map((name) => (
                     isMobile ? (
                       <div key={name} style={{ display: "grid", gap: 6, borderBottom: "1px solid #27272A", paddingBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span style={{ fontSize: 13, color: colorsMap[name] || "#D1D1D6", fontWeight: 600 }}>{name}</span>
-                          {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#48484A", flexShrink: 0 }} />}
+                          {!editingId && <X size={14} onClick={() => parsedReviewActive ? removeDraftExercise(name) : untrackExercise(name)} title={parsedReviewActive ? "Remove from this session" : "Remove from tracked exercises"} style={{ cursor: "pointer", color: "#48484A", flexShrink: 0 }} />}
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8 }}>
                           <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "10px 10px", color: "#F2F2F7", fontSize: 14, boxSizing: "border-box" }} />
@@ -8401,11 +8396,11 @@ function TrainingLog() {
                         <span style={{ fontSize: 13, color: colorsMap[name] || "#D1D1D6", fontWeight: 600 }}>{name}</span>
                         <input type="text" placeholder="e.g. 12,11,9,8" value={draft.ex[name]} onChange={(e) => setDraft({ ...draft, ex: { ...draft.ex, [name]: e.target.value } })} className="mono" style={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} />
                         <input type="text" placeholder="e.g. 15,15,5,5" value={draft.load[name]} onChange={(e) => setDraft({ ...draft, load: { ...draft.load, [name]: e.target.value } })} className="mono" style={{ background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} />
-                        {!editingId && <X size={14} onClick={() => untrackExercise(name)} title="Remove from tracked exercises" style={{ cursor: "pointer", color: "#48484A" }} />}
+                        {!editingId && <X size={14} onClick={() => parsedReviewActive ? removeDraftExercise(name) : untrackExercise(name)} title={parsedReviewActive ? "Remove from this session" : "Remove from tracked exercises"} style={{ cursor: "pointer", color: "#48484A" }} />}
                       </div>
                     )
                   ))}
-                  {trackedExercises.length === 0 && !editingId && (
+                  {trackedExercises.length === 0 && !editingId && !parsedReviewActive && (
                     <div style={{ fontSize: 12, color: "#636366", fontStyle: "italic" }}>No exercises tracked yet — paste a workout above, or use "+ Add exercise" to add one manually.</div>
                   )}
                 </div>
@@ -9006,7 +9001,7 @@ function TrainingLog() {
                 </div>
               </div>
             ))}
-            <button onClick={() => { setShowLibrary(false); setEditingCustomName(null); setCustomExerciseError(""); setAddExDraft({ name:"", group:"Pull", ratio:"1.0", target:"", type:"reps" }); setShowAddExercise(true); }} style={{ marginTop: 4, width: "100%", background: "#2C2C2E", color: "#FFFFFF", border: "none", borderRadius: 12, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Add an exercise not listed here</button>
+            <button onClick={() => { setShowLibrary(false); setPendingUnmatchedSource(null); setEditingCustomName(null); setCustomExerciseError(""); setAddExDraft({ name:"", group:"Pull", ratio:"1.0", target:"", type:"reps" }); setShowAddExercise(true); }} style={{ marginTop: 4, width: "100%", background: "#2C2C2E", color: "#FFFFFF", border: "none", borderRadius: 12, padding: "10px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Add an exercise not listed here</button>
           </div>
         </div>
       )}
