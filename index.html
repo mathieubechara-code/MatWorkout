@@ -6340,6 +6340,21 @@ function TrainingLog() {
         if (v != null) { totalVol += v; anyVol = true; }
       });
       row.Total = metric === "reps" ? total(s.ex[filter]) : metric === "1rm" ? (best1RM == null ? null : Math.round(best1RM)) : (anyVol ? Math.round(totalVol) : null);
+
+      // Same rolling definition used by the normalized trend logic, but kept in raw units
+      // so the user can see "typical" directly on a single-exercise chart.
+      const cutoff = new Date(`${s.date}T00:00:00`);
+      cutoff.setDate(cutoff.getDate() - 42);
+      const cutoffStr = toISODate(cutoff);
+      const priorVals = sessions
+        .filter((p) => p.date >= cutoffStr && isWorkoutBefore(p, s) && p.ex?.[filter])
+        .map((p) => {
+          if (metric === "reps") return total(p.ex[filter]);
+          if (metric === "1rm") return exercise1RM(p, filter);
+          return exerciseVolume(p, filter);
+        })
+        .filter((v) => v != null && Number.isFinite(v) && v > 0);
+      row.Typical = priorVals.length ? priorVals.reduce((a,b)=>a+b,0) / priorVals.length : null;
       return row;
     });
   }, [rangedSessions, filter, metric]);
@@ -6518,7 +6533,7 @@ function TrainingLog() {
   const overallTrendView = timeView === "week" ? overallWeekTrend : overallDayTrend;
   const groupPerformanceView = timeView === "week" ? groupNormalizedWeekTrend : groupNormalizedDayTrend;
   const groupChartDataView = groupPerformanceView;
-  const workoutStatsMeaning=(()=>{const scope=filter==="All"?"Overall combines comparable exercises equally after each is normalized to its own recent history.":filter.startsWith("group:")?`${filter.slice(6)} combines comparable exercises in that training group equally after normalization.`:`${filter} shows that exercise directly. In Day view, Total shows the session summary and Sets shows individual set lines; Week summarizes sessions by week.`;const metricText=metric==="1rm"?"1RM is estimated strength from the best eligible 1–12 rep set. In All/group views, 100 is the previous 6-week strength average.":metric==="volume"?"Volume is workload: reps × effective load. Higher means more work, not automatically better. In All/group views, 100 is the previous 6-week workload average.":"Reps tracks completed repetitions. More reps can mean more work, not automatically better strength. In All/group views, 100 is the previous 6-week reps average.";return `${scope} ${metricText} The current session is excluded from its own baseline.`;})();
+  const workoutStatsMeaning=(()=>{const scope=filter==="All"?"Overall combines comparable exercises equally after each is normalized to its own recent history.":filter.startsWith("group:")?`${filter.slice(6)} combines comparable exercises in that training group equally after normalization.`:`${filter} shows that exercise directly. In Day view, Total shows the session summary plus a dashed rolling 6-week Typical line; Sets shows individual set lines. Week summarizes sessions by week.`;const metricText=metric==="1rm"?"1RM is estimated strength from the best eligible 1–12 rep set. In All/group views, 100 is the previous 6-week strength average.":metric==="volume"?"Volume is workload: reps × effective load. Higher means more work, not automatically better. In All/group views, 100 is the previous 6-week workload average.":"Reps tracks completed repetitions. More reps can mean more work, not automatically better strength. In All/group views, 100 is the previous 6-week reps average.";return `${scope} ${metricText} The current session is excluded from its own baseline.`;})();
   const workoutTrendMeaning = (() => {
     const base = workoutTrendTag.detail;
     if (workoutTrendTag.label === "Not enough history") return `${base} The tag waits for enough comparable sessions before calling a direction.`;
@@ -7139,9 +7154,14 @@ function TrainingLog() {
   const yLabel = metric === "reps" ? "reps" : metric === "1rm" ? "1RM" : "kg";
 
   const changeFilter = (f) => {
-    setFilter(f);
+    // Training-group pills are true toggles: clicking the active group again exits
+    // the group view back to All. Re-entering a group starts fresh with every
+    // exercise in that group included.
+    const nextFilter = f.startsWith("group:") && filter === f ? "All" : f;
+    setFilter(nextFilter);
     setChartFocus(null);
     setHiddenStatsExercises(new Set());
+    setShowWorkoutTrendMeaning(false);
   };
   const toggleStatsExercise = (name) => {
     setHiddenStatsExercises((cur) => {
@@ -7930,7 +7950,7 @@ function TrainingLog() {
                 {groupVolumeRecent.map((g) => {
                   const isActive = activeGroup === g.group;
                   return (
-                    <div key={g.group} onClick={() => changeFilter("group:" + g.group)} style={{ cursor: "pointer", borderRadius: 12, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
+                    <div key={g.group} onClick={() => changeFilter("group:" + g.group)} title={filter === "group:" + g.group ? `Exit ${g.group} group view` : `View ${g.group} stats`} style={{ cursor: "pointer", borderRadius: 12, padding: isActive ? "6px 8px" : "6px 8px", background: isActive ? `${GROUP_COLORS[g.group]}22` : "transparent", border: isActive ? `1px solid ${GROUP_COLORS[g.group]}55` : "1px solid transparent", transition: "background 0.15s, border-color 0.15s" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
                         <span style={{ color: GROUP_COLORS[g.group], fontWeight: 600 }}>{g.group}</span>
                         <span className="mono" style={{ color: "#D1D1D6" }}>{g.kg.toLocaleString()} kg ({g.pct}%)</span>
@@ -8093,7 +8113,7 @@ function TrainingLog() {
                       display: "grid", gridTemplateColumns: isMobile ? "72px 1fr" : "92px 1fr",
                       alignItems: "start", gap: 7, padding: "6px 0"
                     }}>
-                      <button onClick={() => changeFilter(groupValue)} style={{
+                      <button onClick={() => changeFilter(groupValue)} title={groupActive ? `Exit ${g} group view` : `View all ${g} exercises`} style={{
                         cursor: "pointer", minHeight: 29, borderRadius: 9, padding: "5px 7px",
                         fontSize: 10.5, fontWeight: 800, textAlign: "left",
                         border: `1px solid ${groupActive ? gColor : gColor + "66"}`,
@@ -8147,7 +8167,7 @@ function TrainingLog() {
                   })()}
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                  {filter !== "All" && !filter.startsWith("group:") && timeView === "day" && <div title={metric==="1rm"?"Total = best eligible estimated 1RM per session; Sets = each eligible set":"Total = session total; Sets = individual set lines"} style={{display:"flex",gap:2,background:"#000000",border:"1px solid #27272A",borderRadius:8,padding:2}}>
+                  {filter !== "All" && !filter.startsWith("group:") && timeView === "day" && <div title={metric==="1rm"?"Total = best eligible estimated 1RM per session + rolling 6-week typical; Sets = each eligible set":"Total = session total + rolling 6-week typical; Sets = individual set lines"} style={{display:"flex",gap:2,background:"#000000",border:"1px solid #27272A",borderRadius:8,padding:2}}>
                     {[["total","Total"],["sets","Sets"]].map(([v,l])=><button key={v} onClick={()=>{setSetChartView(v);setChartFocus(null);}} style={{cursor:"pointer",height:22,padding:"0 7px",border:"none",borderRadius:6,background:setChartView===v?"#F2F2F7":"transparent",color:setChartView===v?"#000000":"#8E8E93",fontSize:9,fontWeight:800}}>{l}</button>)}
                   </div>}
                   <button onClick={() => setShowWorkoutTrendMeaning((v)=>!v)} title="Tap for trend interpretation" style={{cursor:"pointer",background:showWorkoutTrendMeaning?`${workoutTrendTag.tone}18`:"transparent",fontSize:9.5,fontWeight:800,color:workoutTrendTag.tone,border:`1px solid ${workoutTrendTag.tone}66`,borderRadius:999,padding:"3px 7px"}}>{workoutTrendTag.label}</button>
@@ -8189,7 +8209,10 @@ function TrainingLog() {
                     {setChartView === "sets" ? Array.from({ length: maxSets }).map((_, i) => {
                       const key = "Set " + (i + 1);
                       return <Line key={i} type="monotone" dataKey={key} stroke={setColor(i)} strokeWidth={chartFocus === key ? 2.4 : 1.6} strokeOpacity={chartFocus && chartFocus !== key ? 0.15 : 0.85} dot={{ r: 2.5, fillOpacity: chartFocus && chartFocus !== key ? 0.15 : 1 }} connectNulls />;
-                    }) : <Line type="monotone" dataKey="Total" name={metric==="1rm"?"Best est. 1RM":metric==="volume"?"Total volume":"Total reps"} stroke="#FFFFFF" strokeWidth={3} dot={{ r: 3.5 }} connectNulls />}
+                    }) : <>
+                      <Line type="monotone" dataKey="Typical" name="Rolling 6-wk typical" stroke="#8E8E93" strokeWidth={1.8} strokeDasharray="6 5" dot={false} connectNulls />
+                      <Line type="monotone" dataKey="Total" name={metric==="1rm"?"Best est. 1RM":metric==="volume"?"Total volume":"Total reps"} stroke="#FFFFFF" strokeWidth={3} dot={{ r: 3.5 }} connectNulls />
+                    </>}
                   </LineChart>
                 )}
               </ResponsiveContainer>
