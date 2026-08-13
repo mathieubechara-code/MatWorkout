@@ -2482,7 +2482,6 @@ function SwimmingTab({ isMobile, onExit }) {
   const [expandedId, setExpandedId] = useState(null);
   const [strokeFilter, setStrokeFilter] = useState("all");
   const [expandedMetrics, setExpandedMetrics] = useState(() => new Set()); // set of trend-card keys currently expanded
-  const [swimTimeView, setSwimTimeView] = useState("day"); // "day" (per session) or "week" (aggregated) — scoped to this tab only
   const [chartOverlaySel, setChartOverlaySel] = useState({ pace: "none", swolf: "none", cadence: "none", dps: "none" }); // per-chart overlay choice
   const [compareMetrics, setCompareMetrics] = useState(["pace", "cadence"]); // freely selectable Compare metrics
   const [compareHelpOpen, setCompareHelpOpen] = useState(false);
@@ -2494,7 +2493,6 @@ function SwimmingTab({ isMobile, onExit }) {
   const [activityStrokeFilter, setActivityStrokeFilter] = useState({}); // { [sessionId]: strokeName | "all" } — per-session pace chart filter
   const [openRepsFor, setOpenRepsFor] = useState({}); // { [sessionId]: bool } — Reps/sets sub-section, collapsed by default
   const [openLengthsFor, setOpenLengthsFor] = useState({}); // { [sessionId]: bool } — Length by length sub-section, collapsed by default
-  const [metricValueMode, setMetricValueMode] = useState("avg6"); // "latest" | "avg6" — headline number on each Trends card
   const [trendHelpOpen, setTrendHelpOpen] = useState(false);
   const [swimSection, setSwimSection] = useState(() => {
     try {
@@ -3039,10 +3037,9 @@ function SwimmingTab({ isMobile, onExit }) {
     });
   }, [chronSessions, allStrokesSeen, swolfReferencePools]);
 
-  // The series actually feeding the sparkline cards + expanded charts, switched by the
-  // Day/Week toggle. Collapsed cards and their expanded charts always read from this same
-  // source, so they never disagree.
-  const trendDataView = swimTimeView === "week" ? weeklyTrendData : trendData;
+  // Trends are session-level only. Weekly pooling was removed because it obscured
+  // individual-session movement and made the headline/status baseline ambiguous.
+  const trendDataView = trendData;
 
   const cssTrendData = useMemo(() => {
     const chron = sessions ? [...sessions].filter((s) => s.isCssTest && s.cssTest).sort(compareSwimSessionsChronologically) : [];
@@ -3171,63 +3168,62 @@ function SwimmingTab({ isMobile, onExit }) {
   // per-stroke metrics).
   const seriesFor = (key) => trendDataView.map((d) => (d[key] == null ? null : d[key]));
 
-  // Trend status is deliberately "latest vs typical", not recent-window vs prior-window.
-  // Typical = mean of the prior comparable values in the currently displayed/filtered series;
-  // the latest point is excluded so it cannot move its own reference line.
-  const computeVerdict = (series, direction, threshold = 0.025, labels = {}) => {
-    const vals = series.filter((v) => v != null && Number.isFinite(v));
-    if (vals.length < 2) return null;
-    const latest = vals[vals.length - 1];
-    const prior = vals.slice(0, -1);
-    if (!prior.length) return null;
-    const typical = prior.reduce((a, b) => a + b, 0) / prior.length;
-    if (typical == null || typical === 0) return null;
-    const change = (latest - typical) / typical;
-    const pctAbs = Math.round(Math.abs(change) * 1000) / 10;
+  // One coherent Trend baseline:
+  // chart = individual comparable sessions; headline = previous 6-week average;
+  // status = latest comparable session vs that exact same baseline.
+  // The latest point is excluded from its own baseline.
+  const sixWeekBaselineFor = (rows, dataKey) => {
+    const valid = (rows || []).filter((d) => d && d[dataKey] != null && Number.isFinite(d[dataKey]) && d.date);
+    if (!valid.length) return { latest: null, baseline: null, baselineCount: 0, latestRow: null };
+    const latestRow = valid[valid.length - 1];
+    const latestDate = new Date(`${latestRow.date}T00:00:00`);
+    const cutoff = new Date(latestDate);
+    cutoff.setDate(cutoff.getDate() - 42);
+    const prior = valid.filter((d) => {
+      if (d === latestRow) return false;
+      const dt = new Date(`${d.date}T00:00:00`);
+      return dt >= cutoff && dt < latestDate;
+    });
+    const vals = prior.map((d) => d[dataKey]).filter((v) => v != null && Number.isFinite(v));
+    return {
+      latest: latestRow[dataKey],
+      baseline: vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null,
+      baselineCount: vals.length,
+      latestRow
+    };
+  };
 
-    if (Math.abs(change) < threshold) {
-      return { label: `${labels.steady || "Steady"} · ${pctAbs}% vs typical`, color: "#8E8E93" };
-    }
+  const computeVerdict = (rows, dataKey, direction, threshold = 0.025, labels = {}) => {
+    const { latest, baseline } = sixWeekBaselineFor(rows, dataKey);
+    if (latest == null || baseline == null || baseline === 0) return null;
+    const change = (latest - baseline) / baseline;
+    const pctAbs = Math.round(Math.abs(change) * 1000) / 10;
+    const suffix = `${pctAbs}% vs 6-wk baseline`;
+    if (Math.abs(change) < threshold) return { label: `${labels.steady || "Steady"} · ${suffix}`, color: "#8E8E93" };
     if (direction === "neutral") {
       return change > 0
-        ? { label: `${labels.up || "Higher"} · ${pctAbs}% vs typical`, color: "#64D2FF" }
-        : { label: `${labels.down || "Lower"} · ${pctAbs}% vs typical`, color: "#64D2FF" };
+        ? { label: `${labels.up || "Higher"} · ${suffix}`, color: "#64D2FF" }
+        : { label: `${labels.down || "Lower"} · ${suffix}`, color: "#64D2FF" };
     }
-
     const better = direction === "lower-better" ? change < 0 : change > 0;
     return better
-      ? { label: `${labels.better || "Improving"} · ${pctAbs}% vs typical`, color: "#30D158" }
-      : { label: `${labels.worse || "Declining"} · ${pctAbs}% vs typical`, color: "#FF453A" };
+      ? { label: `${labels.better || "Improving"} · ${suffix}`, color: "#30D158" }
+      : { label: `${labels.worse || "Declining"} · ${suffix}`, color: "#FF453A" };
   };
 
   const sparkPoints = (series) => series.map((v, i) => ({ i, v })).filter((p) => p.v != null);
 
-  // The stroke used by views that need one concrete stroke label (e.g. Compare/Radar).
-  // Trend technique cards do NOT use this fallback when "All strokes" is selected.
   const activeStroke = strokeFilter === "all" ? primaryStroke : strokeFilter;
-  // "All strokes" uses genuine whole-session pace plus pooled technique metrics
-  // across every swim type present. A specific filter switches each metric to that stroke.
   const paceDataKey = strokeFilter === "all" ? "pace100" : `pace100_${strokeFilter}`;
+  const swolfDataKey = strokeFilter === "all" ? "swolf_all" : `swolf_${strokeFilter}`;
+  const cadenceDataKey = strokeFilter === "all" ? "cadence_all" : `cadence_${strokeFilter}`;
+  const dpsDataKey = strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`;
   const paceSeries = seriesFor(paceDataKey);
-  const swolfSeries = seriesFor(strokeFilter === "all" ? "swolf_all" : `swolf_${strokeFilter}`);
-  const cadenceSeries = seriesFor(strokeFilter === "all" ? "cadence_all" : `cadence_${strokeFilter}`);
-  const dpsSeries = seriesFor(strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`);
+  const swolfSeries = seriesFor(swolfDataKey);
+  const cadenceSeries = seriesFor(cadenceDataKey);
+  const dpsSeries = seriesFor(dpsDataKey);
 
-  const latestOf = (series) => { const vals = series.filter((v) => v != null); return vals.length ? vals[vals.length - 1] : null; };
-  // Trend-card headline average = the arithmetic mean of every valid point currently
-  // represented by that card after the active Category / Stroke / Effort / pool-quality
-  // eligibility rules have been applied. No minimum session count is required.
-  const averageFromRows = (rows, key) => {
-    const vals = (rows || [])
-      .map((d) => d && d[key])
-      .filter((v) => v != null && Number.isFinite(v));
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-  };
-  const headlineOf = (series, dataKey = null, sourceRows = trendDataView) => (
-    metricValueMode === "avg6" && dataKey
-      ? averageFromRows(sourceRows, dataKey)
-      : latestOf(series)
-  );
+  const headlineOf = (dataKey, sourceRows = trendDataView) => sixWeekBaselineFor(sourceRows, dataKey).baseline;
 
   // Card accent color: Pace is the only one of these four that has a genuine "All strokes"
   // value (pace100 is a real whole-session figure — total time ÷ total distance across every
@@ -3788,14 +3784,14 @@ function SwimmingTab({ isMobile, onExit }) {
       title: "Pace" + strokeTitleSuffix(strokeFilter === "all" ? null : strokeFilter),
       series: paceSeries,
       verdict: computeVerdict(
-        paceSeries,
+        trendDataView, paceDataKey,
         strokeFilter === "all" ? "neutral" : "lower-better",
         INSIGHT_THRESHOLDS.paceMeaningfulPct,
         strokeFilter === "all"
           ? { up: "Slower", down: "Faster", steady: "Steady" }
           : { better: "Faster", worse: "Slower", steady: "Steady" }
       ),
-      value: fmtPace100(headlineOf(paceSeries, paceDataKey)),
+      value: fmtPace100(headlineOf(paceDataKey)),
       perStroke: true,
       lowerBetter: true,
       color: strokeCardColor,
@@ -3805,12 +3801,12 @@ function SwimmingTab({ isMobile, onExit }) {
       title: "SWOLF" + strokeTitleSuffix(activeStroke),
       series: swolfSeries,
       verdict: computeVerdict(
-        swolfSeries,
+        trendDataView, swolfDataKey,
         strokeFilter === "all" ? "neutral" : "lower-better",
         INSIGHT_THRESHOLDS.swolfMeaningfulPct,
         strokeFilter === "all" ? { up: "Higher", down: "Lower" } : { worse: "Less efficient" }
       ),
-      value: headlineOf(swolfSeries, strokeFilter === "all" ? "swolf_all" : `swolf_${strokeFilter}`) != null ? Math.round(headlineOf(swolfSeries, strokeFilter === "all" ? "swolf_all" : `swolf_${strokeFilter}`)) : "—",
+      value: headlineOf(swolfDataKey) != null ? Math.round(headlineOf(swolfDataKey)) : "—",
       perStroke: true,
       lowerBetter: true,
       color: strokeCardColor,
@@ -3819,8 +3815,8 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "cadence",
       title: "Stroke rate" + strokeTitleSuffix(activeStroke),
       series: cadenceSeries,
-      verdict: computeVerdict(cadenceSeries, "neutral", INSIGHT_THRESHOLDS.cadenceMeaningfulPct, { up: "Higher", down: "Lower" }),
-      value: headlineOf(cadenceSeries, strokeFilter === "all" ? "cadence_all" : `cadence_${strokeFilter}`) != null ? `${Math.round(headlineOf(cadenceSeries, strokeFilter === "all" ? "cadence_all" : `cadence_${strokeFilter}`))} spm` : "—",
+      verdict: computeVerdict(trendDataView, cadenceDataKey, "neutral", INSIGHT_THRESHOLDS.cadenceMeaningfulPct, { up: "Higher", down: "Lower" }),
+      value: headlineOf(cadenceDataKey) != null ? `${Math.round(headlineOf(cadenceDataKey))} spm` : "—",
       perStroke: true,
       color: strokeCardColor,
     },
@@ -3828,8 +3824,8 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "dps",
       title: "Distance/stroke" + strokeTitleSuffix(activeStroke) + " · same pool",
       series: dpsSeries,
-      verdict: computeVerdict(dpsSeries, "neutral", INSIGHT_THRESHOLDS.dpsMeaningfulPct, { up: "Higher", down: "Lower" }),
-      value: headlineOf(dpsSeries, strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`) != null ? `${headlineOf(dpsSeries, strokeFilter === "all" ? "dps_all" : `dps_${strokeFilter}`).toFixed(2)}m` : "—",
+      verdict: computeVerdict(trendDataView, dpsDataKey, "neutral", INSIGHT_THRESHOLDS.dpsMeaningfulPct, { up: "Higher", down: "Lower" }),
+      value: headlineOf(dpsDataKey) != null ? `${headlineOf(dpsDataKey).toFixed(2)}m` : "—",
       perStroke: true,
       color: strokeCardColor,
     },
@@ -3837,8 +3833,8 @@ function SwimmingTab({ isMobile, onExit }) {
       key: "css",
       title: "Critical Swim Speed (CSS)",
       series: cssTrendData.map((d) => d.cssPace100),
-      verdict: computeVerdict(cssTrendData.map((d) => d.cssPace100), "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower" }),
-      value: cssTrendData.length ? fmtPace100(metricValueMode === "avg6" ? averageFromRows(cssTrendData, "cssPace100") : cssTrendData[cssTrendData.length - 1].cssPace100) : "—",
+      verdict: computeVerdict(cssTrendData, "cssPace100", "lower-better", INSIGHT_THRESHOLDS.paceMeaningfulPct, { better: "Improving", worse: "Slower" }),
+      value: cssTrendData.length ? fmtPace100(headlineOf("cssPace100", cssTrendData)) : "—",
       lowerBetter: true,
       color: "#0A84FF",
     },
@@ -4440,28 +4436,11 @@ function SwimmingTab({ isMobile, onExit }) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ ...labelStyle, marginBottom: 0 }}>Trends</div><button onClick={() => setTrendHelpOpen((v) => !v)} title="What do these metrics mean?" className="meaning-btn" style={{ cursor: "pointer", background: trendHelpOpen ? "#64D2FF22" : "transparent", border: "1px solid #64D2FF88", borderRadius: 999, padding: "1px 5px", color: "#64D2FF", fontSize: 8.3, fontWeight: 800 }}>Meaning</button></div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
-                    <button key={v} onClick={() => setSwimTimeView(v)} className="pill swim-filter-pill" style={{
-                      cursor: "pointer", background: swimTimeView === v ? "#27272A" : "transparent",
-                      border: "1px solid " + (swimTimeView === v ? "#3A3A3C" : "#27272A"), color: swimTimeView === v ? "#FFFFFF" : "#8E8E93",
-                      borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 600,
-                    }}>{l}</button>
-                  ))}
-                </div>
-                <button
-                  className="swim-filter-pill"
-                  onClick={() => setMetricValueMode((m) => (m === "avg6" ? "latest" : "avg6"))}
-                  title="Toggle each card's big number between the latest value and the average of the previous 6 calendar weeks"
-                  className="pill"
-                  style={{
-                    cursor: "pointer",
-                    background: metricValueMode === "avg6" ? "#64D2FF" : "transparent",
-                    border: "1px solid " + (metricValueMode === "avg6" ? "#64D2FF" : "#27272A"),
-                    color: metricValueMode === "avg6" ? "#000000" : "#8E8E93",
-                    borderRadius: 12, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
-                  }}
-                >6-wk avg</button>
+                <span className="pill swim-filter-pill" title="Headline and status use the previous 6 calendar weeks, excluding the latest comparable session" style={{
+                  display:"inline-flex", alignItems:"center", cursor:"default",
+                  background:"#64D2FF18", border:"1px solid #64D2FF66", color:"#64D2FF",
+                  borderRadius:9, padding:"5px 8px", fontSize:10.3, fontWeight:750
+                }}>6-wk baseline</span>
                 {metricCards.length > 0 && (
                   <button onClick={toggleExpandAllMetrics} className="pill swim-filter-pill" style={{
                     display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
@@ -4487,6 +4466,7 @@ function SwimmingTab({ isMobile, onExit }) {
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 600, color: "#D1D1D6" }}>{card.title}</div>
                         <div className="disp" style={{ fontSize: 19, fontWeight: 700, color: "#FFFFFF", marginTop: 2 }}>{card.value}</div>
+                        <div style={{ fontSize: 8.8, color: "#636366", marginTop: 1 }}>previous 6-wk average</div>
                         {card.sub && <div className="mono" style={{ fontSize: 10, color: "#FF453A" }}>{card.sub}</div>}
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
