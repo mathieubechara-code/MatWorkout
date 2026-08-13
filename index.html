@@ -6113,6 +6113,10 @@ function TrainingLog() {
         }
 
         let weightMsg = "";
+        if (restoreWorkoutBackup && !weightArr) {
+          await persistWeightLog([]);
+          weightMsg = " Restored 0 weight entries.";
+        }
         if (weightArr) {
           const validWeights = weightArr
             .filter((e) => e && e.date && e.date <= todayStr && Number.isFinite(Number(e.kg)) && Number(e.kg) > 0)
@@ -6140,14 +6144,37 @@ function TrainingLog() {
         if (parsed && isObj && parsed.settings && typeof parsed.settings === "object" && (restoreWorkoutBackup || !workoutArr)) {
           const st = parsed.settings;
           try {
-            if (Object.prototype.hasOwnProperty.call(st, "ownerName")) { const v = typeof st.ownerName === "string" ? st.ownerName : ""; setOwnerName(v); await window.storage.set(OWNER_KEY, v, false); }
-            if (Object.prototype.hasOwnProperty.call(st, "targetSettings")) { const v = st.targetSettings && typeof st.targetSettings === "object" ? st.targetSettings : {}; setTargetSettings(v); await window.storage.set(TARGET_KEY, JSON.stringify(v), false); }
-            if (Object.prototype.hasOwnProperty.call(st, "trackedExercises")) { const v = Array.isArray(st.trackedExercises) ? st.trackedExercises : []; setTrackedExercises(v); await window.storage.set(TRACKED_KEY, JSON.stringify(v), false); }
-            if (Object.prototype.hasOwnProperty.call(st, "customExercises")) { const v = normalizeCustomLibrary(st.customExercises); setCustomExercises(v); await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(v), false); }
-            if (Object.prototype.hasOwnProperty.call(st, "prSelection")) { const v = Array.isArray(st.prSelection) ? st.prSelection : null; setPrSelection(v); await window.storage.set(PR_SELECTION_KEY, JSON.stringify(v), false); }
-            if (Object.prototype.hasOwnProperty.call(st, "weightTargetSettings")) { const v = st.weightTargetSettings && typeof st.weightTargetSettings === "object" ? st.weightTargetSettings : {}; setWeightTargetSettings(v); await window.storage.set(WEIGHT_TARGET_KEY, JSON.stringify(v), false); }
-            if (Object.prototype.hasOwnProperty.call(st, "swimTargetSettings")) { const v = st.swimTargetSettings && typeof st.swimTargetSettings === "object" ? st.swimTargetSettings : {}; setSwimTargetSettingsView(v); await window.storage.set("swim-target-settings-v1", JSON.stringify(v), false); }
-            settingsMsg = " Settings restored.";
+            const exactWorkout = restoreWorkoutBackup && !!workoutArr;
+
+            if (exactWorkout || Object.prototype.hasOwnProperty.call(st, "ownerName")) {
+              const v = typeof st.ownerName === "string" ? st.ownerName : "";
+              setOwnerName(v); await window.storage.set(OWNER_KEY, v, false);
+            }
+            if (exactWorkout || Object.prototype.hasOwnProperty.call(st, "targetSettings")) {
+              const v = st.targetSettings && typeof st.targetSettings === "object" ? st.targetSettings : {};
+              setTargetSettings(v); await window.storage.set(TARGET_KEY, JSON.stringify(v), false);
+            }
+            if (exactWorkout || Object.prototype.hasOwnProperty.call(st, "trackedExercises")) {
+              const v = Array.isArray(st.trackedExercises) ? st.trackedExercises : [];
+              setTrackedExercises(v); await window.storage.set(TRACKED_KEY, JSON.stringify(v), false);
+            }
+            if (exactWorkout || Object.prototype.hasOwnProperty.call(st, "customExercises")) {
+              const v = normalizeCustomLibrary(st.customExercises);
+              setCustomExercises(v); await window.storage.set(CUSTOM_LIB_KEY, JSON.stringify(v), false);
+            }
+            if (exactWorkout || Object.prototype.hasOwnProperty.call(st, "prSelection")) {
+              const v = Array.isArray(st.prSelection) ? st.prSelection : null;
+              setPrSelection(v); await window.storage.set(PR_SELECTION_KEY, JSON.stringify(v), false);
+            }
+            if (exactWorkout || Object.prototype.hasOwnProperty.call(st, "weightTargetSettings")) {
+              const v = st.weightTargetSettings && typeof st.weightTargetSettings === "object" ? st.weightTargetSettings : {};
+              setWeightTargetSettings(v); await window.storage.set(WEIGHT_TARGET_KEY, JSON.stringify(v), false);
+            }
+            if (Object.prototype.hasOwnProperty.call(st, "swimTargetSettings")) {
+              const v = st.swimTargetSettings && typeof st.swimTargetSettings === "object" ? st.swimTargetSettings : {};
+              setSwimTargetSettingsView(v); await window.storage.set("swim-target-settings-v1", JSON.stringify(v), false);
+            }
+            settingsMsg = exactWorkout ? " Workout settings restored." : " Settings restored.";
           } catch (_) {}
         }
 
@@ -6658,38 +6685,38 @@ function TrainingLog() {
     if ([strength,volume,intensity,progression].every((x)=>x==null)) return null;
 
     let headline="A balanced session.";
-    let story="Available measures stayed close to your recent training profile.";
+    let story="Available comparable exercises stayed close to their own recent 6-week profiles.";
     let tone="#64D2FF";
 
-    if (s==="na" && p==="na" && volume!=null && intensity!=null) {
-      headline = v==="up" ? "More leg/group work with a rotated exercise mix." : v==="down" ? "Less group work with a rotated exercise mix." : "Similar group workload with different exercises.";
+    if (s==="na" && p==="na" && (volume!=null || intensity!=null)) {
+      headline = v==="up" ? "More workload than usual." : v==="down" ? "Less workload than usual." : "Workload near normal.";
       story = i==="up"
-        ? "Volume and rep profile can still be compared at training-group level. Strength and Progression need repeated history for the same exercises, so they are intentionally withheld."
+        ? "Comparable exercises used a lower-rep, more strength-oriented profile than their own recent norms. Strength/Progression stay hidden until enough eligible 1–12 rep history exists."
         : i==="down"
-          ? "The group workload is comparable, with a higher-rep/lighter profile than usual. Strength and Progression are withheld until the same exercises repeat."
-          : "The group workload and rep profile are comparable, but Strength and Progression are withheld until the same exercises repeat.";
-      tone = v==="down" ? "#FF9F0A" : "#30D158";
+          ? "Comparable exercises used a higher-rep profile than usual. Strength/Progression stay hidden until enough eligible 1–12 rep history exists."
+          : "The available workload/rep-profile signals are near normal; strength-based axes need more comparable history.";
+      tone = v==="down" ? "#FF9F0A" : "#64D2FF";
     } else if (s==="up" && v==="up") {
-      headline="Stronger with more productive work.";
+      headline="Stronger with more workload.";
       story = i==="up"
-        ? "Comparable exercises were stronger, group volume was higher, and the session used a lower-rep/higher-intensity profile than usual."
-        : "Comparable exercises were stronger while the selected training group completed more total work.";
+        ? "Comparable exercises were stronger, carried more workload, and used fewer reps per set than their own recent 6-week averages."
+        : "Comparable exercises were stronger and carried more workload than their own recent 6-week averages.";
       tone="#30D158";
     } else if (s==="up" && v==="down" && i==="up") {
-      headline="A heavier, strength-focused session.";
-      story="Comparable strength was above normal while group volume was lower and the rep profile was more intense.";
+      headline="A strength-focused session.";
+      story="Comparable strength was above normal while workload was lower and reps per set were lower than usual.";
       tone="#30D158";
     } else if ((s==="same" || s==="na") && v==="up" && i==="down") {
-      headline="More volume with a higher-rep profile.";
-      story="The selected training group accumulated more work than usual with more reps per set. That describes a volume-oriented session, not automatically better performance.";
+      headline="More workload with a higher-rep profile.";
+      story="Comparable exercises accumulated more workload than usual with more reps per set. That describes a volume-oriented session, not automatically better performance.";
       tone="#FF9F0A";
     } else if (s==="down" && v==="down" && i==="down") {
       headline="A lighter session than usual.";
-      story="Comparable strength and group workload were below recent levels, with a higher-rep/lower-intensity profile.";
+      story="Comparable strength and workload were below recent levels, with more reps per set than usual.";
       tone="#FF9F0A";
     } else if (s==="up" && p==="up") {
       headline="Clear strength progression.";
-      story="Repeated exercises moved forward in rep-adjusted strength. The group-level workload provides context without treating different exercises as equivalent.";
+      story="Repeated exercises moved forward in rep-adjusted strength versus their own rolling 6-week baselines.";
       tone="#30D158";
     } else if (p==="up") {
       headline="Progress across repeated exercises.";
@@ -6700,25 +6727,24 @@ function TrainingLog() {
       story="More comparable exercises moved backward than forward today. One session is context, not a trend.";
       tone="#FF9F0A";
     } else if (i==="up" && v==="same") {
-      headline="More intense rep profile, similar workload.";
-      story="Group workload stayed near normal, but you performed fewer reps per set than usual — a higher-intensity profile.";
+      headline="More strength-oriented reps, similar workload.";
+      story="Workload stayed near normal, but comparable exercises used fewer reps per set than usual.";
       tone="#FF9F0A";
     } else if (v==="up") {
-      headline="A higher-volume session.";
-      story="The selected training group completed more total work than its recent 6-week session baseline.";
+      headline="A higher-workload session.";
+      story="Comparable exercises carried more workload than their own recent 6-week averages.";
       tone="#30D158";
+    } else if (v==="down" && s==="same") {
+      headline="Strength held with less workload.";
+      story="Estimated strength stayed near normal while comparable exercise workload was below its recent 6-week average.";
+      tone="#64D2FF";
     }
     return { headline, story, tone };
   }, [workoutRadar]);
 
-  // PRs are tracked by TOTAL session volume (all sets for that exercise, summed) rather than a
-  // single best set — one big set can flatter a session that was otherwise unremarkable, while
-  // total volume reflects the actual work done. Each PR also carries the rep/set breakdown it
-  // was built from, plus how many days ago it was set ("PR aging"), so a PR you haven't come
-  // close to in months reads differently from one you nearly matched last week.
-  // Uses the same "currently actually logged" list as the charts (`chartExercises`) — not
-  // every exercise name that has ever existed — so a PR disappears once you delete the
-  // session(s) that produced it, instead of hanging around forever.
+  // PRs use the single best eligible 1–12 rep set for each exercise, converted to
+  // estimated 1RM with the same shared Epley calculation used by Stats/Radar/Compare.
+  // Freshness is tied to the latest session containing that exercise, not the latest workout overall.
   const prMap = useMemo(() => {
     if (!sessions) return {};
     const map = {};
@@ -7881,7 +7907,7 @@ function TrainingLog() {
             <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, boxShadow: "none", padding: 16, marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#D1D1D6", marginBottom: 4 }}>Volume by training group — last 6 weeks ({latest ? fmtDate(latest.date) : ""})</div>
               <div style={{ fontSize: 11, color: "#636366", marginBottom: 12 }}>
-                {GROUPS.map((g) => `${g}: ${chartExercises.filter((n) => muscleGroupMap[n] === g).join(" + ") || "—"}`).join(" · ")}
+                {GROUPS.map((g) => `${g}: ${chartExercises.filter((n) => muscleGroupMap[n] === g && isRepExercise(n)).join(" + ") || "—"}`).join(" · ")}
               </div>
               <div style={{ display: "grid", gap: 8 }}>
                 {groupVolumeRecent.map((g) => {
@@ -9071,6 +9097,7 @@ function TrainingLog() {
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#636366", marginBottom: 12 }}>
               <span className="mono">{fmtDateFull(compareSessions[0].date)}</span><span className="mono">{fmtDateFull(compareSessions[1].date)}</span>
             </div>
+            <div style={{fontSize:10.5,color:"#636366",marginBottom:10}}>Est. strength uses the same eligible 1–12 rep e1RM logic as PRs, Stats and Radar. Workload is reps × effective load.</div>
             {compareSessions[0].bodyweight != null && compareSessions[1].bodyweight != null && (
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "8px 0", borderBottom: "1px solid #27272A", marginBottom: 8 }}>
                 <span style={{ color: "#8E8E93" }}>Bodyweight</span>
