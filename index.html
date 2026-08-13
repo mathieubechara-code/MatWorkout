@@ -5047,6 +5047,8 @@ function TrainingLog() {
   const [showWorkoutPrMeaning, setShowWorkoutPrMeaning] = useState(false);
   const [showGroupIncludes, setShowGroupIncludes] = useState(false);
   const [showWorkoutStatsMeaning, setShowWorkoutStatsMeaning] = useState(false);
+  const [showWorkoutTrendMeaning, setShowWorkoutTrendMeaning] = useState(false);
+  const [setChartView, setSetChartView] = useState("total"); // "total" | "sets" for a single exercise in Day view
   const [showLibrary, setShowLibrary] = useState(false);
   // Which exercises show up in the PR card. null = show all (default); array = only these.
   const [prSelection, setPrSelection] = useState(null);
@@ -6516,7 +6518,17 @@ function TrainingLog() {
   const overallTrendView = timeView === "week" ? overallWeekTrend : overallDayTrend;
   const groupPerformanceView = timeView === "week" ? groupNormalizedWeekTrend : groupNormalizedDayTrend;
   const groupChartDataView = groupPerformanceView;
-  const workoutStatsMeaning=(()=>{const scope=filter==="All"?"Overall combines comparable exercises equally after each is normalized to its own recent history.":filter.startsWith("group:")?`${filter.slice(6)} combines comparable exercises in that training group equally after normalization.`:`${filter} shows that exercise directly; Day is per session and Week summarizes the week.`;const metricText=metric==="1rm"?"1RM is estimated strength from the best eligible 1–12 rep set. In All/group views, 100 is the previous 6-week strength average.":metric==="volume"?"Volume is workload: reps × effective load. Higher means more work, not automatically better. In All/group views, 100 is the previous 6-week workload average.":"Reps tracks completed repetitions. More reps can mean more work, not automatically better strength. In All/group views, 100 is the previous 6-week reps average.";return `${scope} ${metricText} The current session is excluded from its own baseline.`;})();
+  const workoutStatsMeaning=(()=>{const scope=filter==="All"?"Overall combines comparable exercises equally after each is normalized to its own recent history.":filter.startsWith("group:")?`${filter.slice(6)} combines comparable exercises in that training group equally after normalization.`:`${filter} shows that exercise directly. In Day view, Total shows the session summary and Sets shows individual set lines; Week summarizes sessions by week.`;const metricText=metric==="1rm"?"1RM is estimated strength from the best eligible 1–12 rep set. In All/group views, 100 is the previous 6-week strength average.":metric==="volume"?"Volume is workload: reps × effective load. Higher means more work, not automatically better. In All/group views, 100 is the previous 6-week workload average.":"Reps tracks completed repetitions. More reps can mean more work, not automatically better strength. In All/group views, 100 is the previous 6-week reps average.";return `${scope} ${metricText} The current session is excluded from its own baseline.`;})();
+  const workoutTrendMeaning = (() => {
+    const base = workoutTrendTag.detail;
+    if (workoutTrendTag.label === "Not enough history") return `${base} The tag waits for enough comparable sessions before calling a direction.`;
+    if (workoutTrendTag.label === "Stable") return `${base}. Recent performance is inside the noise threshold, so no meaningful direction is called.`;
+    if (metric === "1rm") return `${base}. This compares recent estimated strength with the preceding comparable window after rolling 6-week normalization.`;
+    if (metric === "volume") return `${base}. This is a workload direction, not automatically a performance grade.`;
+    if (workoutTrendTag.label === "Fewer reps") return `${base}. Fewer reps is not automatically negative — check 1RM and load, because heavier work can reduce reps.`;
+    if (workoutTrendTag.label === "Building reps") return `${base}. More reps means recent rep output is higher; it does not automatically mean higher strength.`;
+    return base;
+  })();
   const bodyweightDataView = timeView === "week" ? weeklyBodyweightData : bodyweightData;
   const loadStepDataView = timeView === "week" ? weeklyLoadStepData : loadStepData;
 
@@ -8131,11 +8143,19 @@ function TrainingLog() {
                       ? `${filter.slice(6)} ${metric === "1rm" ? "strength" : metric === "volume" ? "volume" : "reps"} trend`
                       : timeView === "week"
                       ? `${filter} — ${yLabel} per week`
-                      : `${filter} — ${yLabel} per set across sessions`;
+                      : `${filter} — ${setChartView === "sets" ? `${yLabel} by set` : metric === "1rm" ? "best estimated 1RM per session" : metric === "volume" ? "total volume per session" : "total reps per session"}`;
                   })()}
                 </div>
-                <span title={`Session-based trend · ${workoutTrendTag.detail}`} style={{flexShrink:0,fontSize:9.5,fontWeight:800,color:workoutTrendTag.tone,border:`1px solid ${workoutTrendTag.tone}55`,borderRadius:999,padding:"3px 7px"}}>{workoutTrendTag.label}</span>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                  {filter !== "All" && !filter.startsWith("group:") && timeView === "day" && <div title={metric==="1rm"?"Total = best eligible estimated 1RM per session; Sets = each eligible set":"Total = session total; Sets = individual set lines"} style={{display:"flex",gap:2,background:"#000000",border:"1px solid #27272A",borderRadius:8,padding:2}}>
+                    {[["total","Total"],["sets","Sets"]].map(([v,l])=><button key={v} onClick={()=>{setSetChartView(v);setChartFocus(null);}} style={{cursor:"pointer",height:22,padding:"0 7px",border:"none",borderRadius:6,background:setChartView===v?"#F2F2F7":"transparent",color:setChartView===v?"#000000":"#8E8E93",fontSize:9,fontWeight:800}}>{l}</button>)}
+                  </div>}
+                  <button onClick={() => setShowWorkoutTrendMeaning((v)=>!v)} title="Tap for trend interpretation" style={{cursor:"pointer",background:showWorkoutTrendMeaning?`${workoutTrendTag.tone}18`:"transparent",fontSize:9.5,fontWeight:800,color:workoutTrendTag.tone,border:`1px solid ${workoutTrendTag.tone}66`,borderRadius:999,padding:"3px 7px"}}>{workoutTrendTag.label}</button>
+                </div>
               </div>
+              {showWorkoutTrendMeaning && <div style={{margin:"5px 4px 7px",padding:"7px 9px",border:`1px solid ${workoutTrendTag.tone}44`,background:`${workoutTrendTag.tone}0D`,borderRadius:9,fontSize:10.5,color:"#D1D1D6",lineHeight:1.4}}>
+                <strong style={{color:workoutTrendTag.tone}}>{workoutTrendTag.label}</strong> · {workoutTrendMeaning}
+              </div>}
 
               <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
                 {filter === "All" ? (
@@ -8165,18 +8185,17 @@ function TrainingLog() {
                 ) : (
                   <LineChart data={perSetData} margin={{ top: 10, right: 16, left: -10, bottom: 0 }}><XAxis dataKey="date" stroke="#636366" fontSize={11} axisLine={{ stroke: "#8E8E93", strokeOpacity: 0.62 }} tickLine={false} /><YAxis stroke="#636366" fontSize={11} tickFormatter={(v) => fmtNum(v, 2)} />
                     <Tooltip contentStyle={{ background: "#27272A", border: "1px solid #2C2C2E", borderRadius: 12, fontSize: 12 }} formatter={(v, name) => [fmtNum(v, 2), name]} />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />
-                    {Array.from({ length: maxSets }).map((_, i) => {
+                    {setChartView === "sets" && <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }} onClick={(e) => setChartFocus((cur) => (cur === e.dataKey ? null : e.dataKey))} />}
+                    {setChartView === "sets" ? Array.from({ length: maxSets }).map((_, i) => {
                       const key = "Set " + (i + 1);
                       return <Line key={i} type="monotone" dataKey={key} stroke={setColor(i)} strokeWidth={chartFocus === key ? 2.4 : 1.6} strokeOpacity={chartFocus && chartFocus !== key ? 0.15 : 0.85} dot={{ r: 2.5, fillOpacity: chartFocus && chartFocus !== key ? 0.15 : 1 }} connectNulls />;
-                    })}
-                    <Line type="monotone" dataKey="Total" stroke="#FFFFFF" strokeWidth={chartFocus === "Total" ? 3.2 : 2.6} strokeOpacity={chartFocus && chartFocus !== "Total" ? 0.15 : 1} dot={{ r: 3.5, fillOpacity: chartFocus && chartFocus !== "Total" ? 0.15 : 1 }} connectNulls />
+                    }) : <Line type="monotone" dataKey="Total" name={metric==="1rm"?"Best est. 1RM":metric==="volume"?"Total volume":"Total reps"} stroke="#FFFFFF" strokeWidth={3} dot={{ r: 3.5 }} connectNulls />}
                   </LineChart>
                 )}
               </ResponsiveContainer>
             </div>
 
-            {chartFocus && filter !== "All" && !filter.startsWith("group:") && (
+            {setChartView === "sets" && chartFocus && filter !== "All" && !filter.startsWith("group:") && (
               <div style={{ textAlign: "center", marginTop: -8, marginBottom: 10 }}>
                 <button onClick={() => setChartFocus(null)} className="mono" style={{ background: "none", border: "none", color: "#636366", fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>Show all lines</button>
               </div>
