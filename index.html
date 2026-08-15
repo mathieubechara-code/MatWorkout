@@ -4354,13 +4354,15 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
               const selected = swimSection === v;
               return (
                 <button key={v} className="app-nav-pill" onClick={() => setSwimSection(v)} style={{
-                  flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
-                  background: selected ? "#FF9F0A" : "transparent", border: "none", borderRadius: 10,
-                  color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 12,
-                  padding: isMobile ? "7px 4px" : "8px 7px",
+                  flex: (v === "compare" || v === "radar") ? "0 0 auto" : 1,
+                  minWidth: (v === "compare" || v === "radar") ? (isMobile ? 82 : 94) : 0,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer",
+                  background: selected ? "#FF9F0A" : "transparent", border: "none", borderRadius: 9,
+                  color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 9.5 : 11,
+                  padding: (v === "compare" || v === "radar") ? (isMobile ? "6px 8px" : "7px 10px") : (isMobile ? "6px 4px" : "7px 6px"),
                   transition: "background 0.15s, color 0.15s",
                 }}>
-                  <Ic size={isMobile ? 11 : 13} />
+                  <Ic size={isMobile ? 10 : 12} />
                   {l}
                 </button>
               );
