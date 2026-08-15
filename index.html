@@ -5086,6 +5086,7 @@ function TrainingLog() {
   const [workoutFitNewExercise, setWorkoutFitNewExercise] = useState("");
   const [workoutFitShowExerciseList, setWorkoutFitShowExerciseList] = useState(false);
   const [workoutFitCreateAssign, setWorkoutFitCreateAssign] = useState(false);
+  const [workoutFitRecentCreated, setWorkoutFitRecentCreated] = useState(null);
   const [workoutFitMsg, setWorkoutFitMsg] = useState("");
   const [workoutFitUploading, setWorkoutFitUploading] = useState(false);
   const [expandedWorkoutId, setExpandedWorkoutId] = useState(null);
@@ -5778,8 +5779,9 @@ function TrainingLog() {
       setPendingUnmatchedSource(null);
       setParsedReviewActive(true);
     }
-    if (workoutFitCreateAssign && workoutFitSelected.size > 0) {
-      assignExerciseToSelectedFitRows(name);
+    if (workoutFitCreateAssign) {
+      setWorkoutFitRecentCreated(name);
+      if (workoutFitSelected.size > 0) assignExerciseToSelectedFitRows(name);
       setWorkoutFitCreateAssign(false);
     }
     setDraft((d) => {
@@ -6006,6 +6008,11 @@ function TrainingLog() {
     : 0;
   const workoutFitReconciled = !!workoutFitReview && workoutFitUnresolvedCount === 0 &&
     workoutFitReview.rows.some((r) => r.included);
+  const workoutFitPickerEntries = useMemo(() => {
+    const base = activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps");
+    if (!workoutFitRecentCreated || base.some((e)=>e.name===workoutFitRecentCreated)) return base;
+    return [...base, {name:workoutFitRecentCreated,type:"reps",archived:false}];
+  }, [activeLibrary, workoutFitRecentCreated]);
 
   const saveWorkoutFitReview = async () => {
     if (!workoutFitReview) return;
@@ -8632,14 +8639,21 @@ function TrainingLog() {
                       disabled={workoutFitSelected.size===0}
                       style={{width:"100%",boxSizing:"border-box",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"6px 8px",color:"#F2F2F7",fontSize:10.5,opacity:workoutFitSelected.size?1:.5}}
                     />
-                    {workoutFitShowExerciseList && workoutFitSelected.size>0 && <div style={{position:"absolute",zIndex:15,top:"calc(100% + 4px)",left:0,right:0,maxHeight:190,overflowY:"auto",background:"#1C1C1E",border:"1px solid #3A3A3C",borderRadius:10,boxShadow:"0 10px 28px rgba(0,0,0,.35)",padding:4}}>
-                      {activeLibrary
-                        .filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps" && (!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase())))
-                        .slice(0,24)
-                        .map((e)=><button key={e.name} onClick={()=>assignExerciseToSelectedFitRows(e.name)} style={{width:"100%",textAlign:"left",cursor:"pointer",background:"transparent",border:"none",borderRadius:7,color:"#D1D1D6",padding:"7px 8px",fontSize:10.5,fontWeight:650}}>{e.name}</button>)}
-                      {activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps" && (!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase()))).length===0 &&
-                        <div style={{padding:"8px",fontSize:10,color:"#636366"}}>No matching exercise.</div>}
-                    </div>}
+                    {workoutFitShowExerciseList && workoutFitSelected.size>0 && <>
+                      <button aria-label="Close exercise list" onClick={()=>setWorkoutFitShowExerciseList(false)} style={{position:"fixed",inset:0,zIndex:14,background:"transparent",border:"none",padding:0,cursor:"default"}} />
+                      <div style={{position:"absolute",zIndex:15,top:"calc(100% + 4px)",left:0,right:0,maxHeight:220,overflowY:"auto",background:"#1C1C1E",border:"1px solid #3A3A3C",borderRadius:10,boxShadow:"0 10px 28px rgba(0,0,0,.35)",padding:4}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 5px 5px"}}>
+                          <span style={{fontSize:9.5,color:"#636366",fontWeight:700}}>Choose exercise</span>
+                          <button onClick={()=>setWorkoutFitShowExerciseList(false)} style={{cursor:"pointer",background:"transparent",border:"none",color:"#8E8E93",fontSize:10,fontWeight:800,padding:"2px 4px"}}>Close</button>
+                        </div>
+                        {workoutFitPickerEntries
+                          .filter((e)=>(!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase())))
+                          .slice(0,40)
+                          .map((e)=><button key={e.name} onClick={()=>assignExerciseToSelectedFitRows(e.name)} style={{width:"100%",textAlign:"left",cursor:"pointer",background:"transparent",border:"none",borderRadius:7,color:"#D1D1D6",padding:"7px 8px",fontSize:10.5,fontWeight:650}}>{e.name}</button>)}
+                        {workoutFitPickerEntries.filter((e)=>(!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase()))).length===0 &&
+                          <div style={{padding:"8px",fontSize:10,color:"#636366"}}>No matching exercise.</div>}
+                      </div>
+                    </>}
                   </div>
                   <button onClick={()=>setWorkoutFitShowExerciseList((v)=>!v)} disabled={workoutFitSelected.size===0} style={{cursor:workoutFitSelected.size?"pointer":"default",opacity:workoutFitSelected.size?1:.45,background:"transparent",border:"1px solid #64D2FF55",borderRadius:8,color:"#64D2FF",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Browse</button>
                   <button onClick={()=>{
@@ -8662,7 +8676,7 @@ function TrainingLog() {
                       <span className="mono" style={{fontSize:10,color:"#8E8E93"}}>#{idx+1}</span>
                       <select value={r.exercise} disabled={!r.included} onChange={(e)=>updateWorkoutFitRow(r.id,{exercise:e.target.value,resolution:e.target.value?"assigned":"review"})} style={{minWidth:0,background:"#1C1C1E",border:`1px solid ${r.exercise?"#30D15844":"#FF9F0A55"}`,borderRadius:7,padding:"5px 6px",color:r.exercise?"#D1D1D6":"#FF9F0A",fontSize:10}}>
                         <option value="">Needs exercise</option>
-                        {activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps").map((e)=><option key={e.name} value={e.name}>{e.name}</option>)}
+                        {workoutFitPickerEntries.map((e)=><option key={e.name} value={e.name}>{e.name}</option>)}
                       </select>
                       <input title="Reps" type="number" min="1" step="1" disabled={!r.included} value={r.reps} onChange={(e)=>updateWorkoutFitRow(r.id,{reps:e.target.value})} className="mono" style={{width:"100%",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:7,padding:"5px 5px",color:"#F2F2F7",fontSize:10,textAlign:"center"}}/>
                       <input title="Added kg" type="number" min="0" step="0.5" disabled={!r.included} value={r.loadKg} onChange={(e)=>updateWorkoutFitRow(r.id,{loadKg:e.target.value})} className="mono" style={{width:"100%",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:7,padding:"5px 5px",color:"#F2F2F7",fontSize:10,textAlign:"center"}}/>
@@ -9426,7 +9440,7 @@ function TrainingLog() {
               </div>
               <div style={{ fontSize: 10.5, color: "#48484A" }}>Ratio = fraction of bodyweight lifted per rep. Use 0 for a pure-load exercise (barbell/machine). Static exercises are preserved in the log but excluded from rep/volume/e1RM analytics until duration is supported.</div>
               {customExerciseError && <div style={{fontSize:10.5,color:"#FF6961",padding:"7px 8px",border:"1px solid #FF453A55",borderRadius:9}}>{customExerciseError}</div>}
-              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "#FF9F0A", color: "#000000", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{editingCustomName ? "Save custom exercise" : "Add exercise"}</button>
+              <button onClick={addCustomExercise} disabled={!addExDraft.name.trim()} style={{ marginTop: 4, background: "#FF9F0A", color: "#000000", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{editingCustomName ? "Save custom exercise" : workoutFitCreateAssign ? "Add & assign exercise" : "Add exercise"}</button>
             </div>
           </div>
         </div>
