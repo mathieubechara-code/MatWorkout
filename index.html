@@ -5341,7 +5341,9 @@ function TrainingLog() {
   const keepSwimLengthDistanceOnly = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({
     ...l,
     userExcluded: false,
-    userReviewResolution: (l.glitch || l.reviewFlag) ? "keep_length" : l.userReviewResolution,
+    // Manual correction is always available. A length does not need an automatic flag
+    // before the user can keep its distance while excluding its measurements from analytics.
+    userReviewResolution: "keep_length",
   }));
   const excludeReviewedSwimLength = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({
     ...l,
@@ -9217,7 +9219,8 @@ function TrainingLog() {
                                       const eff = effectiveLength(l);
                                       const excluded = !!l.userExcluded;
                                       const rowStyle = {
-                                        background: excluded ? "transparent" : (l.glitch ? "#FF9F0A14" : (l.reviewFlag ? "#64D2FF0D" : "transparent")),
+                                        // Make flagged rows visually obvious without overwhelming the table.
+                                        background: excluded ? "transparent" : (l.glitch ? "#FF9F0A2E" : (l.reviewFlag ? "#64D2FF26" : "transparent")),
                                         opacity: excluded ? 0.45 : 1,
                                         borderTop: "1px solid var(--border, #27272A)",
                                       };
@@ -9278,10 +9281,10 @@ function TrainingLog() {
                                           <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.totalStrokes : "—"}</td>
                                           <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.avgCadence : "—"}</td>
                                           <td className="mono" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>{eff.lengthType === "active" ? l.swolf : "—"}</td>
-                                          <td style={{ padding: "5px 4px", textAlign: "right", position: "sticky", right: 0, background: l.glitch && !excluded ? "#1a1712" : (l.reviewFlag && !excluded ? "#071114" : "var(--card, #000000)") }} onClick={(e) => e.stopPropagation()}>
+                                          <td style={{ padding: "5px 4px", textAlign: "right", position: "sticky", right: 0, background: l.glitch && !excluded ? "#2A2110" : (l.reviewFlag && !excluded ? "#10272E" : "var(--card, #000000)") }} onClick={(e) => e.stopPropagation()}>
                                             <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", flexWrap: "wrap", alignItems: "center" }}>
                                               {reviewTag && (
-                                                <span className="mono" title={reviewResolution ? "You already reviewed this flagged length" : "This flagged length still needs your decision"} style={{ color: reviewTag.color, border: `1px solid ${reviewTag.color}66`, background: `${reviewTag.color}12`, borderRadius: 999, padding: "3px 7px", fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>
+                                                <span className="mono" title={reviewResolution ? "Manual review/correction applied to this length" : "This flagged length still needs your decision"} style={{ color: reviewTag.color, border: `1px solid ${reviewTag.color}66`, background: `${reviewTag.color}12`, borderRadius: 999, padding: "3px 7px", fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>
                                                   {reviewTag.label}
                                                 </span>
                                               )}
@@ -9297,6 +9300,9 @@ function TrainingLog() {
                                               )}
                                               {!excluded && eff.lengthType === "active" && (
                                                 <button onClick={() => markSwimLengthIdle(s.id, l.index)} style={lenBtnStyle("neutral")}>Mark idle</button>
+                                              )}
+                                              {!excluded && eff.lengthType === "active" && (!flaggedForReview || swimReviewResolved(l)) && reviewResolution !== "keep_length" && (
+                                                <button onClick={() => keepSwimLengthDistanceOnly(s.id, l.index)} title="Keep this pool length in distance but exclude its measurements from pace, SWOLF, cadence, strokes, DPS and trends" style={lenBtnStyle("neutral")}>Keep length</button>
                                               )}
                                               {!excluded && eff.lengthType === "idle" && (
                                                 <button onClick={() => setSwimIdleToActiveFor({ sessionId: s.id, lengthIndex: l.index })} style={lenBtnStyle("neutral")}>Mark active</button>
