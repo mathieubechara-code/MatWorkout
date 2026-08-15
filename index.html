@@ -7698,14 +7698,42 @@ function TrainingLog() {
           line-height: 1.15 !important;
           border-radius: 9px !important;
         }
+        .pill.compare-combo-pill,
+        button.compare-combo-pill,
+        .pill.radar-axis-pill,
+        button.radar-axis-pill {
+          min-height: 29px !important;
+          height: 29px !important;
+          padding: 5px 8px !important;
+          font-size: 10.3px !important;
+          line-height: 1.15 !important;
+          border-radius: 9px !important;
+          width: auto !important;
+        }
+
         @media (max-width: 560px) {
-          .pill.swim-filter-pill,
-          button.swim-filter-pill {
+          .pill.swim-filter-pill:not(.compare-combo-pill):not(.radar-axis-pill),
+          button.swim-filter-pill:not(.compare-combo-pill):not(.radar-axis-pill) {
             min-height: 40px !important;
             padding: 5px 8px !important;
             font-size: 10.3px !important;
             line-height: 1.15 !important;
             border-radius: 9px !important;
+          }
+
+          /* Compare + Radar metric pills intentionally match Workout's
+             training-group/exercise pills: 29px high, compact padding/text. */
+          .pill.compare-combo-pill,
+          button.compare-combo-pill,
+          .pill.radar-axis-pill,
+          button.radar-axis-pill {
+            min-height: 29px !important;
+            height: 29px !important;
+            padding: 5px 8px !important;
+            font-size: 10.3px !important;
+            line-height: 1.15 !important;
+            border-radius: 9px !important;
+            width: auto !important;
           }
         }
       `}</style>
