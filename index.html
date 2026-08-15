@@ -728,11 +728,6 @@ function effectiveLength(l) {
   return { ...l, lengthType, stroke, isOverridden: !!(l.userLengthType || l.userStroke) };
 }
 
-// Review outcome helpers. These do NOT participate in anomaly detection.
-const swimReviewResolved = (l) => ["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution);
-const swimDistanceIncluded = (l) => !l.userExcluded && l.userReviewResolution !== "removed";
-const swimAnalyticsIncluded = (l) => swimDistanceIncluded(l) && l.userReviewResolution !== "keep_length";
-
 const SWIM_EFFORT_META = {
   easy:  { label: "Easy",  color: "#30D158" },
   work:  { label: "Work",  color: "#64D2FF" },
@@ -766,7 +761,7 @@ function buildSwimEffortAssignments(sessions) {
     const allEff = (s.lengths || []).map((raw) => ({ raw, eff: effectiveLength(raw) }));
     const active = allEff.filter(({ raw, eff }) =>
       eff.lengthType === "active" &&
-      swimAnalyticsIncluded(raw) &&
+      !raw.userExcluded &&
       eff.pace100 != null &&
       Number.isFinite(eff.pace100) &&
       eff.pace100 > 0
@@ -859,7 +854,7 @@ const swimEffortComposition = (session, assignments) => {
   const counts = { easy: 0, work: 0, speed: 0 };
   (session && session.lengths || []).forEach((raw) => {
     const l = effectiveLength(raw);
-    if (l.lengthType !== "active" || !swimAnalyticsIncluded(raw)) return;
+    if (l.lengthType !== "active" || raw.userExcluded) return;
     counts[swimEffortForLength(session, raw, assignments)] += 1;
   });
   const pool = session && session.poolLength;
@@ -1078,28 +1073,23 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
       if (!(sc > 0)) return;
       const dps = poolLength / sc;
 
-      // Conservative REVIEW-ONLY candidates. Neither branch excludes or rewrites data.
+      // Conservative review candidate only:
+      // - dramatically faster than this session's same-stroke median
+      // - dramatically fewer Garmin-counted strokes
+      // - >4 m per Garmin-counted stroke
       //
-      // Fast / low-count anomaly: retained from the current detector.
+      // This is deliberately NOT a corruption verdict. Sprint/recovery structure can be real,
+      // so the candidate never changes PR eligibility, effort baselines, totals or analytics.
       const extremeFastLowCount =
         eff.pace100 < paceMed * 0.60 &&
         sc < strokeMed * 0.60 &&
         dps > 4.0;
 
-      // Slow / high-count anomaly: restored from the earlier two-sided detector.
-      // This was previously dropped when flagging was made more conservative, which meant
-      // genuine obvious slow/high-stroke anomalies could stop appearing for review.
-      // Because flags are now review-only, it is safe to surface this again without
-      // contaminating distance or analytics until the user chooses an outcome.
-      const extremeSlowHighCount =
-        eff.pace100 > paceMed * 1.70 &&
-        sc > strokeMed * 1.30;
-
-      if (extremeFastLowCount || extremeSlowHighCount) {
-        const reason = extremeFastLowCount
-          ? `unusual same-stroke length: ${Math.round(eff.pace100)}s/100m, ${sc} Garmin-counted strokes (${dps.toFixed(1)}m/stroke) — unusually fast with unusually few strokes; review only`
-          : `unusual same-stroke length: ${Math.round(eff.pace100)}s/100m, ${sc} Garmin-counted strokes — unusually slow with unusually many strokes versus this session's ${SWIM_STROKE_LABELS[stroke] || stroke} pattern; review only`;
-        review.set(raw.index, reason);
+      if (extremeFastLowCount) {
+        review.set(
+          raw.index,
+          `unusual same-stroke length: ${Math.round(eff.pace100)}s/100m, ${sc} Garmin-counted strokes (${dps.toFixed(1)}m/stroke) — review only`
+        );
       }
     });
   });
@@ -1119,22 +1109,19 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
 
 function computeSwimSessionMetrics(lengths, poolLength) {
   const eff = lengths.map(effectiveLength);
+  const validActive = eff.filter((l) => l.lengthType === "active" && !l.userExcluded);
+  const timedActive = validActive.filter((l) => l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0);
+  const idleLengths = eff.filter((l) => l.lengthType === "idle" && !l.userExcluded);
 
-  // Distance truth and analytics trust are independent.
-  const distanceActive = eff.filter((l) => l.lengthType === "active" && swimDistanceIncluded(l));
-  const analyticsActive = distanceActive.filter((l) => swimAnalyticsIncluded(l));
-  const timedActive = analyticsActive.filter((l) => l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0);
-  const idleLengths = eff.filter((l) => l.lengthType === "idle" && swimDistanceIncluded(l));
-
-  const distance = poolLength != null ? Math.round(distanceActive.length * poolLength * 100) / 100 : null;
-  const analyticsDistance = poolLength != null ? Math.round(analyticsActive.length * poolLength * 100) / 100 : null;
+  const distance = poolLength != null ? Math.round(validActive.length * poolLength * 100) / 100 : null;
   const swimTimeSec = timedActive.reduce((a, l) => a + l.elapsedSec, 0);
   const restTimeSec = idleLengths.reduce((a, l) => a + (Number.isFinite(l.elapsedSec) && l.elapsedSec > 0 ? l.elapsedSec : 0), 0);
-  const paceTimeCoverage = analyticsActive.length > 0 ? timedActive.length / analyticsActive.length : 0;
-  const pace100Overall = paceTimeCoverage === 1 && swimTimeSec > 0 && analyticsDistance ? (swimTimeSec / analyticsDistance) * 100 : null;
+  const paceTimeCoverage = validActive.length > 0 ? timedActive.length / validActive.length : 0;
+  // Never manufacture pace by pairing full distance with partial timing.
+  const pace100Overall = paceTimeCoverage === 1 && swimTimeSec > 0 && distance ? (swimTimeSec / distance) * 100 : null;
 
   const strokeGroups = {};
-  analyticsActive.forEach((l) => {
+  validActive.forEach((l) => {
     if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = {
       swolfs: [], timeSec: 0, lengthCount: 0, timedLengthCount: 0,
       countedStrokeTotal: 0, countedStrokeTimeSec: 0, countedStrokeLengths: 0
@@ -1171,6 +1158,7 @@ function computeSwimSessionMetrics(lengths, poolLength) {
       techniqueDistanceCoverage,
       techniqueTimeCoverage,
       avgSwolf: TECHNIQUE_SWIM_STROKES.has(stroke) && g.countedStrokeLengths > 0 ? avg(g.swolfs) : null,
+      // True ratio-of-totals over exactly the lengths with valid Garmin stroke counts.
       avgCadence: g.countedStrokeTotal > 0 && g.countedStrokeTimeSec > 0
         ? (g.countedStrokeTotal / g.countedStrokeTimeSec) * 60
         : null,
@@ -1184,11 +1172,12 @@ function computeSwimSessionMetrics(lengths, poolLength) {
     };
   });
 
-  // Reps are analytics, so Keep length is omitted from rep pace/structure calculations.
+  // Reconstruct reps/sets from consecutive active lengths (a run broken by any idle length,
+  // in original recorded order, honoring exclusions and IDLE/ACTIVE overrides).
   const reps = [];
   let currentRep = null;
   eff.forEach((l) => {
-    if (!swimAnalyticsIncluded(l)) return;
+    if (l.userExcluded) return;
     if (l.lengthType === "active") {
       if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timedLengthCount: 0, timeSec: 0, strokeSet: new Set() };
       currentRep.lengthCount += 1;
@@ -1211,18 +1200,16 @@ function computeSwimSessionMetrics(lengths, poolLength) {
   }) : [];
 
   const totalActiveLengths = eff.filter((l) => l.lengthType === "active").length;
-  const suspiciousKept = eff.filter((l) => l.glitch && l.lengthType === "active" && !l.userExcluded && !swimReviewResolved(l)).length;
-  const reviewOnly = eff.filter((l) => l.reviewFlag && l.lengthType === "active" && !l.userExcluded && !swimReviewResolved(l)).length;
-  const distanceOnlyCount = eff.filter((l) => l.lengthType === "active" && l.userReviewResolution === "keep_length").length;
-  const excludedCount = eff.filter((l) => !swimDistanceIncluded(l)).length;
+  const suspiciousKept = eff.filter((l) => l.glitch && l.lengthType === "active" && !l.userExcluded).length;
+  const reviewOnly = eff.filter((l) => l.reviewFlag && l.lengthType === "active" && !l.userExcluded).length;
+  const excludedCount = eff.filter((l) => l.userExcluded).length;
   const parts = [];
   if (suspiciousKept > 0) parts.push(`${suspiciousKept} sensor-quality warning${suspiciousKept === 1 ? "" : "s"} (still counted until you decide)`);
-  if (reviewOnly > 0) parts.push(`${reviewOnly} unusual length${reviewOnly === 1 ? "" : "s"} marked review-only (does not change data until you decide)`);
-  if (distanceOnlyCount > 0) parts.push(`${distanceOnlyCount} length${distanceOnlyCount === 1 ? "" : "s"} kept for distance only`);
+  if (reviewOnly > 0) parts.push(`${reviewOnly} unusual length${reviewOnly === 1 ? "" : "s"} marked review-only (does not change analytics)`);
   if (excludedCount > 0) parts.push(`${excludedCount} length${excludedCount === 1 ? "" : "s"} excluded by you`);
   const qualityNote = parts.length ? parts.join("; ") + "." : null;
 
-  return { distance, swimTimeSec, restTimeSec, pace100Overall, paceTimeCoverage, strokeStats, reps: repSummaries, totalActiveLengths, validActiveLengths: analyticsActive.length, excludedCount, qualityNote };
+  return { distance, swimTimeSec, restTimeSec, pace100Overall, paceTimeCoverage, strokeStats, reps: repSummaries, totalActiveLengths, validActiveLengths: validActive.length, excludedCount, qualityNote };
 }
 
 // Turns raw parsed FIT messages into a fully-computed swim session object, applying the
@@ -1389,7 +1376,7 @@ function backfillSwimSessionStrokeStats(session) {
   const strokeStatsNeedBackfill = strokes.some((k) => session.strokeStats[k] && session.strokeStats[k].pace100 == null);
   let fixedStrokeStats = session.strokeStats;
   if (strokeStatsNeedBackfill) {
-    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && swimAnalyticsIncluded(l));
+    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && !l.userExcluded);
     const groups = {};
     validActive.forEach((l) => {
       if (!groups[l.stroke]) groups[l.stroke] = { timeSec: 0, lengthCount: 0 };
@@ -3209,7 +3196,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
   // Best pace is calculated directly from stroke-specific pace (the one with the most lengths),
   // shown as a small tag next to the PR so "1:32/100m" isn't ambiguous about which stroke it
   // was swum in — whole-session pace can otherwise mix strokes together silently.
-  const hasUnresolvedSwimQualityFlag = (s) => !!(s && Array.isArray(s.lengths) && s.lengths.some((l) => l.glitch && !l.userExcluded && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution)));
+  const hasUnresolvedSwimQualityFlag = (s) => !!(s && Array.isArray(s.lengths) && s.lengths.some((l) => l.glitch && !l.userExcluded && !["kept","removed","adjusted"].includes(l.userReviewResolution)));
 // reviewFlag is intentionally NOT included here: a personal-pattern review candidate is not
 // evidence of corrupted data and must not suppress a real sprint/PR.
 
@@ -5298,16 +5285,6 @@ function TrainingLog() {
     ...l,
     userExcluded: false,
     userReviewResolution: (l.glitch || l.reviewFlag) ? "kept" : l.userReviewResolution,
-  }));
-  const keepSwimLengthDistanceOnly = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({
-    ...l,
-    userExcluded: false,
-    userReviewResolution: (l.glitch || l.reviewFlag) ? "keep_length" : l.userReviewResolution,
-  }));
-  const excludeReviewedSwimLength = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({
-    ...l,
-    userExcluded: true,
-    userReviewResolution: (l.glitch || l.reviewFlag) ? "removed" : l.userReviewResolution,
   }));
   const resetSwimLengthOverrides = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: false, userLengthType: null, userStroke: null, userReviewResolution: null }));
 
@@ -8891,12 +8868,12 @@ function TrainingLog() {
                 // Include persisted review history so a corrected warning does not vanish from
                 // the session's reconciliation state after the correction clears the live flag.
                 const reviewedOrFlaggedLengths = (s.lengths || []).filter((l) =>
-                  l.glitch || l.reviewFlag || ["kept", "keep_length", "removed", "adjusted"].includes(l.userReviewResolution)
+                  l.glitch || l.reviewFlag || ["kept", "removed", "adjusted"].includes(l.userReviewResolution)
                 );
                 const unresolvedFlaggedLengths = reviewedOrFlaggedLengths.filter((l) =>
                   (l.glitch || l.reviewFlag) &&
                   !l.userExcluded &&
-                  !["kept", "keep_length", "removed", "adjusted"].includes(l.userReviewResolution)
+                  !["kept", "removed", "adjusted"].includes(l.userReviewResolution)
                 );
                 const hasFlaggedLengths = reviewedOrFlaggedLengths.length > 0;
                 const reviewReconciled = hasFlaggedLengths && unresolvedFlaggedLengths.length === 0;
@@ -9193,13 +9170,11 @@ function TrainingLog() {
                                       const flaggedForReview = !!(l.glitch || l.reviewFlag);
                                       const reviewResolution = l.userReviewResolution || (excluded && flaggedForReview ? "removed" : null);
                                       const reviewTag = reviewResolution === "removed"
-                                        ? { label: "Reviewed · Exclude", color: "#30D158" }
-                                        : reviewResolution === "keep_length"
-                                          ? { label: "Reviewed · Keep length", color: "#30D158" }
-                                          : reviewResolution === "kept"
-                                            ? { label: "Reviewed · Keep all", color: "#30D158" }
-                                            : reviewResolution === "adjusted"
-                                              ? { label: "Reviewed · Adjusted", color: "#30D158" }
+                                        ? { label: "Reviewed · Removed", color: "#30D158" }
+                                        : reviewResolution === "kept"
+                                          ? { label: "Reviewed · Kept", color: "#30D158" }
+                                          : reviewResolution === "adjusted"
+                                            ? { label: "Reviewed · Adjusted", color: "#30D158" }
                                             : flaggedForReview
                                               ? { label: "Needs review", color: l.glitch ? "#FF9F0A" : "#64D2FF" }
                                               : null;
@@ -9213,7 +9188,7 @@ function TrainingLog() {
                                             </span>
                                           </td>
                                           <td style={{ padding: "5px 8px", color: eff.lengthType === "idle" ? "var(--text-dimmer, #636366)" : "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>
-                                            <span>{eff.lengthType}{l.glitch && !excluded && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution) ? " ⚠" : ""}{l.reviewFlag && !excluded && !l.glitch && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution) ? " ◇" : ""}{eff.isOverridden ? " ✎" : ""}</span>
+                                            <span>{eff.lengthType}{l.glitch && !excluded && !["kept","removed","adjusted"].includes(l.userReviewResolution) ? " ⚠" : ""}{l.reviewFlag && !excluded && !l.glitch && !["kept","removed","adjusted"].includes(l.userReviewResolution) ? " ◇" : ""}{eff.isOverridden ? " ✎" : ""}</span>
                                             {editingEffort && effort && <span className="mono" style={{ display: "inline-block", marginLeft: 5, fontSize: 9, color: SWIM_EFFORT_META[effort].color, border: `1px solid ${SWIM_EFFORT_META[effort].color}55`, borderRadius: 5, padding: "1px 4px" }}>{SWIM_EFFORT_META[effort].label}{validSwimEffort(l.userEffort) ? " · manual" : ""}</span>}
                                           </td>
                                           <td style={{ padding: "5px 8px", ...dataCellStyle }}>
@@ -9246,12 +9221,8 @@ function TrainingLog() {
                                                   {reviewTag.label}
                                                 </span>
                                               )}
-                                              {flaggedForReview && !swimReviewResolved(l) && (
-                                                <>
-                                                  <button onClick={() => keepSuspiciousSwimLength(s.id, l.index)} title="Distance YES · Analytics YES" style={lenBtnStyle("positive")}>Keep all</button>
-                                                  <button onClick={() => keepSwimLengthDistanceOnly(s.id, l.index)} title="Distance YES · Analytics NO" style={lenBtnStyle("neutral")}>Keep length</button>
-                                                  <button onClick={() => excludeReviewedSwimLength(s.id, l.index)} title="Distance NO · Analytics NO" style={lenBtnStyle("negative")}>Exclude</button>
-                                                </>
+                                              {flaggedForReview && !excluded && !["kept","removed","adjusted"].includes(reviewResolution) && (
+                                                <button onClick={() => keepSuspiciousSwimLength(s.id, l.index)} title="Confirm this flagged length is valid and keep it in analytics" style={lenBtnStyle("positive")}>Keep</button>
                                               )}
                                               {eff.isOverridden && !excluded && (
                                                 <button onClick={() => resetSwimLengthOverrides(s.id, l.index)} title="Revert to original" style={lenBtnStyle("neutral")}>Revert</button>
@@ -9262,11 +9233,9 @@ function TrainingLog() {
                                               {!excluded && eff.lengthType === "idle" && (
                                                 <button onClick={() => setSwimIdleToActiveFor({ sessionId: s.id, lengthIndex: l.index })} style={lenBtnStyle("neutral")}>Mark active</button>
                                               )}
-                                              {(!flaggedForReview || swimReviewResolved(l)) && (
-                                                <button onClick={() => toggleExcludeSwimLength(s.id, l.index)} style={lenBtnStyle(excluded ? "positive" : "negative")}>
-                                                  {excluded ? "Include" : "Exclude"}
-                                                </button>
-                                              )}
+                                              <button onClick={() => toggleExcludeSwimLength(s.id, l.index)} style={lenBtnStyle(excluded ? "positive" : "negative")}>
+                                                {excluded ? "Include" : "Exclude"}
+                                              </button>
                                             </div>
                                           </td>
                                         </tr>
@@ -9298,7 +9267,7 @@ function TrainingLog() {
                               {s.lengths.some((l) => l.glitch && !l.userExcluded) && (
                                 <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 6 }}>⚠ sensor-quality warning. Keep, Exclude, or correct the length once checked; its Status becomes Reviewed · Kept/Removed/Adjusted, and the session turns Reconciled when none remain unresolved.</div>
                               )}
-                              {s.lengths.some((l) => l.reviewFlag && !l.userExcluded && !l.glitch && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution)) && (
+                              {s.lengths.some((l) => l.reviewFlag && !l.userExcluded && !l.glitch && !["kept","removed","adjusted"].includes(l.userReviewResolution)) && (
                                 <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 4 }}>◇ unusual-length review. It stays included in analytics unless excluded. Use Keep or Exclude once checked; the Status tag records your decision.</div>
                               )}
                             </>
