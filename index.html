@@ -5083,6 +5083,7 @@ function TrainingLog() {
   const [workoutFitReview, setWorkoutFitReview] = useState(null);
   const [workoutFitSelected, setWorkoutFitSelected] = useState(() => new Set());
   const [workoutFitAssignName, setWorkoutFitAssignName] = useState("");
+  const [workoutFitNewExercise, setWorkoutFitNewExercise] = useState("");
   const [workoutFitMsg, setWorkoutFitMsg] = useState("");
   const [workoutFitUploading, setWorkoutFitUploading] = useState(false);
   const [expandedWorkoutId, setExpandedWorkoutId] = useState(null);
@@ -5892,10 +5893,20 @@ function TrainingLog() {
 
   const startEdit = (s) => {
     setFormError("");
+    if (s?.sourceType === "garmin_fit" && s?.fitSource?.rows?.length) {
+      setWorkoutFitReview({
+        fileName:s.fitSource.fileName||"Garmin FIT", date:s.date, label:s.label||"Garmin FIT",
+        bodyweight:s.bodyweight!=null?String(s.bodyweight):"", sessionAvgHR:s.fitSource.sessionAvgHR??null,
+        parserVersion:s.fitSource.parserVersion||1, sourceMessage:s.fitSource.sourceMessage||225, editingSessionId:s.id,
+        rows:s.fitSource.rows.map((r,i)=>({id:`fit-edit-${i+1}`,sourceIndex:r.sourceIndex??i,sourceMessageIndex:r.sourceMessageIndex??i,sourceCategoryCode:r.sourceCategoryCode??null,startTime:r.startTime??null,durationSec:r.durationSec??null,avgHR:r.avgHR??null,reps:r.reps,loadKg:r.loadKg??0,exercise:r.exercise||"",included:r.included!==false,resolution:r.included===false?"excluded":(r.exercise?"assigned":"review")}))
+      });
+      setWorkoutFitSelected(new Set()); setWorkoutFitAssignName(""); setWorkoutFitNewExercise("");
+      setWorkoutFitMsg("Editing reconciled FIT workout."); setShowForm(false); setEditingId(null); return;
+    }
     setEditingId(s.id);
     // Include every exercise the session actually has data for (even if it's since been
     // untracked) plus all currently tracked fields, so nothing gets silently dropped on save.
-    const namesForEdit = Array.from(new Set([...trackedExercises, ...Object.keys(s.ex)]));
+    const namesForEdit = Array.from(new Set(Object.keys(s.ex || {}).filter((name)=>s.ex?.[name]?.length || s.load?.[name]?.length)));
     setDraft({
       date: s.date, label: s.label, bodyweight: s.bodyweight != null ? String(s.bodyweight) : "", notes: s.notes || "",
       ex: Object.fromEntries(namesForEdit.map((e) => [e, s.ex[e] ? s.ex[e].join(",") : ""])),
@@ -5968,14 +5979,6 @@ function TrainingLog() {
     });
   };
 
-  const assignWorkoutFitSelected = () => {
-    if (!workoutFitReview || !workoutFitAssignName || workoutFitSelected.size === 0) return;
-    setWorkoutFitReview((cur) => ({
-      ...cur,
-      rows: cur.rows.map((r) => workoutFitSelected.has(r.id) ? { ...r, exercise: workoutFitAssignName, resolution: "assigned" } : r)
-    }));
-    setWorkoutFitSelected(new Set());
-  };
 
   const updateWorkoutFitRow = (id, patch) => {
     setWorkoutFitReview((cur) => cur ? ({ ...cur, rows: cur.rows.map((r) => r.id === id ? { ...r, ...patch } : r) }) : cur);
@@ -6057,7 +6060,10 @@ function TrainingLog() {
         }))
       }
     };
-    await persist(sortWorkoutSessions([...sessions, s]));
+    const nextSessions = workoutFitReview.editingSessionId
+      ? sessions.map((old)=>old.id===workoutFitReview.editingSessionId?{...s,id:old.id,createdAt:old.createdAt||s.createdAt}:old)
+      : [...sessions,s];
+    await persist(sortWorkoutSessions(nextSessions));
     // Remember assigned exercises for normal manual entry too.
     const assigned = Array.from(new Set(included.map((r)=>r.exercise)));
     const newTracked = assigned.filter((name)=>!trackedExercises.includes(name));
@@ -8592,7 +8598,7 @@ function TrainingLog() {
                 </div>
 
                 <div style={{fontSize:11,color:"#8E8E93",lineHeight:1.45,marginBottom:10}}>
-                  Garmin gives us detected work sets, but exercise identity may be incomplete. Select any number of rows — e.g. rows 1–4 — then assign them to one exercise. Reps and added weight stay editable before save.
+                  This FIT contains Garmin strength set/category codes, but no reliable human-readable exercise names that this parser can safely map automatically. Select any number of rows — e.g. rows 1–4 — then choose an exercise from search; the selection assigns immediately. Reps and added weight stay editable before save.
                 </div>
 
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"end",marginBottom:10}}>
@@ -8604,12 +8610,41 @@ function TrainingLog() {
                 <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:9,padding:"8px 9px",background:"#000000",border:"1px solid #27272A",borderRadius:11}}>
                   <button onClick={()=>setWorkoutFitSelected(new Set(workoutFitReview.rows.filter((r)=>r.included).map((r)=>r.id)))} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:8,color:"#8E8E93",padding:"5px 7px",fontSize:9.5,fontWeight:700}}>Select all</button>
                   <button onClick={()=>setWorkoutFitSelected(new Set())} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:8,color:"#8E8E93",padding:"5px 7px",fontSize:9.5,fontWeight:700}}>Clear</button>
-                  <select value={workoutFitAssignName} onChange={(e)=>setWorkoutFitAssignName(e.target.value)} style={{minWidth:175,background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"5px 7px",color:"#F2F2F7",fontSize:10.5}}>
-                    <option value="">Assign selected to…</option>
-                    {activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps").map((e)=><option key={e.name} value={e.name}>{e.name}</option>)}
-                  </select>
-                  <button onClick={assignWorkoutFitSelected} disabled={!workoutFitAssignName || workoutFitSelected.size===0} style={{cursor:(!workoutFitAssignName||workoutFitSelected.size===0)?"default":"pointer",opacity:(!workoutFitAssignName||workoutFitSelected.size===0)?.45:1,background:"#FF9F0A",border:"none",borderRadius:8,color:"#000000",padding:"6px 9px",fontSize:10,fontWeight:850}}>Assign {workoutFitSelected.size || ""}</button>
+                  <input
+                    list="workout-fit-exercises"
+                    value={workoutFitAssignName}
+                    onChange={(e)=>{
+                      const value=e.target.value;
+                      setWorkoutFitAssignName(value);
+                      const exact=activeLibrary.find((x)=>!x.archived && exerciseTypeFromEntry(x)==="reps" && x.name.toLowerCase()===value.trim().toLowerCase());
+                      if(exact && workoutFitSelected.size>0){
+                        setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,exercise:exact.name,resolution:"assigned"}:r)}));
+                        setWorkoutFitSelected(new Set());
+                        setWorkoutFitAssignName("");
+                      }
+                    }}
+                    placeholder={workoutFitSelected.size ? `Search exercise for ${workoutFitSelected.size} selected…` : "Select rows first…"}
+                    disabled={workoutFitSelected.size===0}
+                    style={{minWidth:195,background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"5px 7px",color:"#F2F2F7",fontSize:10.5,opacity:workoutFitSelected.size?1:.5}}
+                  />
+                  <datalist id="workout-fit-exercises">{activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps").map((e)=><option key={e.name} value={e.name}/>)}</datalist>
                   <button onClick={()=>{ if(!workoutFitSelected.size)return; setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,included:false,resolution:"excluded"}:r)}));setWorkoutFitSelected(new Set()); }} disabled={workoutFitSelected.size===0} style={{cursor:workoutFitSelected.size?"pointer":"default",opacity:workoutFitSelected.size?1:.45,background:"transparent",border:"1px solid #FF453A55",borderRadius:8,color:"#FF6961",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Exclude selected</button>
+                  <input value={workoutFitNewExercise} onChange={(e)=>setWorkoutFitNewExercise(e.target.value)} placeholder="+ New exercise" style={{minWidth:130,background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"5px 7px",color:"#F2F2F7",fontSize:10}}/>
+                  <button onClick={async()=>{
+                    const name=workoutFitNewExercise.trim(); if(!name)return;
+                    let finalName=name;
+                    const existing=activeLibrary.find((e)=>e.name.toLowerCase()===name.toLowerCase());
+                    if(!existing){
+                      await persistCustom([...customExercises,{name,group:"Pull",ratio:1,target:"",type:"reps",archived:false}]);
+                      if(!trackedExercises.includes(name)) await persistTracked([...trackedExercises,name]);
+                    } else finalName=existing.name;
+                    if(workoutFitSelected.size>0){
+                      setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,exercise:finalName,resolution:"assigned"}:r)}));
+                      setWorkoutFitSelected(new Set());
+                    }
+                    setWorkoutFitAssignName("");
+                    setWorkoutFitNewExercise("");
+                  }} disabled={!workoutFitNewExercise.trim()} style={{cursor:"pointer",background:"transparent",border:"1px solid #64D2FF55",borderRadius:8,color:"#64D2FF",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Add new</button>
                 </div>
 
                 <div style={{display:"grid",gap:5,maxHeight:430,overflowY:"auto"}}>
@@ -8631,7 +8666,7 @@ function TrainingLog() {
                 </div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginTop:10}}>
                   <div style={{fontSize:10.5,color:workoutFitReconciled?"#30D158":"#FF9F0A"}}>{workoutFitReconciled?"✓ Review reconciled — ready to save.":`${workoutFitUnresolvedCount} included set${workoutFitUnresolvedCount===1?"":"s"} still need an exercise.`}</div>
-                  <button onClick={saveWorkoutFitReview} disabled={!workoutFitReconciled} style={{cursor:workoutFitReconciled?"pointer":"default",opacity:workoutFitReconciled?1:.45,background:"#30D158",border:"none",borderRadius:10,color:"#000000",padding:"8px 12px",fontSize:11,fontWeight:850}}>Save reconciled workout</button>
+                  <button onClick={saveWorkoutFitReview} disabled={!workoutFitReconciled} style={{cursor:workoutFitReconciled?"pointer":"default",opacity:workoutFitReconciled?1:.45,background:"#30D158",border:"none",borderRadius:10,color:"#000000",padding:"8px 12px",fontSize:11,fontWeight:850}}>{workoutFitReview.editingSessionId ? "Update reconciled workout" : "Save reconciled workout"}</button>
                 </div>
                 {workoutFitMsg && <div style={{fontSize:10.5,color:workoutFitMsg.includes("Failed")||workoutFitMsg.includes("required")||workoutFitMsg.includes("remaining")?"#FF453A":"#8E8E93",marginTop:8}}>{workoutFitMsg}</div>}
               </div>
@@ -8654,7 +8689,7 @@ function TrainingLog() {
                       </div>
                     )}
                   </div>
-                  <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Label (optional)</div><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} /></div>
+                  <div style={{ flex: 1, minWidth: 160 }}><div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 4 }}>Label (optional)</div><div style={{display:"flex",gap:6}}><input type="text" placeholder="e.g. Deload week" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} style={{ flex:1,minWidth:0, background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} /><button type="button" onClick={()=>setDraft({...draft,label:"Warm-up"})} style={{cursor:"pointer",background:draft.label==="Warm-up"?"#FF9F0A":"transparent",color:draft.label==="Warm-up"?"#000":"#FF9F0A",border:"1px solid #FF9F0A88",borderRadius:10,padding:"6px 9px",fontSize:10,fontWeight:800}}>Warm-up</button></div></div>
                 </div>
 
                 <div style={{ background: "#000000", border: "1px dashed #2C2C2E", borderRadius: 16, padding: 12, marginBottom: 16 }}>
@@ -8709,7 +8744,7 @@ function TrainingLog() {
                 <div style={{ marginBottom: 4, fontSize: 11, color: "#8E8E93" }}>Notes (optional — soreness, sleep, how it felt)</div>
                 <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} style={{ width: "100%", background: "#000000", border: "1px solid #2C2C2E", borderRadius: 12, padding: "8px 10px", color: "#F2F2F7", fontSize: 13, boxSizing: "border-box" }} />
                 {formError && <div style={{marginTop:10,padding:"8px 10px",border:"1px solid #FF453A55",background:"#FF453A10",borderRadius:10,color:"#FF6961",fontSize:11.5,fontWeight:650,lineHeight:1.35}}>⚠ {formError}</div>}
-                <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: "#1C1C1E", color: "#101214", border: "none", borderRadius: 12, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
+                <button onClick={saveSession} disabled={saving} style={{ marginTop: 16, background: saving ? "#3A3A3C" : "#FF9F0A", color: saving ? "#8E8E93" : "#000000", border: "1px solid #FF9F0A", borderRadius: 12, padding: "10px 20px", fontWeight: 800, fontSize: 13, cursor: saving ? "default" : "pointer" }}>{saving ? "Saving…" : editingId ? "Update session" : "Save session"}</button>
               </div>
             )}
 
