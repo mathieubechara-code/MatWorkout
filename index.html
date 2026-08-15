@@ -728,15 +728,10 @@ function effectiveLength(l) {
   return { ...l, lengthType, stroke, isOverridden: !!(l.userLengthType || l.userStroke) };
 }
 
-// Swim review has two independent dimensions:
-// distanceIncluded: was this pool length genuinely swum?
-// analyticsIncluded: are its recorded performance measurements trustworthy?
-// Legacy "kept" => Keep all. Legacy "removed"/userExcluded => Exclude.
-const swimLengthDistanceIncluded = (l) => !l.userExcluded && l.userReviewResolution !== "removed";
-const swimLengthAnalyticsIncluded = (l) =>
-  swimLengthDistanceIncluded(l) && l.userReviewResolution !== "keep_length";
-const swimLengthReviewResolved = (l) =>
-  ["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution);
+// Review outcome helpers. These do NOT participate in anomaly detection.
+const swimReviewResolved = (l) => ["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution);
+const swimDistanceIncluded = (l) => !l.userExcluded && l.userReviewResolution !== "removed";
+const swimAnalyticsIncluded = (l) => swimDistanceIncluded(l) && l.userReviewResolution !== "keep_length";
 
 const SWIM_EFFORT_META = {
   easy:  { label: "Easy",  color: "#30D158" },
@@ -771,7 +766,7 @@ function buildSwimEffortAssignments(sessions) {
     const allEff = (s.lengths || []).map((raw) => ({ raw, eff: effectiveLength(raw) }));
     const active = allEff.filter(({ raw, eff }) =>
       eff.lengthType === "active" &&
-      swimLengthAnalyticsIncluded(raw) &&
+      swimAnalyticsIncluded(raw) &&
       eff.pace100 != null &&
       Number.isFinite(eff.pace100) &&
       eff.pace100 > 0
@@ -864,7 +859,7 @@ const swimEffortComposition = (session, assignments) => {
   const counts = { easy: 0, work: 0, speed: 0 };
   (session && session.lengths || []).forEach((raw) => {
     const l = effectiveLength(raw);
-    if (l.lengthType !== "active" || !swimLengthAnalyticsIncluded(raw)) return;
+    if (l.lengthType !== "active" || !swimAnalyticsIncluded(raw)) return;
     counts[swimEffortForLength(session, raw, assignments)] += 1;
   });
   const pool = session && session.poolLength;
@@ -1035,12 +1030,9 @@ const refreshSwimIntrinsicQualityFlags = (lengths) => {
       }
     }
 
-    // Preserve unknown/external warnings. Also preserve an unresolved automatic warning
-    // until the user explicitly reviews it; automatic recalculation must not silently
-    // make a previously surfaced flag vanish.
+    // Preserve unknown/external warnings; otherwise replace/clear our own parser warning.
     if (existing && !isKnownAuto) return raw;
     if (intrinsic) return { ...raw, glitch: intrinsic };
-    if (existing && isKnownAuto && !swimLengthReviewResolved(raw)) return raw;
     return existing ? { ...raw, glitch: null } : raw;
   });
 };
@@ -1113,16 +1105,7 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
       typeof raw.glitch === "string" &&
       raw.glitch.startsWith("possible misdetected/transition length:");
     const base = oldPersonalGlitch ? { ...raw, glitch: null } : raw;
-    const detectedNow = review.get(raw.index) || null;
-
-    // Important review-state rule: once an anomaly has been surfaced to the user,
-    // do not make an UNRESOLVED flag disappear merely because a later recomputation
-    // no longer reproduces the same session-relative threshold. The user must choose
-    // Keep all / Keep length / Exclude. A resolved length may follow current detection.
-    const unresolvedExisting = base.reviewFlag && !swimLengthReviewResolved(base)
-      ? base.reviewFlag
-      : null;
-    const reviewFlag = detectedNow || unresolvedExisting;
+    const reviewFlag = review.get(raw.index) || null;
 
     if (base.reviewFlag === reviewFlag) return base;
     return { ...base, reviewFlag };
@@ -1131,16 +1114,16 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
 
 function computeSwimSessionMetrics(lengths, poolLength) {
   const eff = lengths.map(effectiveLength);
-  // Distance and performance trust are deliberately independent.
-  const distanceActive = eff.filter((l) => l.lengthType === "active" && swimLengthDistanceIncluded(l));
-  const analyticsActive = distanceActive.filter((l) => swimLengthAnalyticsIncluded(l));
+
+  // Distance truth and analytics trust are independent.
+  const distanceActive = eff.filter((l) => l.lengthType === "active" && swimDistanceIncluded(l));
+  const analyticsActive = distanceActive.filter((l) => swimAnalyticsIncluded(l));
   const timedActive = analyticsActive.filter((l) => l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0);
-  const idleLengths = eff.filter((l) => l.lengthType === "idle" && swimLengthDistanceIncluded(l));
+  const idleLengths = eff.filter((l) => l.lengthType === "idle" && swimDistanceIncluded(l));
 
   const distance = poolLength != null ? Math.round(distanceActive.length * poolLength * 100) / 100 : null;
-  // Swim time/pace are performance analytics, so Keep length records do not contaminate them.
-  const swimTimeSec = timedActive.reduce((a, l) => a + l.elapsedSec, 0);
   const analyticsDistance = poolLength != null ? Math.round(analyticsActive.length * poolLength * 100) / 100 : null;
+  const swimTimeSec = timedActive.reduce((a, l) => a + l.elapsedSec, 0);
   const restTimeSec = idleLengths.reduce((a, l) => a + (Number.isFinite(l.elapsedSec) && l.elapsedSec > 0 ? l.elapsedSec : 0), 0);
   const paceTimeCoverage = analyticsActive.length > 0 ? timedActive.length / analyticsActive.length : 0;
   const pace100Overall = paceTimeCoverage === 1 && swimTimeSec > 0 && analyticsDistance ? (swimTimeSec / analyticsDistance) * 100 : null;
@@ -1183,7 +1166,6 @@ function computeSwimSessionMetrics(lengths, poolLength) {
       techniqueDistanceCoverage,
       techniqueTimeCoverage,
       avgSwolf: TECHNIQUE_SWIM_STROKES.has(stroke) && g.countedStrokeLengths > 0 ? avg(g.swolfs) : null,
-      // True ratio-of-totals over exactly the lengths with valid Garmin stroke counts.
       avgCadence: g.countedStrokeTotal > 0 && g.countedStrokeTimeSec > 0
         ? (g.countedStrokeTotal / g.countedStrokeTimeSec) * 60
         : null,
@@ -1197,12 +1179,11 @@ function computeSwimSessionMetrics(lengths, poolLength) {
     };
   });
 
-  // Reconstruct reps/sets from consecutive active lengths (a run broken by any idle length,
-  // in original recorded order, honoring exclusions and IDLE/ACTIVE overrides).
+  // Reps are analytics, so Keep length is omitted from rep pace/structure calculations.
   const reps = [];
   let currentRep = null;
   eff.forEach((l) => {
-    if (!swimLengthAnalyticsIncluded(l)) return;
+    if (!swimAnalyticsIncluded(l)) return;
     if (l.lengthType === "active") {
       if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timedLengthCount: 0, timeSec: 0, strokeSet: new Set() };
       currentRep.lengthCount += 1;
@@ -1225,12 +1206,14 @@ function computeSwimSessionMetrics(lengths, poolLength) {
   }) : [];
 
   const totalActiveLengths = eff.filter((l) => l.lengthType === "active").length;
-  const unresolvedWarnings = eff.filter((l) => (l.glitch || l.reviewFlag) && l.lengthType === "active" && !swimLengthReviewResolved(l)).length;
-  const keepLengthCount = eff.filter((l) => l.lengthType === "active" && l.userReviewResolution === "keep_length").length;
-  const excludedCount = eff.filter((l) => !swimLengthDistanceIncluded(l)).length;
+  const suspiciousKept = eff.filter((l) => l.glitch && l.lengthType === "active" && !l.userExcluded && !swimReviewResolved(l)).length;
+  const reviewOnly = eff.filter((l) => l.reviewFlag && l.lengthType === "active" && !l.userExcluded && !swimReviewResolved(l)).length;
+  const distanceOnlyCount = eff.filter((l) => l.lengthType === "active" && l.userReviewResolution === "keep_length").length;
+  const excludedCount = eff.filter((l) => !swimDistanceIncluded(l)).length;
   const parts = [];
-  if (unresolvedWarnings > 0) parts.push(`${unresolvedWarnings} unusual length${unresolvedWarnings === 1 ? "" : "s"} flagged for review (no automatic exclusion)`);
-  if (keepLengthCount > 0) parts.push(`${keepLengthCount} length${keepLengthCount === 1 ? "" : "s"} kept for distance but excluded from analytics`);
+  if (suspiciousKept > 0) parts.push(`${suspiciousKept} sensor-quality warning${suspiciousKept === 1 ? "" : "s"} (still counted until you decide)`);
+  if (reviewOnly > 0) parts.push(`${reviewOnly} unusual length${reviewOnly === 1 ? "" : "s"} marked review-only (does not change data until you decide)`);
+  if (distanceOnlyCount > 0) parts.push(`${distanceOnlyCount} length${distanceOnlyCount === 1 ? "" : "s"} kept for distance only`);
   if (excludedCount > 0) parts.push(`${excludedCount} length${excludedCount === 1 ? "" : "s"} excluded by you`);
   const qualityNote = parts.length ? parts.join("; ") + "." : null;
 
@@ -1401,7 +1384,7 @@ function backfillSwimSessionStrokeStats(session) {
   const strokeStatsNeedBackfill = strokes.some((k) => session.strokeStats[k] && session.strokeStats[k].pace100 == null);
   let fixedStrokeStats = session.strokeStats;
   if (strokeStatsNeedBackfill) {
-    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && swimLengthAnalyticsIncluded(l));
+    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && swimAnalyticsIncluded(l));
     const groups = {};
     validActive.forEach((l) => {
       if (!groups[l.stroke]) groups[l.stroke] = { timeSec: 0, lengthCount: 0 };
@@ -1437,13 +1420,10 @@ function migrateSwimSessionToOverrideLayer(session) {
 
   const lengths = session.lengths.map((l) => ({
     ...l,
-    userExcluded: "userExcluded" in l ? !!l.userExcluded : (l.userReviewResolution === "removed"),
+    userExcluded: "userExcluded" in l ? !!l.userExcluded : false,
     userLengthType: l.userLengthType || null,
     userStroke: l.userStroke || null,
     userEffort: validSwimEffort(l.userEffort) ? l.userEffort : null,
-    // Legacy kept remains Keep all; legacy removed remains Exclude.
-    // keep_length is the new distance-YES / analytics-NO state.
-    userReviewResolution: l.userReviewResolution || null,
   }));
   const metrics = computeSwimSessionMetrics(lengths, session.poolLength);
   const distance = session.distanceCorrection ? session.distance : metrics.distance;
@@ -9261,7 +9241,7 @@ function TrainingLog() {
                                                   {reviewTag.label}
                                                 </span>
                                               )}
-                                              {flaggedForReview && !swimLengthReviewResolved(l) && (
+                                              {flaggedForReview && !swimReviewResolved(l) && (
                                                 <>
                                                   <button onClick={() => keepSuspiciousSwimLength(s.id, l.index)} title="Distance YES · Analytics YES" style={lenBtnStyle("positive")}>Keep all</button>
                                                   <button onClick={() => keepSwimLengthDistanceOnly(s.id, l.index)} title="Distance YES · Analytics NO" style={lenBtnStyle("neutral")}>Keep length</button>
@@ -9277,7 +9257,7 @@ function TrainingLog() {
                                               {!excluded && eff.lengthType === "idle" && (
                                                 <button onClick={() => setSwimIdleToActiveFor({ sessionId: s.id, lengthIndex: l.index })} style={lenBtnStyle("neutral")}>Mark active</button>
                                               )}
-                                              {(!flaggedForReview || swimLengthReviewResolved(l)) && (
+                                              {(!flaggedForReview || swimReviewResolved(l)) && (
                                                 <button onClick={() => toggleExcludeSwimLength(s.id, l.index)} style={lenBtnStyle(excluded ? "positive" : "negative")}>
                                                   {excluded ? "Include" : "Exclude"}
                                                 </button>
