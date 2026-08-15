@@ -521,7 +521,7 @@ function parseFitBinary(arrayBuffer) {
 
   const localDefs = {};
   let lastTimestamp = null;
-  const messages = { 18: [], 19: [], 101: [], 20: [] }; // session, lap, length, record
+  const messages = { 18: [], 19: [], 101: [], 20: [], 225: [] }; // session, lap, length, record, Garmin strength set
 
   function readScalar(off, baseTypeName, littleEndian) {
     switch (baseTypeName) {
@@ -608,7 +608,55 @@ function parseFitBinary(arrayBuffer) {
     }
     if (messages[globalMesgNum]) messages[globalMesgNum].push(rec);
   }
-  return { sessionMsgs: messages[18], lapMsgs: messages[19], lengthMsgs: messages[101], recordMsgs: messages[20] };
+  return { sessionMsgs: messages[18], lapMsgs: messages[19], lengthMsgs: messages[101], recordMsgs: messages[20], strengthSetMsgs: messages[225] };
+}
+
+
+function parseWorkoutFitDraft(arrayBuffer, fileName = "workout.fit") {
+  const parsed = parseFitBinary(arrayBuffer);
+  const session = parsed.sessionMsgs?.[0] || {};
+  const rawSets = parsed.strengthSetMsgs || [];
+
+  // Garmin set message 225 on the supplied Strength activity:
+  // f5 = set kind (1 work, 0 rest), f3 = reps, f6 = set start FIT timestamp,
+  // f0 = duration in milliseconds, f2 = set-average HR when plausible.
+  const work = rawSets.filter((r) => Number(r.f5) === 1 && Number(r.f3) > 0);
+  if (!work.length) throw new Error("No strength work sets were detected in this FIT file.");
+
+  const firstTs = work[0].f6 ?? work[0].f253 ?? session.f2 ?? session.f253;
+  const startDate = fitTimestampToDate(firstTs);
+  const date = startDate && !Number.isNaN(startDate.getTime()) ? toISODate(startDate) : toISODate(new Date());
+
+  const rows = work.map((r, idx) => {
+    const ts = fitTimestampToDate(r.f6 ?? r.f253);
+    const hr = Number(r.f2);
+    return {
+      id: `fit-set-${idx + 1}`,
+      sourceIndex: idx,
+      sourceMessageIndex: r.f10 ?? idx,
+      sourceCategoryCode: r.f7 ?? null,
+      startTime: ts && !Number.isNaN(ts.getTime()) ? ts.toISOString() : null,
+      durationSec: Number.isFinite(Number(r.f0)) ? Number(r.f0) / 1000 : null,
+      avgHR: Number.isFinite(hr) && hr >= 30 && hr <= 240 ? hr : null,
+      reps: Number(r.f3),
+      loadKg: 0,
+      exercise: "",
+      included: true,
+      resolution: "review"
+    };
+  });
+
+  const sessionAvgHR = Number(session.f16);
+  return {
+    fileName,
+    date,
+    label: "Garmin FIT",
+    bodyweight: "",
+    sessionAvgHR: Number.isFinite(sessionAvgHR) && sessionAvgHR >= 30 && sessionAvgHR <= 240 ? sessionAvgHR : null,
+    rows,
+    parserVersion: 1,
+    sourceMessage: 225
+  };
 }
 
 const SWIM_STROKE_NAMES = { 0: "freestyle", 1: "backstroke", 2: "breaststroke", 3: "butterfly", 4: "drill", 5: "mixed", 6: "im" };
@@ -5032,6 +5080,12 @@ function TrainingLog() {
   const [parsedReviewActive, setParsedReviewActive] = useState(false);
   const [parseResolved, setParseResolved] = useState([]);
   const [pendingUnmatchedSource, setPendingUnmatchedSource] = useState(null);
+  const [workoutFitReview, setWorkoutFitReview] = useState(null);
+  const [workoutFitSelected, setWorkoutFitSelected] = useState(() => new Set());
+  const [workoutFitAssignName, setWorkoutFitAssignName] = useState("");
+  const [workoutFitMsg, setWorkoutFitMsg] = useState("");
+  const [workoutFitUploading, setWorkoutFitUploading] = useState(false);
+  const [expandedWorkoutId, setExpandedWorkoutId] = useState(null);
   const [selectedCompare, setSelectedCompare] = useState([]);
   const [showCompare, setShowCompare] = useState(false);
   const [importMsg, setImportMsg] = useState("");
@@ -5069,6 +5123,7 @@ function TrainingLog() {
   const [weightLogKg, setWeightLogKg] = useState("");
   const [showWeightLogEntry, setShowWeightLogEntry] = useState(false);
   const fileInputRef = useRef(null);
+  const workoutFitInputRef = useRef(null);
 
   // ---- History & Log: Workout / Swim toggle -------------------------------------------
   // Controls which "log new session" flow shows (paste/manual form vs. .FIT upload) and
@@ -5881,6 +5936,139 @@ function TrainingLog() {
     setPasteText("");
   };
 
+
+  const handleWorkoutFitUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setWorkoutFitUploading(true);
+    setWorkoutFitMsg("");
+    try {
+      const ab = await file.arrayBuffer();
+      const review = parseWorkoutFitDraft(ab, file.name);
+      const lastBw = latest ? bwMap[latest.id] : null;
+      review.bodyweight = lastBw != null ? String(lastBw) : "";
+      setWorkoutFitReview(review);
+      setWorkoutFitSelected(new Set());
+      setWorkoutFitAssignName("");
+      setWorkoutFitMsg(`Detected ${review.rows.length} strength work sets. Select one or more rows and assign an exercise.`);
+    } catch (err) {
+      setWorkoutFitReview(null);
+      setWorkoutFitMsg(`Failed to parse workout FIT: ${err?.message || String(err)}`);
+    } finally {
+      setWorkoutFitUploading(false);
+      if (workoutFitInputRef.current) workoutFitInputRef.current.value = "";
+    }
+  };
+
+  const toggleWorkoutFitRow = (id) => {
+    setWorkoutFitSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const assignWorkoutFitSelected = () => {
+    if (!workoutFitReview || !workoutFitAssignName || workoutFitSelected.size === 0) return;
+    setWorkoutFitReview((cur) => ({
+      ...cur,
+      rows: cur.rows.map((r) => workoutFitSelected.has(r.id) ? { ...r, exercise: workoutFitAssignName, resolution: "assigned" } : r)
+    }));
+    setWorkoutFitSelected(new Set());
+  };
+
+  const updateWorkoutFitRow = (id, patch) => {
+    setWorkoutFitReview((cur) => cur ? ({ ...cur, rows: cur.rows.map((r) => r.id === id ? { ...r, ...patch } : r) }) : cur);
+  };
+
+  const workoutFitUnresolvedCount = workoutFitReview
+    ? workoutFitReview.rows.filter((r) => r.included && !r.exercise).length
+    : 0;
+  const workoutFitReconciled = !!workoutFitReview && workoutFitUnresolvedCount === 0 &&
+    workoutFitReview.rows.some((r) => r.included);
+
+  const saveWorkoutFitReview = async () => {
+    if (!workoutFitReview) return;
+    const bw = Number(workoutFitReview.bodyweight);
+    if (!Number.isFinite(bw) || bw <= 0) {
+      setWorkoutFitMsg("Bodyweight is required before saving so workload and strength stay comparable.");
+      return;
+    }
+    const included = workoutFitReview.rows.filter((r) => r.included);
+    if (!included.length) { setWorkoutFitMsg("Keep at least one work set."); return; }
+    if (included.some((r) => !r.exercise)) {
+      setWorkoutFitMsg(`Reconcile ${included.filter((r)=>!r.exercise).length} remaining set(s) before saving.`);
+      return;
+    }
+    if (included.some((r) => !Number.isFinite(Number(r.reps)) || Number(r.reps) <= 0)) {
+      setWorkoutFitMsg("Every included set needs reps greater than 0.");
+      return;
+    }
+    if (included.some((r) => !Number.isFinite(Number(r.loadKg)) || Number(r.loadKg) < 0)) {
+      setWorkoutFitMsg("Added load must be 0 kg or greater.");
+      return;
+    }
+
+    // Preserve set order. Multiple rows assigned to one exercise become that exercise's
+    // ordered rep/load arrays — exactly the same canonical structure as manual logging.
+    const ex = {}, load = {};
+    for (const row of included) {
+      const name = row.exercise;
+      const ratio = bwRatioMap[name] != null ? Number(bwRatioMap[name]) : 1;
+      if (ratio === 0 && Number(row.loadKg) <= 0) {
+        setWorkoutFitMsg(`${name}: this load-only exercise needs an added load greater than 0 kg.`);
+        return;
+      }
+      if (!ex[name]) { ex[name] = []; load[name] = []; }
+      ex[name].push(Number(row.reps));
+      load[name].push(Number(row.loadKg) || 0);
+    }
+
+    const now = new Date().toISOString();
+    const s = {
+      id: `fit-workout-${Date.now()}`,
+      createdAt: now,
+      date: workoutFitReview.date,
+      label: workoutFitReview.label || "Garmin FIT",
+      bodyweight: bw,
+      notes: "",
+      ex,
+      load,
+      reconciliationStatus: "reconciled",
+      sourceType: "garmin_fit",
+      fitSource: {
+        fileName: workoutFitReview.fileName,
+        parserVersion: workoutFitReview.parserVersion,
+        sourceMessage: workoutFitReview.sourceMessage,
+        importedAt: now,
+        sessionAvgHR: workoutFitReview.sessionAvgHR,
+        rows: workoutFitReview.rows.map((r) => ({
+          sourceIndex: r.sourceIndex,
+          sourceMessageIndex: r.sourceMessageIndex,
+          sourceCategoryCode: r.sourceCategoryCode,
+          startTime: r.startTime,
+          durationSec: r.durationSec,
+          avgHR: r.avgHR,
+          reps: Number(r.reps),
+          loadKg: Number(r.loadKg) || 0,
+          exercise: r.exercise || null,
+          included: !!r.included,
+          resolution: r.included ? "assigned" : "excluded"
+        }))
+      }
+    };
+    await persist(sortWorkoutSessions([...sessions, s]));
+    // Remember assigned exercises for normal manual entry too.
+    const assigned = Array.from(new Set(included.map((r)=>r.exercise)));
+    const newTracked = assigned.filter((name)=>!trackedExercises.includes(name));
+    if (newTracked.length) await persistTracked([...trackedExercises, ...newTracked]);
+
+    setWorkoutFitReview(null);
+    setWorkoutFitSelected(new Set());
+    setWorkoutFitAssignName("");
+    setWorkoutFitMsg(`Saved reconciled FIT workout with ${included.length} sets across ${assigned.length} exercise${assigned.length===1?"":"s"}.`);
+  };
+
   const saveSession = async () => {
     if (!sessions) return;
     setFormError("");
@@ -6026,7 +6214,7 @@ function TrainingLog() {
     };
     const swimTargetSettings = await readSettingJSON("swim-target-settings-v1");
     const freshSwimSessions = viewMode === "workout" ? null : await readSwimSessionsFresh();
-    const meta = { schemaVersion: 2, exportedAt: new Date().toISOString() };
+    const meta = { schemaVersion: 3, exportedAt: new Date().toISOString(), workoutFitReconciliation: true };
     if (viewMode === "workout") { payload = { ...meta, sessions, weightLog, settings: workoutSettings }; suffix = "workout"; }
     else if (viewMode === "swim") { payload = { ...meta, swimSessions: freshSwimSessions, settings: { swimTargetSettings } }; suffix = "swim"; }
     else { payload = { ...meta, sessions, swimSessions: freshSwimSessions, weightLog, settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
@@ -8269,6 +8457,12 @@ function TrainingLog() {
               {viewMode === "workout" && !showForm && (
                 <button className="log-session-primary" onClick={() => { const lastBw = latest ? bwMap[latest.id] : null; setParsedReviewActive(false); setParseResolved([]); setUnmatchedNames([]); setDraft({ ...emptyDraft(trackedExercises), bodyweight: lastBw != null ? String(lastBw) : "" }); setShowForm(true); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", background: "#FF9F0A", color: "#000000", border: "1px solid #FF9F0A", borderRadius: 16, padding: "10px 16px", fontWeight: 800, fontSize: 13 }}><Plus size={16} /> Add workout</button>
               )}
+              {viewMode === "workout" && !showForm && (
+                <label className="file-btn" style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",background:"#1C1C1E",border:"1px solid #FF9F0A66",color:"#FF9F0A",borderRadius:16,padding:"10px 14px",fontWeight:750,fontSize:13}}>
+                  <Upload size={14}/> {workoutFitUploading ? "Parsing FIT…" : "Import workout .FIT"}
+                  <input ref={workoutFitInputRef} type="file" accept=".fit" onChange={handleWorkoutFitUpload} disabled={workoutFitUploading}/>
+                </label>
+              )}
               <button onClick={exportJSON} title="Create a complete backup for this view" style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",background:"#1C1C1E",border:"1px solid #27272A",color:"#D1D1D6",borderRadius:16,padding:"10px 14px",fontWeight:600,fontSize:13}}><Download size={14}/> Back up {viewMode==="workout"?"workout":viewMode==="swim"?"swim":"all"} data</button>
               <label className="file-btn" title="Restore a backup or merge exported training data" style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",background:"#1C1C1E",border:"1px solid #27272A",color:"#D1D1D6",borderRadius:16,padding:"10px 14px",fontWeight:600,fontSize:13}}>
                 <Upload size={14}/> Restore / import data
@@ -8284,13 +8478,13 @@ function TrainingLog() {
                 <button onClick={() => setShowCompare(true)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", color: "#101214", border: "none", borderRadius: 16, padding: "10px 14px", fontWeight: 700, fontSize: 13 }}><GitCompare size={14} /> Compare selected</button>
               )}
               {viewMode === "workout" && sessions.length > 0 && (
-                <button onClick={() => setConfirmDeleteAllScope("workout")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #FF453A55", color: "#FF453A", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all logs</button>
+                <button onClick={() => setConfirmDeleteAllScope("workout")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #FF453A55", color: "#FF453A", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all workout activity</button>
               )}
               {viewMode === "swim" && (swimSessions || []).length > 0 && (
                 <button onClick={() => setConfirmDeleteAllScope("swim")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #FF453A55", color: "#FF453A", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all swim activity</button>
               )}
               {viewMode === "all" && (sessions.length > 0 || (swimSessions || []).length > 0) && (
-                <button onClick={() => setConfirmDeleteAllScope("all")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #FF453A55", color: "#FF453A", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete all activity</button>
+                <button onClick={() => setConfirmDeleteAllScope("all")} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", background: "#1C1C1E", border: "1px solid #FF453A55", color: "#FF453A", borderRadius: 16, padding: "10px 14px", fontWeight: 600, fontSize: 13 }}><Trash2 size={14} /> Delete entire training log</button>
               )}
             </div>
 
@@ -8377,6 +8571,72 @@ function TrainingLog() {
               </div>
             )}
 
+
+            {viewMode === "workout" && workoutFitMsg && !workoutFitReview && (
+              <div style={{fontSize:11.5,color:workoutFitMsg.startsWith("Failed")?"#FF453A":"#30D158",marginBottom:10}}>{workoutFitMsg}</div>
+            )}
+
+            {viewMode === "workout" && workoutFitReview && (
+              <div style={{background:"#1C1C1E",border:"1px solid #FF9F0A55",borderRadius:20,padding:isMobile?12:16,marginBottom:18}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap",marginBottom:10}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                      <span style={{fontWeight:800,fontSize:15,color:"#FFFFFF"}}>Review workout FIT</span>
+                      {workoutFitReconciled
+                        ? <span className="mono" style={{fontSize:9.5,color:"#30D158",border:"1px solid #30D15866",background:"#30D15812",borderRadius:999,padding:"2px 6px",fontWeight:800}}>✓ Reconciled</span>
+                        : <span className="mono" style={{fontSize:9.5,color:"#FF9F0A",border:"1px solid #FF9F0A66",background:"#FF9F0A12",borderRadius:999,padding:"2px 6px",fontWeight:800}}>Needs review · {workoutFitUnresolvedCount}</span>}
+                    </div>
+                    <div className="mono" style={{fontSize:10.5,color:"#636366",marginTop:3}}>{workoutFitReview.fileName} · {workoutFitReview.rows.length} detected work sets</div>
+                  </div>
+                  <button onClick={()=>{setWorkoutFitReview(null);setWorkoutFitSelected(new Set());setWorkoutFitAssignName("");setWorkoutFitMsg("");}} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:9,color:"#8E8E93",padding:"5px 8px",fontSize:10.5,fontWeight:700}}>Cancel</button>
+                </div>
+
+                <div style={{fontSize:11,color:"#8E8E93",lineHeight:1.45,marginBottom:10}}>
+                  Garmin gives us detected work sets, but exercise identity may be incomplete. Select any number of rows — e.g. rows 1–4 — then assign them to one exercise. Reps and added weight stay editable before save.
+                </div>
+
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"end",marginBottom:10}}>
+                  <div><div style={{fontSize:9.5,color:"#636366",marginBottom:3}}>Date</div><input type="date" max={todayStr} value={workoutFitReview.date} onChange={(e)=>setWorkoutFitReview({...workoutFitReview,date:e.target.value})} style={{background:"#000000",border:"1px solid #2C2C2E",borderRadius:9,padding:"6px 8px",color:"#F2F2F7",fontSize:11}}/></div>
+                  <div><div style={{fontSize:9.5,color:"#636366",marginBottom:3}}>Bodyweight kg</div><input type="number" min="1" step="0.1" value={workoutFitReview.bodyweight} onChange={(e)=>setWorkoutFitReview({...workoutFitReview,bodyweight:e.target.value})} className="mono" style={{width:90,background:"#000000",border:"1px solid #2C2C2E",borderRadius:9,padding:"6px 8px",color:"#F2F2F7",fontSize:11}}/></div>
+                  <div><div style={{fontSize:9.5,color:"#636366",marginBottom:3}}>Session name</div><input value={workoutFitReview.label} onChange={(e)=>setWorkoutFitReview({...workoutFitReview,label:e.target.value})} style={{width:140,background:"#000000",border:"1px solid #2C2C2E",borderRadius:9,padding:"6px 8px",color:"#F2F2F7",fontSize:11}}/></div>
+                </div>
+
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:9,padding:"8px 9px",background:"#000000",border:"1px solid #27272A",borderRadius:11}}>
+                  <button onClick={()=>setWorkoutFitSelected(new Set(workoutFitReview.rows.filter((r)=>r.included).map((r)=>r.id)))} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:8,color:"#8E8E93",padding:"5px 7px",fontSize:9.5,fontWeight:700}}>Select all</button>
+                  <button onClick={()=>setWorkoutFitSelected(new Set())} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:8,color:"#8E8E93",padding:"5px 7px",fontSize:9.5,fontWeight:700}}>Clear</button>
+                  <select value={workoutFitAssignName} onChange={(e)=>setWorkoutFitAssignName(e.target.value)} style={{minWidth:175,background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"5px 7px",color:"#F2F2F7",fontSize:10.5}}>
+                    <option value="">Assign selected to…</option>
+                    {activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps").map((e)=><option key={e.name} value={e.name}>{e.name}</option>)}
+                  </select>
+                  <button onClick={assignWorkoutFitSelected} disabled={!workoutFitAssignName || workoutFitSelected.size===0} style={{cursor:(!workoutFitAssignName||workoutFitSelected.size===0)?"default":"pointer",opacity:(!workoutFitAssignName||workoutFitSelected.size===0)?.45:1,background:"#FF9F0A",border:"none",borderRadius:8,color:"#000000",padding:"6px 9px",fontSize:10,fontWeight:850}}>Assign {workoutFitSelected.size || ""}</button>
+                  <button onClick={()=>{ if(!workoutFitSelected.size)return; setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,included:false,resolution:"excluded"}:r)}));setWorkoutFitSelected(new Set()); }} disabled={workoutFitSelected.size===0} style={{cursor:workoutFitSelected.size?"pointer":"default",opacity:workoutFitSelected.size?1:.45,background:"transparent",border:"1px solid #FF453A55",borderRadius:8,color:"#FF6961",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Exclude selected</button>
+                </div>
+
+                <div style={{display:"grid",gap:5,maxHeight:430,overflowY:"auto"}}>
+                  {workoutFitReview.rows.map((r,idx)=>{
+                    const selected=workoutFitSelected.has(r.id);
+                    return <div key={r.id} style={{display:"grid",gridTemplateColumns:isMobile?"26px 34px minmax(125px,1fr) 55px 60px":"28px 38px minmax(180px,1fr) 64px 72px 70px 62px",gap:5,alignItems:"center",padding:"6px 7px",border:`1px solid ${selected?"#64D2FF66":r.included?"#27272A":"#27272A88"}`,borderRadius:9,background:selected?"#64D2FF0D":"#000000",opacity:r.included?1:.45}}>
+                      <input type="checkbox" checked={selected} disabled={!r.included} onChange={()=>toggleWorkoutFitRow(r.id)} style={{cursor:r.included?"pointer":"default"}}/>
+                      <span className="mono" style={{fontSize:10,color:"#8E8E93"}}>#{idx+1}</span>
+                      <select value={r.exercise} disabled={!r.included} onChange={(e)=>updateWorkoutFitRow(r.id,{exercise:e.target.value,resolution:e.target.value?"assigned":"review"})} style={{minWidth:0,background:"#1C1C1E",border:`1px solid ${r.exercise?"#30D15844":"#FF9F0A55"}`,borderRadius:7,padding:"5px 6px",color:r.exercise?"#D1D1D6":"#FF9F0A",fontSize:10}}>
+                        <option value="">Needs exercise</option>
+                        {activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps").map((e)=><option key={e.name} value={e.name}>{e.name}</option>)}
+                      </select>
+                      <input title="Reps" type="number" min="1" step="1" disabled={!r.included} value={r.reps} onChange={(e)=>updateWorkoutFitRow(r.id,{reps:e.target.value})} className="mono" style={{width:"100%",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:7,padding:"5px 5px",color:"#F2F2F7",fontSize:10,textAlign:"center"}}/>
+                      <input title="Added kg" type="number" min="0" step="0.5" disabled={!r.included} value={r.loadKg} onChange={(e)=>updateWorkoutFitRow(r.id,{loadKg:e.target.value})} className="mono" style={{width:"100%",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:7,padding:"5px 5px",color:"#F2F2F7",fontSize:10,textAlign:"center"}}/>
+                      {!isMobile && <span className="mono" title="Detected work-set duration" style={{fontSize:9.5,color:"#636366",textAlign:"right"}}>{r.durationSec!=null?`${Math.round(r.durationSec)}s`:"—"}</span>}
+                      {!isMobile && <span className="mono" title="Detected set average heart rate" style={{fontSize:9.5,color:"#636366",textAlign:"right"}}>{r.avgHR!=null?`${r.avgHR} bpm`:"—"}</span>}
+                    </div>
+                  })}
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <div style={{fontSize:10.5,color:workoutFitReconciled?"#30D158":"#FF9F0A"}}>{workoutFitReconciled?"✓ Review reconciled — ready to save.":`${workoutFitUnresolvedCount} included set${workoutFitUnresolvedCount===1?"":"s"} still need an exercise.`}</div>
+                  <button onClick={saveWorkoutFitReview} disabled={!workoutFitReconciled} style={{cursor:workoutFitReconciled?"pointer":"default",opacity:workoutFitReconciled?1:.45,background:"#30D158",border:"none",borderRadius:10,color:"#000000",padding:"8px 12px",fontSize:11,fontWeight:850}}>Save reconciled workout</button>
+                </div>
+                {workoutFitMsg && <div style={{fontSize:10.5,color:workoutFitMsg.includes("Failed")||workoutFitMsg.includes("required")||workoutFitMsg.includes("remaining")?"#FF453A":"#8E8E93",marginTop:8}}>{workoutFitMsg}</div>}
+              </div>
+            )}
+
             {viewMode === "workout" && showForm && (
               <div style={{ background: "#1C1C1E", border: "1px solid #2C2C2E", borderRadius: 20, boxShadow: "none", padding: 18, marginBottom: 22 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -8454,36 +8714,41 @@ function TrainingLog() {
             )}
 
             {viewMode === "workout" && (
-              <div style={{ background: "#1C1C1E", border: "1px solid #27272A", borderRadius: 20, overflow: "hidden" }}>
-                <div style={{ padding: "12px 16px", borderBottom: "1px solid #27272A", fontSize: 13, fontWeight: 600, color: "#D1D1D6" }}>Workout sessions ({sessions.length}) · select up to 2 to compare</div>
-                <div style={{ maxHeight: 520, overflowY: "auto" }}>
-                  {[...sessions].reverse().map((s, idx) => (
-                    <div key={s.id} style={{ padding: "12px 16px", borderBottom: idx === sessions.length - 1 ? "none" : "1px solid #27272A", background: selectedCompare.includes(s.id) ? "#27272A" : "transparent" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <input type="checkbox" checked={selectedCompare.includes(s.id)} onChange={() => toggleCompare(s.id)} style={{ cursor: "pointer" }} />
-                          <span className="disp" style={{ fontWeight: 700, fontSize: 15, color: "#FFFFFF" }}>{fmtDate(s.date)}</span>
-                          <span style={{ fontSize: 12, color: "#636366" }}>{s.label}</span>
-                          {s.bodyweight != null ? (
-                            <span className="mono" style={{ fontSize: 11, color: "#48484A" }}>{s.bodyweight} kg</span>
-                          ) : bwMap[s.id] != null ? (
-                            <span className="mono" style={{ fontSize: 11, color: "#48484A", fontStyle: "italic" }}>~{bwMap[s.id]} kg (carried)</span>
-                          ) : null}
+              <div style={{background:"#1C1C1E",border:"1px solid #27272A",borderRadius:20,overflow:"hidden"}}>
+                <div style={{padding:"10px 14px",borderBottom:"1px solid #27272A",fontSize:12.5,fontWeight:650,color:"#D1D1D6"}}>Workout sessions ({sessions.length}) · compact view · select up to 2 to compare</div>
+                <div style={{maxHeight:560,overflowY:"auto"}}>
+                  {[...sessions].reverse().map((s,idx)=>{
+                    const isOpen=expandedWorkoutId===s.id;
+                    const exNames=Object.keys(s.ex||{}).filter((n)=>s.ex[n]?.length);
+                    const setCount=exNames.reduce((sum,n)=>sum+(s.ex[n]?.length||0),0);
+                    const reconciled=s.reconciliationStatus==="reconciled";
+                    return <div key={s.id} style={{borderBottom:idx===sessions.length-1?"none":"1px solid #27272A",background:selectedCompare.includes(s.id)?"#27272A":"transparent"}}>
+                      <div onClick={()=>setExpandedWorkoutId(isOpen?null:s.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 12px",cursor:"pointer"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0}}>
+                          <ChevronDown size={13} style={{color:"#636366",flexShrink:0,transform:isOpen?"rotate(180deg)":"none",transition:"transform .15s"}}/>
+                          <input type="checkbox" checked={selectedCompare.includes(s.id)} onClick={(e)=>e.stopPropagation()} onChange={()=>toggleCompare(s.id)} style={{cursor:"pointer",flexShrink:0}}/>
+                          <span className="disp" style={{fontWeight:750,fontSize:13.5,color:"#FFFFFF",whiteSpace:"nowrap"}}>{fmtDate(s.date)}</span>
+                          <span style={{fontSize:10.5,color:"#636366",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label||"Session"}</span>
+                          {reconciled&&<span className="mono" title="FIT rows were reviewed and reconciled before saving" style={{fontSize:9,color:"#30D158",border:"1px solid #30D15855",borderRadius:999,padding:"1px 5px",fontWeight:800,whiteSpace:"nowrap"}}>✓ Reconciled</span>}
                         </div>
-                        <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
-                          <Pencil size={14} style={{ cursor: "pointer", color: "#48484A" }} onClick={() => startEdit(s)} />
-                          <Trash2 size={15} style={{ cursor: "pointer", color: "#48484A" }} onClick={() => setConfirmDelete(s)} />
+                        <div className="mono" style={{display:"flex",gap:7,fontSize:9.5,color:"#8E8E93",whiteSpace:"nowrap"}}>
+                          <span>{exNames.length} ex</span><span>{setCount} sets</span>{s.bodyweight!=null&&<span>{s.bodyweight}kg</span>}
                         </div>
                       </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {Object.keys(s.ex).filter((n) => s.ex[n]).map((name) => (
-                          <span key={name} className="mono" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: `${colorsMap[name] || "#8E8E93"}14`, color: colorsMap[name] || "#8E8E93", border: `1px solid ${colorsMap[name] || "#8E8E93"}33` }}>{name}: {s.ex[name].join("-")}{weightTag((s.load || {})[name])}</span>
-                        ))}
-                      </div>
-                      {s.notes && <div style={{ fontSize: 11.5, color: "#636366", fontStyle: "italic", marginTop: 6 }}>"{s.notes}"</div>}
+                      {isOpen&&<div style={{padding:"0 12px 10px 33px"}}>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:7}}>
+                          {exNames.map((name)=><span key={name} className="mono" style={{fontSize:10,padding:"3px 7px",borderRadius:6,background:`${colorsMap[name]||"#8E8E93"}14`,color:colorsMap[name]||"#8E8E93",border:`1px solid ${colorsMap[name]||"#8E8E93"}33`}}>{name}: {s.ex[name].join("-")}{weightTag((s.load||{})[name])}</span>)}
+                        </div>
+                        {s.fitSource&&<div style={{fontSize:9.5,color:"#636366",marginBottom:6}}>Garmin FIT · {s.fitSource.fileName} · {s.fitSource.rows?.filter((r)=>r.included).length||setCount} reconciled sets{s.fitSource.sessionAvgHR!=null?` · avg HR ${s.fitSource.sessionAvgHR} bpm`:""}</div>}
+                        {s.notes&&<div style={{fontSize:10.5,color:"#636366",fontStyle:"italic",marginBottom:6}}>"{s.notes}"</div>}
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={()=>startEdit(s)} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:8,color:"#8E8E93",padding:"4px 7px",fontSize:9.5,fontWeight:700}}>Edit</button>
+                          <button onClick={()=>setConfirmDelete(s)} style={{cursor:"pointer",background:"transparent",border:"1px solid #FF453A44",borderRadius:8,color:"#FF6961",padding:"4px 7px",fontSize:9.5,fontWeight:700}}>Delete</button>
+                        </div>
+                      </div>}
                     </div>
-                  ))}
-                  {sessions.length === 0 && <div style={{ padding: "20px 16px", fontSize: 12.5, color: "#636366" }}>No workout sessions logged yet.</div>}
+                  })}
+                  {sessions.length===0&&<div style={{padding:"20px 16px",fontSize:12.5,color:"#636366"}}>No workout sessions logged yet.</div>}
                 </div>
               </div>
             )}
