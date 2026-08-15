@@ -1078,23 +1078,28 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
       if (!(sc > 0)) return;
       const dps = poolLength / sc;
 
-      // Conservative review candidate only:
-      // - dramatically faster than this session's same-stroke median
-      // - dramatically fewer Garmin-counted strokes
-      // - >4 m per Garmin-counted stroke
+      // Conservative REVIEW-ONLY candidates. Neither branch excludes or rewrites data.
       //
-      // This is deliberately NOT a corruption verdict. Sprint/recovery structure can be real,
-      // so the candidate never changes PR eligibility, effort baselines, totals or analytics.
+      // Fast / low-count anomaly: retained from the current detector.
       const extremeFastLowCount =
         eff.pace100 < paceMed * 0.60 &&
         sc < strokeMed * 0.60 &&
         dps > 4.0;
 
-      if (extremeFastLowCount) {
-        review.set(
-          raw.index,
-          `unusual same-stroke length: ${Math.round(eff.pace100)}s/100m, ${sc} Garmin-counted strokes (${dps.toFixed(1)}m/stroke) — review only`
-        );
+      // Slow / high-count anomaly: restored from the earlier two-sided detector.
+      // This was previously dropped when flagging was made more conservative, which meant
+      // genuine obvious slow/high-stroke anomalies could stop appearing for review.
+      // Because flags are now review-only, it is safe to surface this again without
+      // contaminating distance or analytics until the user chooses an outcome.
+      const extremeSlowHighCount =
+        eff.pace100 > paceMed * 1.70 &&
+        sc > strokeMed * 1.30;
+
+      if (extremeFastLowCount || extremeSlowHighCount) {
+        const reason = extremeFastLowCount
+          ? `unusual same-stroke length: ${Math.round(eff.pace100)}s/100m, ${sc} Garmin-counted strokes (${dps.toFixed(1)}m/stroke) — unusually fast with unusually few strokes; review only`
+          : `unusual same-stroke length: ${Math.round(eff.pace100)}s/100m, ${sc} Garmin-counted strokes — unusually slow with unusually many strokes versus this session's ${SWIM_STROKE_LABELS[stroke] || stroke} pattern; review only`;
+        review.set(raw.index, reason);
       }
     });
   });
