@@ -728,6 +728,16 @@ function effectiveLength(l) {
   return { ...l, lengthType, stroke, isOverridden: !!(l.userLengthType || l.userStroke) };
 }
 
+// Swim review has two independent dimensions:
+// distanceIncluded: was this pool length genuinely swum?
+// analyticsIncluded: are its recorded performance measurements trustworthy?
+// Legacy "kept" => Keep all. Legacy "removed"/userExcluded => Exclude.
+const swimLengthDistanceIncluded = (l) => !l.userExcluded && l.userReviewResolution !== "removed";
+const swimLengthAnalyticsIncluded = (l) =>
+  swimLengthDistanceIncluded(l) && l.userReviewResolution !== "keep_length";
+const swimLengthReviewResolved = (l) =>
+  ["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution);
+
 const SWIM_EFFORT_META = {
   easy:  { label: "Easy",  color: "#30D158" },
   work:  { label: "Work",  color: "#64D2FF" },
@@ -761,7 +771,7 @@ function buildSwimEffortAssignments(sessions) {
     const allEff = (s.lengths || []).map((raw) => ({ raw, eff: effectiveLength(raw) }));
     const active = allEff.filter(({ raw, eff }) =>
       eff.lengthType === "active" &&
-      !raw.userExcluded &&
+      swimLengthAnalyticsIncluded(raw) &&
       eff.pace100 != null &&
       Number.isFinite(eff.pace100) &&
       eff.pace100 > 0
@@ -854,7 +864,7 @@ const swimEffortComposition = (session, assignments) => {
   const counts = { easy: 0, work: 0, speed: 0 };
   (session && session.lengths || []).forEach((raw) => {
     const l = effectiveLength(raw);
-    if (l.lengthType !== "active" || raw.userExcluded) return;
+    if (l.lengthType !== "active" || !swimLengthAnalyticsIncluded(raw)) return;
     counts[swimEffortForLength(session, raw, assignments)] += 1;
   });
   const pool = session && session.poolLength;
@@ -1109,19 +1119,22 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
 
 function computeSwimSessionMetrics(lengths, poolLength) {
   const eff = lengths.map(effectiveLength);
-  const validActive = eff.filter((l) => l.lengthType === "active" && !l.userExcluded);
-  const timedActive = validActive.filter((l) => l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0);
-  const idleLengths = eff.filter((l) => l.lengthType === "idle" && !l.userExcluded);
+  // Distance and performance trust are deliberately independent.
+  const distanceActive = eff.filter((l) => l.lengthType === "active" && swimLengthDistanceIncluded(l));
+  const analyticsActive = distanceActive.filter((l) => swimLengthAnalyticsIncluded(l));
+  const timedActive = analyticsActive.filter((l) => l.elapsedSec != null && Number.isFinite(l.elapsedSec) && l.elapsedSec > 0);
+  const idleLengths = eff.filter((l) => l.lengthType === "idle" && swimLengthDistanceIncluded(l));
 
-  const distance = poolLength != null ? Math.round(validActive.length * poolLength * 100) / 100 : null;
+  const distance = poolLength != null ? Math.round(distanceActive.length * poolLength * 100) / 100 : null;
+  // Swim time/pace are performance analytics, so Keep length records do not contaminate them.
   const swimTimeSec = timedActive.reduce((a, l) => a + l.elapsedSec, 0);
+  const analyticsDistance = poolLength != null ? Math.round(analyticsActive.length * poolLength * 100) / 100 : null;
   const restTimeSec = idleLengths.reduce((a, l) => a + (Number.isFinite(l.elapsedSec) && l.elapsedSec > 0 ? l.elapsedSec : 0), 0);
-  const paceTimeCoverage = validActive.length > 0 ? timedActive.length / validActive.length : 0;
-  // Never manufacture pace by pairing full distance with partial timing.
-  const pace100Overall = paceTimeCoverage === 1 && swimTimeSec > 0 && distance ? (swimTimeSec / distance) * 100 : null;
+  const paceTimeCoverage = analyticsActive.length > 0 ? timedActive.length / analyticsActive.length : 0;
+  const pace100Overall = paceTimeCoverage === 1 && swimTimeSec > 0 && analyticsDistance ? (swimTimeSec / analyticsDistance) * 100 : null;
 
   const strokeGroups = {};
-  validActive.forEach((l) => {
+  analyticsActive.forEach((l) => {
     if (!strokeGroups[l.stroke]) strokeGroups[l.stroke] = {
       swolfs: [], timeSec: 0, lengthCount: 0, timedLengthCount: 0,
       countedStrokeTotal: 0, countedStrokeTimeSec: 0, countedStrokeLengths: 0
@@ -1177,7 +1190,7 @@ function computeSwimSessionMetrics(lengths, poolLength) {
   const reps = [];
   let currentRep = null;
   eff.forEach((l) => {
-    if (l.userExcluded) return;
+    if (!swimLengthAnalyticsIncluded(l)) return;
     if (l.lengthType === "active") {
       if (!currentRep) currentRep = { startIndex: l.index, lengthCount: 0, timedLengthCount: 0, timeSec: 0, strokeSet: new Set() };
       currentRep.lengthCount += 1;
@@ -1200,16 +1213,16 @@ function computeSwimSessionMetrics(lengths, poolLength) {
   }) : [];
 
   const totalActiveLengths = eff.filter((l) => l.lengthType === "active").length;
-  const suspiciousKept = eff.filter((l) => l.glitch && l.lengthType === "active" && !l.userExcluded).length;
-  const reviewOnly = eff.filter((l) => l.reviewFlag && l.lengthType === "active" && !l.userExcluded).length;
-  const excludedCount = eff.filter((l) => l.userExcluded).length;
+  const unresolvedWarnings = eff.filter((l) => (l.glitch || l.reviewFlag) && l.lengthType === "active" && !swimLengthReviewResolved(l)).length;
+  const keepLengthCount = eff.filter((l) => l.lengthType === "active" && l.userReviewResolution === "keep_length").length;
+  const excludedCount = eff.filter((l) => !swimLengthDistanceIncluded(l)).length;
   const parts = [];
-  if (suspiciousKept > 0) parts.push(`${suspiciousKept} sensor-quality warning${suspiciousKept === 1 ? "" : "s"} (still counted until you decide)`);
-  if (reviewOnly > 0) parts.push(`${reviewOnly} unusual length${reviewOnly === 1 ? "" : "s"} marked review-only (does not change analytics)`);
+  if (unresolvedWarnings > 0) parts.push(`${unresolvedWarnings} unusual length${unresolvedWarnings === 1 ? "" : "s"} flagged for review (no automatic exclusion)`);
+  if (keepLengthCount > 0) parts.push(`${keepLengthCount} length${keepLengthCount === 1 ? "" : "s"} kept for distance but excluded from analytics`);
   if (excludedCount > 0) parts.push(`${excludedCount} length${excludedCount === 1 ? "" : "s"} excluded by you`);
   const qualityNote = parts.length ? parts.join("; ") + "." : null;
 
-  return { distance, swimTimeSec, restTimeSec, pace100Overall, paceTimeCoverage, strokeStats, reps: repSummaries, totalActiveLengths, validActiveLengths: validActive.length, excludedCount, qualityNote };
+  return { distance, swimTimeSec, restTimeSec, pace100Overall, paceTimeCoverage, strokeStats, reps: repSummaries, totalActiveLengths, validActiveLengths: analyticsActive.length, excludedCount, qualityNote };
 }
 
 // Turns raw parsed FIT messages into a fully-computed swim session object, applying the
@@ -1376,7 +1389,7 @@ function backfillSwimSessionStrokeStats(session) {
   const strokeStatsNeedBackfill = strokes.some((k) => session.strokeStats[k] && session.strokeStats[k].pace100 == null);
   let fixedStrokeStats = session.strokeStats;
   if (strokeStatsNeedBackfill) {
-    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && !l.userExcluded);
+    const validActive = fixedLengths.filter((l) => l.lengthType === "active" && swimLengthAnalyticsIncluded(l));
     const groups = {};
     validActive.forEach((l) => {
       if (!groups[l.stroke]) groups[l.stroke] = { timeSec: 0, lengthCount: 0 };
@@ -1412,10 +1425,13 @@ function migrateSwimSessionToOverrideLayer(session) {
 
   const lengths = session.lengths.map((l) => ({
     ...l,
-    userExcluded: "userExcluded" in l ? !!l.userExcluded : false,
+    userExcluded: "userExcluded" in l ? !!l.userExcluded : (l.userReviewResolution === "removed"),
     userLengthType: l.userLengthType || null,
     userStroke: l.userStroke || null,
     userEffort: validSwimEffort(l.userEffort) ? l.userEffort : null,
+    // Legacy kept remains Keep all; legacy removed remains Exclude.
+    // keep_length is the new distance-YES / analytics-NO state.
+    userReviewResolution: l.userReviewResolution || null,
   }));
   const metrics = computeSwimSessionMetrics(lengths, session.poolLength);
   const distance = session.distanceCorrection ? session.distance : metrics.distance;
@@ -3196,7 +3212,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
   // Best pace is calculated directly from stroke-specific pace (the one with the most lengths),
   // shown as a small tag next to the PR so "1:32/100m" isn't ambiguous about which stroke it
   // was swum in — whole-session pace can otherwise mix strokes together silently.
-  const hasUnresolvedSwimQualityFlag = (s) => !!(s && Array.isArray(s.lengths) && s.lengths.some((l) => l.glitch && !l.userExcluded && !["kept","removed","adjusted"].includes(l.userReviewResolution)));
+  const hasUnresolvedSwimQualityFlag = (s) => !!(s && Array.isArray(s.lengths) && s.lengths.some((l) => l.glitch && !l.userExcluded && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution)));
 // reviewFlag is intentionally NOT included here: a personal-pattern review candidate is not
 // evidence of corrupted data and must not suppress a real sprint/PR.
 
@@ -5285,6 +5301,16 @@ function TrainingLog() {
     ...l,
     userExcluded: false,
     userReviewResolution: (l.glitch || l.reviewFlag) ? "kept" : l.userReviewResolution,
+  }));
+  const keepSwimLengthDistanceOnly = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({
+    ...l,
+    userExcluded: false,
+    userReviewResolution: (l.glitch || l.reviewFlag) ? "keep_length" : l.userReviewResolution,
+  }));
+  const excludeReviewedSwimLength = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({
+    ...l,
+    userExcluded: true,
+    userReviewResolution: (l.glitch || l.reviewFlag) ? "removed" : l.userReviewResolution,
   }));
   const resetSwimLengthOverrides = (sessionId, lengthIndex) => applySwimLengthEdit(sessionId, lengthIndex, (l) => ({ ...l, userExcluded: false, userLengthType: null, userStroke: null, userReviewResolution: null }));
 
@@ -8868,12 +8894,12 @@ function TrainingLog() {
                 // Include persisted review history so a corrected warning does not vanish from
                 // the session's reconciliation state after the correction clears the live flag.
                 const reviewedOrFlaggedLengths = (s.lengths || []).filter((l) =>
-                  l.glitch || l.reviewFlag || ["kept", "removed", "adjusted"].includes(l.userReviewResolution)
+                  l.glitch || l.reviewFlag || ["kept", "keep_length", "removed", "adjusted"].includes(l.userReviewResolution)
                 );
                 const unresolvedFlaggedLengths = reviewedOrFlaggedLengths.filter((l) =>
                   (l.glitch || l.reviewFlag) &&
                   !l.userExcluded &&
-                  !["kept", "removed", "adjusted"].includes(l.userReviewResolution)
+                  !["kept", "keep_length", "removed", "adjusted"].includes(l.userReviewResolution)
                 );
                 const hasFlaggedLengths = reviewedOrFlaggedLengths.length > 0;
                 const reviewReconciled = hasFlaggedLengths && unresolvedFlaggedLengths.length === 0;
@@ -9170,11 +9196,13 @@ function TrainingLog() {
                                       const flaggedForReview = !!(l.glitch || l.reviewFlag);
                                       const reviewResolution = l.userReviewResolution || (excluded && flaggedForReview ? "removed" : null);
                                       const reviewTag = reviewResolution === "removed"
-                                        ? { label: "Reviewed · Removed", color: "#30D158" }
-                                        : reviewResolution === "kept"
-                                          ? { label: "Reviewed · Kept", color: "#30D158" }
-                                          : reviewResolution === "adjusted"
-                                            ? { label: "Reviewed · Adjusted", color: "#30D158" }
+                                        ? { label: "Reviewed · Exclude", color: "#30D158" }
+                                        : reviewResolution === "keep_length"
+                                          ? { label: "Reviewed · Keep length", color: "#30D158" }
+                                          : reviewResolution === "kept"
+                                            ? { label: "Reviewed · Keep all", color: "#30D158" }
+                                            : reviewResolution === "adjusted"
+                                              ? { label: "Reviewed · Adjusted", color: "#30D158" }
                                             : flaggedForReview
                                               ? { label: "Needs review", color: l.glitch ? "#FF9F0A" : "#64D2FF" }
                                               : null;
@@ -9188,7 +9216,7 @@ function TrainingLog() {
                                             </span>
                                           </td>
                                           <td style={{ padding: "5px 8px", color: eff.lengthType === "idle" ? "var(--text-dimmer, #636366)" : "var(--text-dim, #D1D1D6)", ...dataCellStyle }}>
-                                            <span>{eff.lengthType}{l.glitch && !excluded && !["kept","removed","adjusted"].includes(l.userReviewResolution) ? " ⚠" : ""}{l.reviewFlag && !excluded && !l.glitch && !["kept","removed","adjusted"].includes(l.userReviewResolution) ? " ◇" : ""}{eff.isOverridden ? " ✎" : ""}</span>
+                                            <span>{eff.lengthType}{l.glitch && !excluded && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution) ? " ⚠" : ""}{l.reviewFlag && !excluded && !l.glitch && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution) ? " ◇" : ""}{eff.isOverridden ? " ✎" : ""}</span>
                                             {editingEffort && effort && <span className="mono" style={{ display: "inline-block", marginLeft: 5, fontSize: 9, color: SWIM_EFFORT_META[effort].color, border: `1px solid ${SWIM_EFFORT_META[effort].color}55`, borderRadius: 5, padding: "1px 4px" }}>{SWIM_EFFORT_META[effort].label}{validSwimEffort(l.userEffort) ? " · manual" : ""}</span>}
                                           </td>
                                           <td style={{ padding: "5px 8px", ...dataCellStyle }}>
@@ -9221,8 +9249,12 @@ function TrainingLog() {
                                                   {reviewTag.label}
                                                 </span>
                                               )}
-                                              {flaggedForReview && !excluded && !["kept","removed","adjusted"].includes(reviewResolution) && (
-                                                <button onClick={() => keepSuspiciousSwimLength(s.id, l.index)} title="Confirm this flagged length is valid and keep it in analytics" style={lenBtnStyle("positive")}>Keep</button>
+                                              {flaggedForReview && !swimLengthReviewResolved(l) && (
+                                                <>
+                                                  <button onClick={() => keepSuspiciousSwimLength(s.id, l.index)} title="Distance YES · Analytics YES" style={lenBtnStyle("positive")}>Keep all</button>
+                                                  <button onClick={() => keepSwimLengthDistanceOnly(s.id, l.index)} title="Distance YES · Analytics NO" style={lenBtnStyle("neutral")}>Keep length</button>
+                                                  <button onClick={() => excludeReviewedSwimLength(s.id, l.index)} title="Distance NO · Analytics NO" style={lenBtnStyle("negative")}>Exclude</button>
+                                                </>
                                               )}
                                               {eff.isOverridden && !excluded && (
                                                 <button onClick={() => resetSwimLengthOverrides(s.id, l.index)} title="Revert to original" style={lenBtnStyle("neutral")}>Revert</button>
@@ -9233,9 +9265,11 @@ function TrainingLog() {
                                               {!excluded && eff.lengthType === "idle" && (
                                                 <button onClick={() => setSwimIdleToActiveFor({ sessionId: s.id, lengthIndex: l.index })} style={lenBtnStyle("neutral")}>Mark active</button>
                                               )}
-                                              <button onClick={() => toggleExcludeSwimLength(s.id, l.index)} style={lenBtnStyle(excluded ? "positive" : "negative")}>
-                                                {excluded ? "Include" : "Exclude"}
-                                              </button>
+                                              {(!flaggedForReview || swimLengthReviewResolved(l)) && (
+                                                <button onClick={() => toggleExcludeSwimLength(s.id, l.index)} style={lenBtnStyle(excluded ? "positive" : "negative")}>
+                                                  {excluded ? "Include" : "Exclude"}
+                                                </button>
+                                              )}
                                             </div>
                                           </td>
                                         </tr>
@@ -9267,7 +9301,7 @@ function TrainingLog() {
                               {s.lengths.some((l) => l.glitch && !l.userExcluded) && (
                                 <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 6 }}>⚠ sensor-quality warning. Keep, Exclude, or correct the length once checked; its Status becomes Reviewed · Kept/Removed/Adjusted, and the session turns Reconciled when none remain unresolved.</div>
                               )}
-                              {s.lengths.some((l) => l.reviewFlag && !l.userExcluded && !l.glitch && !["kept","removed","adjusted"].includes(l.userReviewResolution)) && (
+                              {s.lengths.some((l) => l.reviewFlag && !l.userExcluded && !l.glitch && !["kept","keep_length","removed","adjusted"].includes(l.userReviewResolution)) && (
                                 <div style={{ fontSize: 10.5, color: "var(--text-dimmer, #636366)", marginTop: 4 }}>◇ unusual-length review. It stays included in analytics unless excluded. Use Keep or Exclude once checked; the Status tag records your decision.</div>
                               )}
                             </>
