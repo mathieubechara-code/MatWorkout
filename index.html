@@ -6009,10 +6009,22 @@ function TrainingLog() {
   const workoutFitReconciled = !!workoutFitReview && workoutFitUnresolvedCount === 0 &&
     workoutFitReview.rows.some((r) => r.included);
   const workoutFitPickerEntries = useMemo(() => {
-    const base = activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps");
-    if (!workoutFitRecentCreated || base.some((e)=>e.name===workoutFitRecentCreated)) return base;
-    return [...base, {name:workoutFitRecentCreated,type:"reps",archived:false}];
-  }, [activeLibrary, workoutFitRecentCreated]);
+    // Build the FIT picker directly from both libraries instead of relying on a derived
+    // view. This guarantees every saved custom rep exercise is searchable immediately
+    // and after a reload. Dedupe case-insensitively and keep custom metadata/aliases.
+    const merged = [...EXERCISE_LIBRARY, ...customExercises]
+      .filter((e)=>e && e.name && !e.archived && exerciseTypeFromEntry(e)==="reps");
+    if (workoutFitRecentCreated && !merged.some((e)=>normalizeExerciseName(e.name)===normalizeExerciseName(workoutFitRecentCreated))) {
+      merged.push({name:workoutFitRecentCreated,type:"reps",archived:false,aliases:[workoutFitRecentCreated.toLowerCase()]});
+    }
+    const seen = new Set();
+    return merged.filter((e)=>{
+      const key=normalizeExerciseName(e.name);
+      if(!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [customExercises, workoutFitRecentCreated]);
 
   const saveWorkoutFitReview = async () => {
     if (!workoutFitReview) return;
@@ -8647,10 +8659,10 @@ function TrainingLog() {
                           <button onClick={()=>setWorkoutFitShowExerciseList(false)} style={{cursor:"pointer",background:"transparent",border:"none",color:"#8E8E93",fontSize:10,fontWeight:800,padding:"2px 4px"}}>Close</button>
                         </div>
                         {workoutFitPickerEntries
-                          .filter((e)=>(!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase())))
+                          .filter((e)=>(!workoutFitAssignName.trim() || [e.name,...(e.aliases||[])].some((v)=>String(v).toLowerCase().includes(workoutFitAssignName.trim().toLowerCase()))))
                           .slice(0,40)
-                          .map((e)=><button key={e.name} onClick={()=>assignExerciseToSelectedFitRows(e.name)} style={{width:"100%",textAlign:"left",cursor:"pointer",background:"transparent",border:"none",borderRadius:7,color:"#D1D1D6",padding:"7px 8px",fontSize:10.5,fontWeight:650}}>{e.name}</button>)}
-                        {workoutFitPickerEntries.filter((e)=>(!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase()))).length===0 &&
+                          .map((e)=>{const custom=customExercises.some((c)=>normalizeExerciseName(c.name)===normalizeExerciseName(e.name));return <button key={e.name} onClick={()=>assignExerciseToSelectedFitRows(e.name)} style={{width:"100%",display:"flex",justifyContent:"space-between",gap:8,textAlign:"left",cursor:"pointer",background:"transparent",border:"none",borderRadius:7,color:"#D1D1D6",padding:"7px 8px",fontSize:10.5,fontWeight:650}}><span>{e.name}</span>{custom&&<span style={{fontSize:8.5,color:"#64D2FF",fontWeight:800}}>CUSTOM</span>}</button>})}
+                        {workoutFitPickerEntries.filter((e)=>(!workoutFitAssignName.trim() || [e.name,...(e.aliases||[])].some((v)=>String(v).toLowerCase().includes(workoutFitAssignName.trim().toLowerCase())))).length===0 &&
                           <div style={{padding:"8px",fontSize:10,color:"#636366"}}>No matching exercise.</div>}
                       </div>
                     </>}
