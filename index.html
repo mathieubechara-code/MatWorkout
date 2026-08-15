@@ -876,7 +876,7 @@ function deriveSwimSessionForEffort(session, effort, assignments) {
   const selectedOriginal = [];
   const filteredLengths = (session.lengths || []).map((raw) => {
     const eff = effectiveLength(raw);
-    if (eff.lengthType !== "active" || raw.userExcluded) return raw;
+    if (eff.lengthType !== "active" || !swimAnalyticsIncluded(raw)) return raw;
     const keep = swimEffortForLength(session, raw, assignments) === effort;
     if (keep) selectedOriginal.push(raw);
     return keep ? raw : { ...raw, userExcluded: true };
@@ -1058,7 +1058,7 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength, historicalSessions =
   const groups = {};
   lengths.forEach((raw) => {
     const eff = effectiveLength(raw);
-    if (eff.lengthType !== "active" || raw.userExcluded || raw.glitch ||
+    if (eff.lengthType !== "active" || !swimAnalyticsIncluded(raw) || raw.glitch ||
         !TECHNIQUE_SWIM_STROKES.has(eff.stroke) ||
         !(eff.elapsedSec > 0) || !Number.isFinite(eff.elapsedSec)) return;
     if (!groups[eff.stroke]) groups[eff.stroke] = [];
@@ -1073,7 +1073,7 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength, historicalSessions =
     if (!session || session.id === currentSessionId || !poolLengthsMatch(session.poolLength, poolLength) || !Array.isArray(session.lengths)) return;
     session.lengths.forEach((raw) => {
       const eff = effectiveLength(raw);
-      if (eff.lengthType !== "active" || raw.userExcluded || raw.glitch ||
+      if (eff.lengthType !== "active" || !swimAnalyticsIncluded(raw) || raw.glitch ||
           !TECHNIQUE_SWIM_STROKES.has(eff.stroke) || !(eff.elapsedSec > 0) ||
           !Number.isFinite(eff.elapsedSec) || !(eff.totalStrokes > 0) || !Number.isFinite(eff.totalStrokes)) return;
       if (!history[eff.stroke]) history[eff.stroke] = [];
@@ -2942,7 +2942,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
       .map((raw) => ({ raw, eff: effectiveLength(raw) }))
       .filter(({ raw, eff }) =>
         eff.lengthType === "active" &&
-        !raw.userExcluded &&
+        swimAnalyticsIncluded(raw) &&
         eff.elapsedSec != null &&
         Number.isFinite(eff.elapsedSec) &&
         eff.elapsedSec > 0 &&
@@ -2961,7 +2961,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
       .map((raw) => ({ raw, eff: effectiveLength(raw) }))
       .filter(({ raw, eff }) =>
         eff.lengthType === "active" &&
-        !raw.userExcluded &&
+        swimAnalyticsIncluded(raw) &&
         TECHNIQUE_SWIM_STROKES.has(eff.stroke)
       );
     if (!active.length) return null;
@@ -3127,7 +3127,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
         }
         (s.lengths || []).forEach((raw) => {
           const eff = effectiveLength(raw);
-          if (eff.lengthType !== "active" || raw.userExcluded || (stroke && eff.stroke !== stroke)) return;
+          if (eff.lengthType !== "active" || !swimAnalyticsIncluded(raw) || (stroke && eff.stroke !== stroke)) return;
           const elapsed = eff.elapsedSec != null && Number.isFinite(eff.elapsedSec) ? eff.elapsedSec : 0;
           timeSec += elapsed;
           if (s.poolLength) distance += s.poolLength;
@@ -3428,7 +3428,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
       .map((raw) => ({ raw, eff: effectiveLength(raw) }))
       .filter(({ raw, eff }) =>
         eff.lengthType === "active" &&
-        !raw.userExcluded &&
+        swimDistanceIncluded(raw) &&
         (strokeFilter === "all" || eff.stroke === strokeFilter)
       ).length;
     return qualifyingLengths > 0 ? qualifyingLengths * s.poolLength : null;
@@ -3462,7 +3462,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
       .map((raw) => ({ raw, eff: effectiveLength(raw) }))
       .filter(({ raw, eff }) =>
         eff.lengthType === "active" &&
-        !raw.userExcluded &&
+        swimAnalyticsIncluded(raw) &&
         eff.pace100 != null &&
         Number.isFinite(eff.pace100) &&
         eff.pace100 > 0 &&
@@ -3523,7 +3523,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
       .map((raw) => ({ raw, eff: effectiveLength(raw) }))
       .filter(({ raw, eff }) =>
         eff.lengthType === "active" &&
-        !raw.userExcluded &&
+        swimAnalyticsIncluded(raw) &&
         eff.elapsedSec > 0 &&
         (strokeFilter === "all" || eff.stroke === strokeFilter)
       );
@@ -6323,7 +6323,7 @@ function TrainingLog() {
     };
     const swimTargetSettings = await readSettingJSON("swim-target-settings-v1");
     const freshSwimSessions = viewMode === "workout" ? null : await readSwimSessionsFresh();
-    const meta = { schemaVersion: 3, exportedAt: new Date().toISOString(), workoutFitReconciliation: true };
+    const meta = { schemaVersion: 3, exportedAt: new Date().toISOString(), workoutFitReconciliation: true, swimReviewSemantics: "v179-distance-vs-analytics" };
     if (viewMode === "workout") { payload = { ...meta, sessions, weightLog, settings: workoutSettings }; suffix = "workout"; }
     else if (viewMode === "swim") { payload = { ...meta, swimSessions: freshSwimSessions, settings: { swimTargetSettings } }; suffix = "swim"; }
     else { payload = { ...meta, sessions, swimSessions: freshSwimSessions, weightLog, settings: { ...workoutSettings, swimTargetSettings } }; suffix = "all"; }
@@ -9030,7 +9030,7 @@ function TrainingLog() {
                           // Effective view: original data with the person's corrections applied,
                           // excluded lengths dropped entirely — matches computeSwimSessionMetrics
                           // exactly, so this chart's timeline never disagrees with the numbers above it.
-                          const effLengths = s.lengths.filter((l) => !l.userExcluded).map(effectiveLength);
+                          const effLengths = s.lengths.filter((l) => swimDistanceIncluded(l)).map(effectiveLength);
                           const activeLengths = effLengths.filter((l) => l.lengthType === "active");
                           if (activeLengths.length < 2) return null;
                           const currentFilter = swimActivityStrokeFilter[s.id] || "all";
@@ -9051,7 +9051,7 @@ function TrainingLog() {
                             : segments.filter((l) => l.lengthType === "active" && l.stroke !== currentFilter && l.end > l.start);
 
                           const chartData = segments
-                            .filter((l) => l.lengthType === "active")
+                            .filter((l) => l.lengthType === "active" && swimAnalyticsIncluded(l))
                             .map((l) => ({
                               x: l.end,
                               pace100: (currentFilter === "all" || l.stroke === currentFilter) ? l.pace100 : null,
