@@ -4354,12 +4354,13 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
               const selected = swimSection === v;
               return (
                 <button key={v} className="app-nav-pill" onClick={() => setSwimSection(v)} style={{
-                  flex: selected ? "0 1 auto" : 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 4 : 5, cursor: "pointer",
-                  background: selected ? "#FF9F0A" : "transparent", border: "none", borderRadius: 9,
-                  color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 9.5 : 11, padding: selected ? (isMobile ? "6px 9px" : "7px 11px") : (isMobile ? "6px 3px" : "7px 5px"),
+                  flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
+                  background: selected ? "#FF9F0A" : "transparent", border: "none", borderRadius: 10,
+                  color: selected ? "#000000" : "#8E8E93", fontWeight: 700, fontSize: isMobile ? 10 : 12,
+                  padding: isMobile ? "7px 4px" : "8px 7px",
                   transition: "background 0.15s, color 0.15s",
                 }}>
-                  <Ic size={isMobile ? 10 : 12} />
+                  <Ic size={isMobile ? 11 : 13} />
                   {l}
                 </button>
               );
@@ -4901,7 +4902,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
 
                 {radarInterpretation && (
                   <div style={{
-                    margin: "2px 0 8px",
+                    margin: "2px 0 3px",
                     border: `1px solid ${radarLatestColor}44`,
                     borderLeft: `3px solid ${radarInterpretation.category === "positive" ? "#30D158" : radarInterpretation.category === "warning" ? "#FF9F0A" : radarLatestColor}`,
                     borderRadius: 11,
@@ -4945,7 +4946,7 @@ function SwimmingTab({ isMobile, onExit, onOpenLog }) {
                   <div style={{ padding: "30px 10px", textAlign: "center", color: "#48484A", fontSize: 12.5, lineHeight: 1.55 }}>Pick at least 3 available axes to draw the profile. Missing axes are omitted rather than estimated.</div>
                 ) : (
                   <>
-                    <div className="radar-profile-chart" style={{ position: "relative" }}>
+                    <div className="radar-profile-chart" style={{ position: "relative", marginTop: isMobile ? -42 : -26, marginBottom: isMobile ? -34 : -18 }}>
                     <ResponsiveContainer width="100%" height={isMobile ? 505 : 455}>
                       <RadarChart data={radarVisibleProfile} outerRadius={isMobile ? "86%" : "82%"} margin={isMobile ? { top: 14, right: 4, bottom: 12, left: 4 } : { top: 10, right: 8, bottom: 10, left: 8 }}>
                         <PolarGrid stroke="#8E8E93" strokeOpacity={0.62} />
