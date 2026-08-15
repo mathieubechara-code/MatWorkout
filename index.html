@@ -1047,69 +1047,60 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
   const groups = {};
   lengths.forEach((raw) => {
     const eff = effectiveLength(raw);
-    if (
-      eff.lengthType !== "active" ||
-      raw.userExcluded ||
-      !TECHNIQUE_SWIM_STROKES.has(eff.stroke) ||
-      eff.elapsedSec == null || !Number.isFinite(eff.elapsedSec) || eff.elapsedSec <= 0
-    ) return;
+    if (eff.lengthType !== "active" || raw.userExcluded ||
+        !TECHNIQUE_SWIM_STROKES.has(eff.stroke) ||
+        !(eff.elapsedSec > 0) || !Number.isFinite(eff.elapsedSec)) return;
     if (!groups[eff.stroke]) groups[eff.stroke] = [];
     groups[eff.stroke].push({ raw, eff });
   });
 
-  const med = (vals) => {
+  const median = (vals) => {
     if (!vals.length) return null;
-    const a = [...vals].sort((x,y)=>x-y);
-    const m = Math.floor(a.length/2);
-    return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+    const a=[...vals].sort((x,y)=>x-y), m=Math.floor(a.length/2);
+    return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
   };
+  const mad = (vals, center) => median(vals.map((v)=>Math.abs(v-center)));
+  const robustZ = (value, center, spread) =>
+    spread > 0 ? 0.67448975 * (value-center) / spread : 0;
 
   const review = new Map();
   Object.entries(groups).forEach(([stroke, rows]) => {
     if (rows.length < 5 || !(poolLength > 0)) return;
+    const times=rows.map(({eff})=>eff.elapsedSec).filter((v)=>Number.isFinite(v)&&v>0);
+    const counts=rows.map(({eff})=>eff.totalStrokes).filter((v)=>Number.isFinite(v)&&v>0);
+    if (times.length<5 || counts.length<5) return;
 
-    // Same pool => elapsed-time ratio and pace ratio are mathematically identical.
-    // Use raw elapsedSec here so flagging does not depend on pace100 already being
-    // normalized/backfilled elsewhere in the import pipeline.
-    const timeMed = med(rows.map(({eff})=>eff.elapsedSec).filter((v)=>Number.isFinite(v) && v>0));
-    const strokeCounts = rows.map(({eff})=>eff.totalStrokes).filter((v)=>v!=null && Number.isFinite(v) && v>0);
-    if (!(timeMed > 0) || strokeCounts.length < 5) return;
-    const strokeMed = med(strokeCounts);
-    if (!(strokeMed > 0)) return;
+    const timeMed=median(times), strokeMed=median(counts);
+    const timeMad=mad(times,timeMed), strokeMad=mad(counts,strokeMed);
+    if (!(timeMed>0) || !(strokeMed>0)) return;
 
     rows.forEach(({raw,eff}) => {
-      const sc = eff.totalStrokes;
-      if (!(sc > 0)) return;
-      const dps = poolLength / sc;
-      const pace100 = (eff.elapsedSec / poolLength) * 100;
+      const sc=eff.totalStrokes;
+      if (!(sc>0)) return;
+      const dps=poolLength/sc, pace100=(eff.elapsedSec/poolLength)*100;
+      const timeZ=robustZ(eff.elapsedSec,timeMed,timeMad);
+      const strokeZ=robustZ(sc,strokeMed,strokeMad);
 
-      const extremeFastLowCount =
-        eff.elapsedSec < timeMed * 0.60 &&
-        sc < strokeMed * 0.60 &&
-        dps > 4.0;
-
-      const extremeSlowHighCount =
-        eff.elapsedSec > timeMed * 1.70 &&
-        sc > strokeMed * 1.30;
-
-      if (extremeFastLowCount || extremeSlowHighCount) {
-        const reason = extremeFastLowCount
-          ? `unusual same-stroke length: ${Math.round(pace100)}s/100m, ${sc} Garmin-counted strokes (${dps.toFixed(1)}m/stroke) — unusually fast with unusually few strokes; review only`
-          : `unusual same-stroke length: ${eff.elapsedSec.toFixed(1)}s, ${sc} Garmin-counted strokes — unusually slow with unusually many strokes versus this session's ${SWIM_STROKE_LABELS[stroke] || stroke} pattern (median ${timeMed.toFixed(1)}s / ${Math.round(strokeMed)} strokes); review only`;
-        review.set(raw.index, reason);
+      // Conservative review-only rule: BOTH measurements must be robust outliers
+      // in the same coherent direction. 3.5 is the conventional modified-z cutoff.
+      const fastLow=timeMad>0 && strokeMad>0 && timeZ < -3.5 && strokeZ < -3.5 && dps>4.0;
+      const slowHigh=timeMad>0 && strokeMad>0 && timeZ > 3.5 && strokeZ > 3.5;
+      if (fastLow || slowHigh) {
+        review.set(raw.index,
+          fastLow
+            ? `unusual same-stroke length: ${Math.round(pace100)}s/100m, ${sc} Garmin-counted strokes (${dps.toFixed(1)}m/stroke) — time and stroke count are robust statistical outliers; review only`
+            : `unusual same-stroke length: ${eff.elapsedSec.toFixed(1)}s, ${sc} Garmin-counted strokes — time and stroke count are robust statistical outliers; review only`
+        );
       }
     });
   });
 
   return lengths.map((raw) => {
-    const oldPersonalGlitch =
-      typeof raw.glitch === "string" &&
+    const oldPersonalGlitch=typeof raw.glitch==="string" &&
       raw.glitch.startsWith("possible misdetected/transition length:");
-    const base = oldPersonalGlitch ? { ...raw, glitch: null } : raw;
-    const reviewFlag = review.get(raw.index) || null;
-
-    if (base.reviewFlag === reviewFlag) return base;
-    return { ...base, reviewFlag };
+    const base=oldPersonalGlitch ? {...raw,glitch:null} : raw;
+    const reviewFlag=review.get(raw.index)||null;
+    return base.reviewFlag===reviewFlag ? base : {...base,reviewFlag};
   });
 }
 
