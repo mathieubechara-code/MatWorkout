@@ -1035,9 +1035,12 @@ const refreshSwimIntrinsicQualityFlags = (lengths) => {
       }
     }
 
-    // Preserve unknown/external warnings; otherwise replace/clear our own parser warning.
+    // Preserve unknown/external warnings. Also preserve an unresolved automatic warning
+    // until the user explicitly reviews it; automatic recalculation must not silently
+    // make a previously surfaced flag vanish.
     if (existing && !isKnownAuto) return raw;
     if (intrinsic) return { ...raw, glitch: intrinsic };
+    if (existing && isKnownAuto && !swimLengthReviewResolved(raw)) return raw;
     return existing ? { ...raw, glitch: null } : raw;
   });
 };
@@ -1110,7 +1113,16 @@ function applyPersonalSwimOutlierFlags(lengths, poolLength) {
       typeof raw.glitch === "string" &&
       raw.glitch.startsWith("possible misdetected/transition length:");
     const base = oldPersonalGlitch ? { ...raw, glitch: null } : raw;
-    const reviewFlag = review.get(raw.index) || null;
+    const detectedNow = review.get(raw.index) || null;
+
+    // Important review-state rule: once an anomaly has been surfaced to the user,
+    // do not make an UNRESOLVED flag disappear merely because a later recomputation
+    // no longer reproduces the same session-relative threshold. The user must choose
+    // Keep all / Keep length / Exclude. A resolved length may follow current detection.
+    const unresolvedExisting = base.reviewFlag && !swimLengthReviewResolved(base)
+      ? base.reviewFlag
+      : null;
+    const reviewFlag = detectedNow || unresolvedExisting;
 
     if (base.reviewFlag === reviewFlag) return base;
     return { ...base, reviewFlag };
