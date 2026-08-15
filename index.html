@@ -5084,6 +5084,8 @@ function TrainingLog() {
   const [workoutFitSelected, setWorkoutFitSelected] = useState(() => new Set());
   const [workoutFitAssignName, setWorkoutFitAssignName] = useState("");
   const [workoutFitNewExercise, setWorkoutFitNewExercise] = useState("");
+  const [workoutFitShowExerciseList, setWorkoutFitShowExerciseList] = useState(false);
+  const [workoutFitCreateAssign, setWorkoutFitCreateAssign] = useState(false);
   const [workoutFitMsg, setWorkoutFitMsg] = useState("");
   const [workoutFitUploading, setWorkoutFitUploading] = useState(false);
   const [expandedWorkoutId, setExpandedWorkoutId] = useState(null);
@@ -5776,6 +5778,10 @@ function TrainingLog() {
       setPendingUnmatchedSource(null);
       setParsedReviewActive(true);
     }
+    if (workoutFitCreateAssign && workoutFitSelected.size > 0) {
+      assignExerciseToSelectedFitRows(name);
+      setWorkoutFitCreateAssign(false);
+    }
     setDraft((d) => {
       const ex = { ...d.ex }, load = { ...d.load };
       if (editingCustomName && editingCustomName !== name) { delete ex[editingCustomName]; delete load[editingCustomName]; }
@@ -5977,6 +5983,17 @@ function TrainingLog() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+  };
+
+  const assignExerciseToSelectedFitRows = (name) => {
+    if (!name || !workoutFitSelected.size) return;
+    setWorkoutFitReview((cur)=>cur ? ({
+      ...cur,
+      rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,exercise:name,resolution:"assigned"}:r)
+    }) : cur);
+    setWorkoutFitSelected(new Set());
+    setWorkoutFitAssignName("");
+    setWorkoutFitShowExerciseList(false);
   };
 
 
@@ -8597,10 +8614,6 @@ function TrainingLog() {
                   <button onClick={()=>{setWorkoutFitReview(null);setWorkoutFitSelected(new Set());setWorkoutFitAssignName("");setWorkoutFitMsg("");}} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:9,color:"#8E8E93",padding:"5px 8px",fontSize:10.5,fontWeight:700}}>Cancel</button>
                 </div>
 
-                <div style={{fontSize:11,color:"#8E8E93",lineHeight:1.45,marginBottom:10}}>
-                  This FIT contains Garmin strength set/category codes, but no reliable human-readable exercise names that this parser can safely map automatically. Select any number of rows — e.g. rows 1–4 — then choose an exercise from search; the selection assigns immediately. Reps and added weight stay editable before save.
-                </div>
-
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"end",marginBottom:10}}>
                   <div><div style={{fontSize:9.5,color:"#636366",marginBottom:3}}>Date</div><input type="date" max={todayStr} value={workoutFitReview.date} onChange={(e)=>setWorkoutFitReview({...workoutFitReview,date:e.target.value})} style={{background:"#000000",border:"1px solid #2C2C2E",borderRadius:9,padding:"6px 8px",color:"#F2F2F7",fontSize:11}}/></div>
                   <div><div style={{fontSize:9.5,color:"#636366",marginBottom:3}}>Bodyweight kg</div><input type="number" min="1" step="0.1" value={workoutFitReview.bodyweight} onChange={(e)=>setWorkoutFitReview({...workoutFitReview,bodyweight:e.target.value})} className="mono" style={{width:90,background:"#000000",border:"1px solid #2C2C2E",borderRadius:9,padding:"6px 8px",color:"#F2F2F7",fontSize:11}}/></div>
@@ -8610,47 +8623,41 @@ function TrainingLog() {
                 <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:9,padding:"8px 9px",background:"#000000",border:"1px solid #27272A",borderRadius:11}}>
                   <button onClick={()=>setWorkoutFitSelected(new Set(workoutFitReview.rows.filter((r)=>r.included).map((r)=>r.id)))} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:8,color:"#8E8E93",padding:"5px 7px",fontSize:9.5,fontWeight:700}}>Select all</button>
                   <button onClick={()=>setWorkoutFitSelected(new Set())} style={{cursor:"pointer",background:"transparent",border:"1px solid #2C2C2E",borderRadius:8,color:"#8E8E93",padding:"5px 7px",fontSize:9.5,fontWeight:700}}>Clear</button>
-                  <input
-                    list="workout-fit-exercises"
-                    value={workoutFitAssignName}
-                    onChange={(e)=>{
-                      const value=e.target.value;
-                      setWorkoutFitAssignName(value);
-                      const exact=activeLibrary.find((x)=>!x.archived && exerciseTypeFromEntry(x)==="reps" && x.name.toLowerCase()===value.trim().toLowerCase());
-                      if(exact && workoutFitSelected.size>0){
-                        setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,exercise:exact.name,resolution:"assigned"}:r)}));
-                        setWorkoutFitSelected(new Set());
-                        setWorkoutFitAssignName("");
-                      }
-                    }}
-                    placeholder={workoutFitSelected.size ? `Search exercise for ${workoutFitSelected.size} selected…` : "Select rows first…"}
-                    disabled={workoutFitSelected.size===0}
-                    style={{minWidth:195,background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"5px 7px",color:"#F2F2F7",fontSize:10.5,opacity:workoutFitSelected.size?1:.5}}
-                  />
-                  <datalist id="workout-fit-exercises">{activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps").map((e)=><option key={e.name} value={e.name}/>)}</datalist>
-                  <button onClick={()=>{ if(!workoutFitSelected.size)return; setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,included:false,resolution:"excluded"}:r)}));setWorkoutFitSelected(new Set()); }} disabled={workoutFitSelected.size===0} style={{cursor:workoutFitSelected.size?"pointer":"default",opacity:workoutFitSelected.size?1:.45,background:"transparent",border:"1px solid #FF453A55",borderRadius:8,color:"#FF6961",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Exclude selected</button>
-                  <input value={workoutFitNewExercise} onChange={(e)=>setWorkoutFitNewExercise(e.target.value)} placeholder="+ New exercise" style={{minWidth:130,background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"5px 7px",color:"#F2F2F7",fontSize:10}}/>
-                  <button onClick={async()=>{
-                    const name=workoutFitNewExercise.trim(); if(!name)return;
-                    let finalName=name;
-                    const existing=activeLibrary.find((e)=>e.name.toLowerCase()===name.toLowerCase());
-                    if(!existing){
-                      await persistCustom([...customExercises,{name,group:"Pull",ratio:1,target:"",type:"reps",archived:false}]);
-                      if(!trackedExercises.includes(name)) await persistTracked([...trackedExercises,name]);
-                    } else finalName=existing.name;
-                    if(workoutFitSelected.size>0){
-                      setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,exercise:finalName,resolution:"assigned"}:r)}));
-                      setWorkoutFitSelected(new Set());
-                    }
-                    setWorkoutFitAssignName("");
-                    setWorkoutFitNewExercise("");
-                  }} disabled={!workoutFitNewExercise.trim()} style={{cursor:"pointer",background:"transparent",border:"1px solid #64D2FF55",borderRadius:8,color:"#64D2FF",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Add new</button>
+                  <div style={{position:"relative",minWidth:215,flex:"1 1 215px"}}>
+                    <input
+                      value={workoutFitAssignName}
+                      onFocus={()=>workoutFitSelected.size&&setWorkoutFitShowExerciseList(true)}
+                      onChange={(e)=>{setWorkoutFitAssignName(e.target.value);setWorkoutFitShowExerciseList(true);}}
+                      placeholder={workoutFitSelected.size ? `Search exercise for ${workoutFitSelected.size} selected…` : "Select rows first…"}
+                      disabled={workoutFitSelected.size===0}
+                      style={{width:"100%",boxSizing:"border-box",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:8,padding:"6px 8px",color:"#F2F2F7",fontSize:10.5,opacity:workoutFitSelected.size?1:.5}}
+                    />
+                    {workoutFitShowExerciseList && workoutFitSelected.size>0 && <div style={{position:"absolute",zIndex:15,top:"calc(100% + 4px)",left:0,right:0,maxHeight:190,overflowY:"auto",background:"#1C1C1E",border:"1px solid #3A3A3C",borderRadius:10,boxShadow:"0 10px 28px rgba(0,0,0,.35)",padding:4}}>
+                      {activeLibrary
+                        .filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps" && (!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase())))
+                        .slice(0,24)
+                        .map((e)=><button key={e.name} onClick={()=>assignExerciseToSelectedFitRows(e.name)} style={{width:"100%",textAlign:"left",cursor:"pointer",background:"transparent",border:"none",borderRadius:7,color:"#D1D1D6",padding:"7px 8px",fontSize:10.5,fontWeight:650}}>{e.name}</button>)}
+                      {activeLibrary.filter((e)=>!e.archived && exerciseTypeFromEntry(e)==="reps" && (!workoutFitAssignName.trim() || e.name.toLowerCase().includes(workoutFitAssignName.trim().toLowerCase()))).length===0 &&
+                        <div style={{padding:"8px",fontSize:10,color:"#636366"}}>No matching exercise.</div>}
+                    </div>}
+                  </div>
+                  <button onClick={()=>setWorkoutFitShowExerciseList((v)=>!v)} disabled={workoutFitSelected.size===0} style={{cursor:workoutFitSelected.size?"pointer":"default",opacity:workoutFitSelected.size?1:.45,background:"transparent",border:"1px solid #64D2FF55",borderRadius:8,color:"#64D2FF",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Browse</button>
+                  <button onClick={()=>{
+                    if(!workoutFitSelected.size)return;
+                    setWorkoutFitCreateAssign(true);
+                    setPendingUnmatchedSource(null);
+                    setEditingCustomName(null);
+                    setCustomExerciseError("");
+                    setAddExDraft({name:workoutFitAssignName.trim(),group:"Pull",ratio:"1.0",target:"",type:"reps"});
+                    setShowAddExercise(true);
+                  }} disabled={workoutFitSelected.size===0} style={{cursor:workoutFitSelected.size?"pointer":"default",opacity:workoutFitSelected.size?1:.45,background:"transparent",border:"1px solid #64D2FF55",borderRadius:8,color:"#64D2FF",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>+ New exercise</button>
+                  <button onClick={()=>{ if(!workoutFitSelected.size)return; setWorkoutFitReview((cur)=>({...cur,rows:cur.rows.map((r)=>workoutFitSelected.has(r.id)?{...r,included:false,resolution:"excluded"}:r)}));setWorkoutFitSelected(new Set()); }} disabled={workoutFitSelected.size===0} style={{cursor:workoutFitSelected.size?"pointer":"default",opacity:workoutFitSelected.size?1:.45,background:"transparent",border:"1px solid #FF453A55",borderRadius:8,color:"#FF6961",padding:"5px 8px",fontSize:9.5,fontWeight:750}}>Exclude</button>
                 </div>
 
                 <div style={{display:"grid",gap:5,maxHeight:430,overflowY:"auto"}}>
                   {workoutFitReview.rows.map((r,idx)=>{
                     const selected=workoutFitSelected.has(r.id);
-                    return <div key={r.id} style={{display:"grid",gridTemplateColumns:isMobile?"26px 34px minmax(125px,1fr) 55px 60px":"28px 38px minmax(180px,1fr) 64px 72px 70px 62px",gap:5,alignItems:"center",padding:"6px 7px",border:`1px solid ${selected?"#64D2FF66":r.included?"#27272A":"#27272A88"}`,borderRadius:9,background:selected?"#64D2FF0D":"#000000",opacity:r.included?1:.45}}>
+                    return <div key={r.id} style={{display:"grid",gridTemplateColumns:isMobile?"26px 34px minmax(108px,1fr) 50px 55px 42px":"28px 38px minmax(180px,1fr) 64px 72px 70px 62px 52px",gap:5,alignItems:"center",padding:"6px 7px",border:`1px solid ${selected?"#64D2FF66":r.included?"#27272A":"#27272A88"}`,borderRadius:9,background:selected?"#64D2FF0D":"#000000",opacity:r.included?1:.58}}>
                       <input type="checkbox" checked={selected} disabled={!r.included} onChange={()=>toggleWorkoutFitRow(r.id)} style={{cursor:r.included?"pointer":"default"}}/>
                       <span className="mono" style={{fontSize:10,color:"#8E8E93"}}>#{idx+1}</span>
                       <select value={r.exercise} disabled={!r.included} onChange={(e)=>updateWorkoutFitRow(r.id,{exercise:e.target.value,resolution:e.target.value?"assigned":"review"})} style={{minWidth:0,background:"#1C1C1E",border:`1px solid ${r.exercise?"#30D15844":"#FF9F0A55"}`,borderRadius:7,padding:"5px 6px",color:r.exercise?"#D1D1D6":"#FF9F0A",fontSize:10}}>
@@ -8661,6 +8668,7 @@ function TrainingLog() {
                       <input title="Added kg" type="number" min="0" step="0.5" disabled={!r.included} value={r.loadKg} onChange={(e)=>updateWorkoutFitRow(r.id,{loadKg:e.target.value})} className="mono" style={{width:"100%",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:7,padding:"5px 5px",color:"#F2F2F7",fontSize:10,textAlign:"center"}}/>
                       {!isMobile && <span className="mono" title="Detected work-set duration" style={{fontSize:9.5,color:"#636366",textAlign:"right"}}>{r.durationSec!=null?`${Math.round(r.durationSec)}s`:"—"}</span>}
                       {!isMobile && <span className="mono" title="Detected set average heart rate" style={{fontSize:9.5,color:"#636366",textAlign:"right"}}>{r.avgHR!=null?`${r.avgHR} bpm`:"—"}</span>}
+                      <button onClick={()=>updateWorkoutFitRow(r.id,{included:!r.included,resolution:!r.included?(r.exercise?"assigned":"review"):"excluded"})} style={{cursor:"pointer",background:"transparent",border:`1px solid ${r.included?"#FF453A44":"#30D15855"}`,borderRadius:6,color:r.included?"#FF6961":"#30D158",padding:"3px 4px",fontSize:8.5,fontWeight:800}}>{r.included?"Out":"Back"}</button>
                     </div>
                   })}
                 </div>
@@ -9379,14 +9387,14 @@ function TrainingLog() {
       )}
 
       {showAddExercise && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => { setShowAddExercise(false); setEditingCustomName(null); setCustomExerciseError(""); }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,11,0.72)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => { setShowAddExercise(false); setEditingCustomName(null); setCustomExerciseError(""); setWorkoutFitCreateAssign(false); }}>
           <div style={{ background: "#1C1C1E", border: "1px solid #2C2C2E", borderRadius: 20, boxShadow: "none", padding: 20, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: "#FFFFFF" }}>{editingCustomName ? "Edit custom exercise" : "Add an exercise"}</span>
-              <X size={18} style={{ cursor: "pointer", color: "#8E8E93" }} onClick={() => { setShowAddExercise(false); setEditingCustomName(null); setCustomExerciseError(""); }} />
+              <X size={18} style={{ cursor: "pointer", color: "#8E8E93" }} onClick={() => { setShowAddExercise(false); setEditingCustomName(null); setCustomExerciseError(""); setWorkoutFitCreateAssign(false); }} />
             </div>
             <div style={{ fontSize: 11.5, color: "#636366", marginBottom: 14, lineHeight: 1.5 }}>
-              For anything not in the built-in reference library. It's added to the entry form immediately and remembered for future paste-parsing.
+              Create the exercise once, then reuse it everywhere. Muscle group controls grouping/Radar; BW ratio controls effective load, Volume and estimated 1RM. Use 0 for pure external-load exercises.
             </div>
             <div style={{ display: "grid", gap: 10 }}>
               <div>
